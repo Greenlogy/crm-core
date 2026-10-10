@@ -25,7 +25,7 @@ Vlastník projektu a schvaľovateľ: Peter Kalman (CEO). Kód píše Claude, Pet
 
 | Vrstva | Technológia |
 | --- | --- |
-| Databáza | PostgreSQL v EÚ (Supabase alebo Neon), migrácie v `db/migrations/` |
+| Databáza | PostgreSQL na Neone (EÚ, Frankfurt), vetvy `main` = produkcia a `dev` = vývoj. Migrácie dbmate v `db/migrations/` (`-- migrate:up` / `-- migrate:down`), `db/schema.sql` sa commituje. Migrácie najprv na `dev`, na `main` až po schválení. |
 | API | Cloudflare Workers, TypeScript, napojenie na DB cez Cloudflare Hyperdrive |
 | Frontend | Cloudflare Pages, TypeScript (framework sa potvrdí v module 1) |
 | Prihlasovanie | Cloudflare Access so SSO cez Google, rovnako ako Cockpit |

@@ -26,3 +26,6 @@
 | 2026-10-10 | Hrubá marža pri výkupe sa počíta rovnakým vzorcom ako pri dodávke | potvrdené Petrom |
 | 2026-10-10 | Výpočet marže podľa line items (starší model v HubSpote) sa do jadra nepreberá | platí model podľa OOM a zmluvných cien |
 | 2026-10-10 | Schválený súhrn inventára HubSpotu a dátový model jadra v0.3; modul 0 uzavretý | Peter |
+| 2026-10-10 | Databáza: Neon, región EÚ (Frankfurt) | čistý Postgres; prihlasovanie rieši Cloudflare Access |
+| 2026-10-10 | Bez lokálneho Postgresu: Neon vetvy `main` = produkcia, `dev` = vývoj a testy. Migrácie najprv na `dev`, na `main` až po Petrovom schválení. Pripojenia v `.dev.vars` ako `DATABASE_URL_DEV` a `DATABASE_URL_MAIN`. | izolované testovanie bez lokálnej inštalácie |
+| 2026-10-10 | Migrácie cez dbmate: `db/migrations/0001_nazov.sql` so sekciami `-- migrate:up` a `-- migrate:down`; `db/schema.sql` sa commituje | číslované SQL súbory podľa konvencie, evidencia spustených migrácií |

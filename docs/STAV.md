@@ -12,7 +12,7 @@ Aktualizované: 10. 10. 2026
 
 ## Prebieha
 
-- Príprava zadania modulu 1
+- Modul 1: databáza jadra – zadanie pripravené (`docs/moduly/01-databaza.md`), spúšťa sa v novej session
 
 ## Otvorené
 
@@ -24,4 +24,5 @@ Aktualizované: 10. 10. 2026
 
 ## Ďalší krok
 
-- Zadanie modulu 1 (databáza a migrácia `0001_jadro.sql`)
+- Založiť Neon projekt (Frankfurt) s vetvami `main` a `dev`, pripojenia do `.dev.vars`
+- Spustiť modul 1 v novej session
