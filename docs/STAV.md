@@ -8,11 +8,11 @@ Aktualizované: 10. 10. 2026
 - Pravidlá projektu (`CLAUDE.md`)
 - Repozitár `crm-core` a Claude Code vo VS Code
 - Modul 0: inventár HubSpotu a Make scenárov (`docs/inventar/`), skript `integrations/hubspot-sync/inventory` (iba čítanie)
-- Dátový model jadra v0.3 (`docs/01-datovy-model.md`) podľa inventára – čaká na schválenie
+- Dátový model jadra v0.3 (`docs/01-datovy-model.md`) – schválený
 
 ## Prebieha
 
-- Schválenie `docs/inventar/suhrn.md` a dátového modelu v0.3 (podmienka uzavretia modulu 0)
+- Príprava zadania modulu 1
 
 ## Otvorené
 
@@ -24,5 +24,4 @@ Aktualizované: 10. 10. 2026
 
 ## Ďalší krok
 
-- Peter schváli súhrn a dátový model v0.3
 - Zadanie modulu 1 (databáza a migrácia `0001_jadro.sql`)

@@ -2,6 +2,7 @@
 
 ## 2026-10-10
 
+- Modul 0 uzavretý: Peter schválil súhrn inventára a dátový model v0.3
 - Modul 0: skript na inventár HubSpotu (`integrations/hubspot-sync/inventory`, iba čítanie)
 - Modul 0: inventár HubSpotu a Make scenárov v `docs/inventar/` (objekty a vlastnosti, pipelines, workflowy a šablóny, Make scenáre, súhrn)
 - Dátový model jadra v0.3 podľa inventára

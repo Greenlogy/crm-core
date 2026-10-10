@@ -1,6 +1,6 @@
 # Dátový model jadra – v0.3
 
-Stav: NÁVRH na schválenie (10. 10. 2026). Po schválení sa z neho vytvorí migrácia `0001_jadro.sql`.
+Stav: SCHVÁLENÝ (Peter, 10. 10. 2026). Z neho sa vytvorí migrácia `0001_jadro.sql` (modul 1).
 
 Podklad: inventár HubSpotu (modul 0), najmä `docs/inventar/suhrn.md`. Čísla návrhov (N1–N20) odkazujú na kapitolu 3 súhrnu.
 

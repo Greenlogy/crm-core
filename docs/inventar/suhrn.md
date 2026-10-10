@@ -1,6 +1,6 @@
 # Inventár HubSpotu – súhrn a návrh dátového modelu v0.3
 
-Stav: NÁVRH na schválenie (10. 10. 2026), rozhodnutia zapracované. Podklady: `objekty-a-vlastnosti.md`, `pipelines.md`, `workflowy-a-sablony.md`, `make-scenare.md`.
+Stav: SCHVÁLENÝ (Peter, 10. 10. 2026). Podklady: `objekty-a-vlastnosti.md`, `pipelines.md`, `workflowy-a-sablony.md`, `make-scenare.md`.
 Po schválení sa zmeny prenesú do `docs/01-datovy-model.md` ako verzia v0.3.
 
 ## 1. Čo v HubSpote máme

@@ -1,6 +1,6 @@
 # Modul 0 – Inventár HubSpotu
 
-Stav: výstupy hotové (10. 10. 2026), čaká na schválenie `suhrn.md` a dátového modelu v0.3.
+Stav: HOTOVÝ – Peter schválil `suhrn.md` a dátový model v0.3 (10. 10. 2026).
 
 ## Cieľ
 

@@ -25,3 +25,4 @@
 | 2026-10-10 | Nákupná cena = vážený priemer PXE BL/PL + 4 €/MWh odchýlka + 4 €/MWh marža | potvrdenie významu vzorca `cena_obchod` v HubSpote |
 | 2026-10-10 | Hrubá marža pri výkupe sa počíta rovnakým vzorcom ako pri dodávke | potvrdené Petrom |
 | 2026-10-10 | Výpočet marže podľa line items (starší model v HubSpote) sa do jadra nepreberá | platí model podľa OOM a zmluvných cien |
+| 2026-10-10 | Schválený súhrn inventára HubSpotu a dátový model jadra v0.3; modul 0 uzavretý | Peter |
