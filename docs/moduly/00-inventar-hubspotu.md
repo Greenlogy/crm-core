@@ -1,6 +1,6 @@
 # Modul 0 – Inventár HubSpotu
 
-Stav: zadanie pripravené, čaká na spustenie.
+Stav: výstupy hotové (10. 10. 2026), čaká na schválenie `suhrn.md` a dátového modelu v0.3.
 
 ## Cieľ
 
@@ -36,3 +36,13 @@ Zistiť presne, čo dnes v HubSpote máme, aby dátový model a migrácia nič n
 ## Hotové, keď
 
 Peter schváli `suhrn.md` a dátový model v0.3.
+
+## Výsledok
+
+- Skript: `integrations/hubspot-sync/inventory` (Node 24, bez závislostí, iba čítanie). Spustenie:
+  `node integrations/hubspot-sync/inventory/inventory.ts --check | --collect [--only=…] [--refresh] | --render`.
+  Surové dáta sa ukladajú do `exports/inventar/raw/` (mimo gitu).
+- Výstupy: všetky súbory zo zoznamu vyššie + produkty, line items a vzorce vypočítaných polí v `objekty-a-vlastnosti.md`.
+- `make-scenare.md` je písaný ručne z Make API (konektor, iba čítanie).
+- Rozhodnutia: `docs/rozhodnutia.md` (10. 10. 2026).
+- Mimo rozsahu: šablóny predajných e-mailov (nemajú API, texty sa prenesú ručne), slovný opis akcií jednotlivých workflowov (doplní modul, ktorý ich nahrádza).

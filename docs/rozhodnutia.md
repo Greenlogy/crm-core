@@ -10,3 +10,18 @@
 | 2026-10-10 | B2C zákazník = kontakt bez firmy; zákazník je firma alebo kontakt (práve jedno) | zhoda s dnešnými dátami v HubSpote |
 | 2026-10-10 | Trading book sa nemigruje, ostáva v Cockpite | už tam existuje |
 | 2026-10-10 | SLA: prvá reakcia 8 a odpoveď 24 pracovných hodín, pracovný čas Po–Pi 7:30–15:30 | interný štandard servisu |
+| 2026-10-10 | Predajné šablóny e-mailov sa v module 0 neinventarizujú; CRM bude mať vlastnú funkciu šablón, texty sa prenesú ručne | HubSpot pre sales templates nemá verejné API |
+| 2026-10-10 | Inventár asociácií počíta najviac 500 asociácií na záznam (nad tým „500+“) | deal má bežne 1–5 OOM, výnimočne viac ako 100; firma 1–10 kontaktov |
+| 2026-10-10 | V inventári je kontakt B2C, ak nemá primárnu firmu (`associatedcompanyid`); súhlasy: počty odhlásených a marketingových kontaktov, bez počtu prihlásených | dostatočná presnosť bez čítania údajov každého kontaktu |
+| 2026-10-10 | 7 370 „notifikačných“ dealov (Greenlogy_B2C_služby / Notifikačný email) sa nemigrujú ako dealy, ale ako záznamy zmenového procesu (`supplier_switch`) a poukážok (`voucher`) | nie sú to obchody, ale záznamy pre automatické e-maily |
+| 2026-10-10 | OOM má päť stavov: Aktívne, Neaktívne, Zrušené, Odídené, Prepísané | stav „Prepísané“ existuje v HubSpote |
+| 2026-10-10 | OOM má štyri typy: spotreba, výroba, sharing, veľkoobchod | zodpovedá štyrom pipelines OOM v HubSpote |
+| 2026-10-10 | Historické tickety (61 723) sa nemigrujú, iba sa archivuje ich export | servis prechádza do Chatwootu, história slúži len na dohľadanie |
+| 2026-10-10 | Nákupné ceny majú zdroj v Cockpite; CRM ich potrebuje na výpočet marže, nemusí ich spravovať samostatne. Spôsob prenosu z Cockpitu sa navrhne. | jeden zdroj pravdy pre nákup elektriny |
+| 2026-10-10 | Pipelines GreenSolar a EFET sa ponechávajú | obchody pokračujú |
+| 2026-10-10 | Externí obchodníci a dodávatelia pracujú priamo v CRM s obmedzeným prístupom (iba vlastné záznamy) | dnes majú prístup do HubSpotu |
+| 2026-10-10 | Vlastník OOM sa pri migrácii odvodí z najnovšieho dealu v stave zmluvy (firma dealu, inak kontakt) | OOM v HubSpote nemá väzbu na firmu |
+| 2026-10-10 | Náprava tokenu vpísaného v Make scenároch Sales portálu sa odkladá | rozhodne Peter neskôr |
+| 2026-10-10 | Nákupná cena = vážený priemer PXE BL/PL + 4 €/MWh odchýlka + 4 €/MWh marža | potvrdenie významu vzorca `cena_obchod` v HubSpote |
+| 2026-10-10 | Hrubá marža pri výkupe sa počíta rovnakým vzorcom ako pri dodávke | potvrdené Petrom |
+| 2026-10-10 | Výpočet marže podľa line items (starší model v HubSpote) sa do jadra nepreberá | platí model podľa OOM a zmluvných cien |

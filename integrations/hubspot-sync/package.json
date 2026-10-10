@@ -1,0 +1,14 @@
+{
+  "name": "@greenlogy/hubspot-sync",
+  "private": true,
+  "type": "module",
+  "description": "Čítanie dát z HubSpotu (inventár, neskôr migrácia). Spúšťa sa priamo cez Node 24 bez kompilácie.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "inventory:check": "node inventory/inventory.ts --check",
+    "inventory:collect": "node inventory/inventory.ts --collect",
+    "inventory:render": "node inventory/inventory.ts --render"
+  }
+}
