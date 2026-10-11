@@ -1,6 +1,6 @@
 # Dizajn Greenlogy CRM
 
-Stav k 11. 10. 2026. Zdroj: návrhy v projekte (plátno „Greenlogy CRM – karta firmy“) a dizajnový systém „Greenlogy CRM“.
+Stav k 11. 10. 2026 (večer, doplnené obrazovky modulu Zákazníci). Zdroj: návrhy v projekte (plátno „Greenlogy CRM – karta firmy“) a dizajnový systém „Greenlogy CRM“.
 
 ## Ako to používať
 
@@ -14,8 +14,8 @@ Stav k 11. 10. 2026. Zdroj: návrhy v projekte (plátno „Greenlogy CRM – kar
 - **Obrazovky sú predloha vzhľadu a rozloženia, nie špecifikácia logiky.** Dáta v nich sú vymyslené. Ktoré polia, stavy a pravidlá platia, určuje schválené zadanie modulu v `docs/moduly/`.
 - Písmo: Geist (Google Fonts), kódy EIC a ID: Geist Mono. Farby a rozmery z Greenlogy Cockpitu.
 - Rozloženie: ľavé menu 232 px, obsah s okrajom 24 × 36 px, karty s rohmi 12 px. Každý záznam v zozname na jednom riadku, dlhý text sa skráti.
+- Modul Zákazníci (zadanie `docs/moduly/01-zakaznici.md` v0.2): obrazovky 08–10 a upravená 01. Menu: „Firmy“ sa mení na „Zákazníci“, pribudla položka „Leady“ (= filter Záujemca + Ponuka). Obrazovky 02–07 majú v menu ešte „Firmy“; upravia sa pri svojich moduloch.
 - Karta firmy: KPI v jednom rade; vľavo údaje a FinStat, v strede časová os, vpravo kontakty, OOM, dealy, zmluvy (rozhodnutie z 10. 10. 2026).
-- Výnimka (Peter, 11. 10. 2026): karty s údajmi v ľavom stĺpci (Firemné informácie, FinStat, údaje OOM a zmluvy) majú popis nad hodnotou a dlhý text sa zalomí, neskracuje sa. Ľavý stĺpec má 360 px.
 - Časy SLA sa počítajú v pracovnom čase Po–Pi 7:30–15:30.
 
 | Súbor | Obrazovka |
@@ -27,3 +27,6 @@ Stav k 11. 10. 2026. Zdroj: návrhy v projekte (plátno „Greenlogy CRM – kar
 | `05-editor-ponuky.html` | Editor ponuky |
 | `06-domov-obchodnik.html` | Domovská obrazovka obchodníka |
 | `07-servis-sla.html` | Servis – SLA prehľad |
+| `08-zoznam-zakaznikov.html` | Zoznam zákazníkov (firmy a domácnosti, filter podľa stavu) |
+| `09-kontakty.html` | Kontakty (všetky osoby) a formulár Nová osoba s kontrolou duplicity |
+| `10-karta-osoby.html` | Karta osoby – domácnosť (pôsobí vo firmách, vývoj stavu) |

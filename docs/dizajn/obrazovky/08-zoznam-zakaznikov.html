@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zákazníci</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}
+.al{background:#fdecea;color:#b42318}
+.wa{background:#fff4e0;color:#b45309}
+.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.btn:focus-visible,.nav:focus-visible,.chip:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.chip{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip:hover{color:#0f172a}
+.cc{color:#94a3b8;font-variant-numeric:tabular-nums}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6f7f8}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.num{text-align:right !important}
+.av{width:28px;height:28px;border-radius:7px;background:#f0f1f3;color:#0f172a;font-size:11px;font-weight:600;display:grid;place-items:center;flex:none}
+.avh{background:#e8f2ee;color:#155a3d}
+.sub{font-size:12px;color:#64748b;line-height:16px}
+.mu{color:#64748b}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+
+<nav aria-label="Hlavné menu" style="flex: 1 1 232px; max-width: 232px; min-width: 200px; box-sizing: border-box; background: #ffffff; border-right: 1px solid #e7e9ec; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 6px 8px;">
+<span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span>
+<div><div style="font-size: 14px; font-weight: 600; line-height: 17px;">Greenlogy</div><div style="font-size: 11px; color: #64748b; line-height: 15px;">CRM</div></div>
+</div>
+<div class="grp">Obchod</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>Prehľad</a>
+<a class="nav" href="#" aria-current="page" style="background: #f0f1f3; color: #0f172a; font-weight: 600;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Zákazníci</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1"></circle></svg>Leady<span style="margin-left: auto; font-size: 12px; color: #94a3b8;">60</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>Odberné miesta</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Dealy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<div class="grp">Servis</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.4A8 8 0 1121 12z"></path></svg>Konverzácie<span class="pill al" style="margin-left: auto;">3</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>SLA prehľad</a>
+<div class="grp">Marketing</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>Segmenty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Kampane</a>
+<div style="flex-grow: 1; min-height: 24px;"></div>
+<div style="display: flex; align-items: center; gap: 8px; background: #f0f1f3; border-radius: 8px; padding: 7px 10px; font-size: 12px; color: #64748b;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a6b4a;"></span>Synchronizované 20:18</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 36px 48px; display: flex; flex-direction: column; gap: 16px;">
+
+<section aria-label="Hlavička" style="display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between;">
+<div style="display: flex; gap: 10px; align-items: baseline;">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;">Zákazníci</h1>
+<span style="font-size: 13px; color: #64748b;">3 595 · firmy a domácnosti</span>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path></svg>Export</button>
+<button class="btn" type="button" style="background: #1a6b4a; border-color: #1a6b4a; color: #ffffff;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Nový zákazník</button>
+</div>
+</section>
+
+<section class="card" aria-label="Zoznam zákazníkov" style="overflow: hidden;">
+<div style="display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e7e9ec;">
+<div style="position: relative; flex: 1 1 260px; max-width: 360px;">
+<label for="hladaj" style="position: absolute; left: -9999px;">Hľadať zákazníka</label>
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="position: absolute; left: 10px; top: 9px; color: #94a3b8;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-5-5"></path></svg>
+<input id="hladaj" type="search" placeholder="Názov, IČO, e-mail, telefón, EIC…" style="width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13px; padding: 7px 10px 7px 32px; border: 1px solid #e7e9ec; border-radius: 8px; color: #0f172a; background: #ffffff;">
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+<button class="btn" type="button">Segment: všetky<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: #64748b;"><path d="M6 9l6 6 6-6"></path></svg></button>
+<button class="btn" type="button">Vlastník: všetci<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: #64748b;"><path d="M6 9l6 6 6-6"></path></svg></button>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #e7e9ec;">
+<div role="group" aria-label="Filter podľa stavu" style="display: flex; flex-wrap: wrap; gap: 2px;">
+<button class="chip" type="button" aria-pressed="true" style="background: #f0f1f3; color: #0f172a;">Všetci <span class="cc">3 595</span></button>
+<button class="chip" type="button" aria-pressed="false">Záujemca <span class="cc">42</span></button>
+<button class="chip" type="button" aria-pressed="false">Ponuka <span class="cc">18</span></button>
+<button class="chip" type="button" aria-pressed="false">Čakajúci zákazník <span class="cc">9</span></button>
+<button class="chip" type="button" aria-pressed="false">Zákazník <span class="cc">3 214</span></button>
+<button class="chip" type="button" aria-pressed="false">Bývalý zákazník <span class="cc">312</span></button>
+</div>
+<label style="display: inline-flex; gap: 8px; align-items: center; font-size: 12px; color: #64748b; padding: 4px 6px; cursor: pointer;"><input type="checkbox" style="accent-color: #1a6b4a; width: 15px; height: 15px; margin: 0;">Zobraziť aj marketingové kontakty (5 120) a archív (410)</label>
+</div>
+
+<div style="overflow-x: auto;">
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">Názov</th>
+<th scope="col">Typ</th>
+<th scope="col">Segment</th>
+<th scope="col">Stav</th>
+<th scope="col" class="num">Aktívne OOM</th>
+<th scope="col" class="num">Ročný objem</th>
+<th scope="col">Vlastník</th>
+<th scope="col">Posledná aktivita</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">KV</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Kovovýroba Váh a.s.</a><div class="sub">IČO 36 412 578 · Žilina</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma · výrobca</td>
+<td><span class="pill ok"><span class="dot"></span>Zákazník</span></td>
+<td class="num">3</td>
+<td class="num">2 268,8 MWh</td>
+<td>Peter Kalman</td>
+<td class="mu">dnes · web</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av avh">MN</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Mária Nováková</a><div class="sub">domácnosť · Martin</div></span></span></td>
+<td class="mu">B2C</td>
+<td>Domácnosť</td>
+<td><span class="pill in"><span class="dot"></span>Čakajúci zákazník</span> <span class="sub">od 1. 1. 2027</span></td>
+<td class="num">0</td>
+<td class="num">3,9 MWh</td>
+<td>Martin Horák</td>
+<td class="mu">včera · zmluva podpísaná</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">JK</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Ján Kováč – stolárstvo</a><div class="sub">IČO 51 234 876 · Bytča</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma</td>
+<td><span class="pill ok"><span class="dot"></span>Zákazník</span></td>
+<td class="num">1</td>
+<td class="num">38,4 MWh</td>
+<td>Zuzana Bieliková</td>
+<td class="mu">8. 10. · hovor</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av avh">JK</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Ján Kováč</a><div class="sub">domácnosť · Bytča · aj štatutár firmy</div></span></span></td>
+<td class="mu">B2C</td>
+<td>Domácnosť · výrobca</td>
+<td><span class="pill ok"><span class="dot"></span>Zákazník</span></td>
+<td class="num">2</td>
+<td class="num">4,8 MWh</td>
+<td>Zuzana Bieliková</td>
+<td class="mu">8. 10. · hovor</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">OL</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Obec Lietava</a><div class="sub">IČO 00 321 524 · Lietava</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma</td>
+<td><span class="pill ok"><span class="dot"></span>Zákazník</span></td>
+<td class="num">7</td>
+<td class="num">186,2 MWh</td>
+<td>Peter Kalman</td>
+<td class="mu">6. 10. · e-mail</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">AT</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Agro Turiec s.r.o.</a><div class="sub">IČO 46 118 903 · Martin</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma · výrobca</td>
+<td><span class="pill wa"><span class="dot"></span>Ponuka</span></td>
+<td class="num">0</td>
+<td class="num">640,0 MWh</td>
+<td>Peter Kalman</td>
+<td class="mu">9. 10. · ponuka odoslaná</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">SM</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Stavmont s.r.o.</a><div class="sub">IČO 35 902 117 · Žilina</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma</td>
+<td><span class="pill wa"><span class="dot"></span>Ponuka</span> <span class="pill">bývalý</span></td>
+<td class="num">0</td>
+<td class="num">212,5 MWh</td>
+<td>Martin Horák</td>
+<td class="mu">5. 10. · ponuka na návrat</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av">HR</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Hotel Rozsutec s.r.o.</a><div class="sub">IČO 47 551 208 · Terchová</div></span></span></td>
+<td class="mu">B2B</td>
+<td>Firma</td>
+<td><span class="pill"><span class="dot"></span>Záujemca</span></td>
+<td class="num">0</td>
+<td class="num mu">–</td>
+<td>VoltPro <span class="sub">(partner)</span></td>
+<td class="mu">3. 10. · formulár na webe</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av avh">LH</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Lucia Hrušková</a><div class="sub">domácnosť · Žilina</div></span></span></td>
+<td class="mu">B2C</td>
+<td>Domácnosť</td>
+<td><span class="pill al">Bývalý zákazník</span> <span class="sub">odišla 3/2026</span></td>
+<td class="num">0</td>
+<td class="num">3,1 MWh</td>
+<td>Martin Horák</td>
+<td class="mu">14. 3. · OOM odídené</td>
+</tr>
+<tr>
+<td><span style="display: flex; gap: 10px; align-items: center;"><span class="av avh">PM</span><span style="min-width: 0;"><a href="#" style="font-weight: 600; color: #0f172a;">Peter Malý</a><div class="sub">domácnosť · Lietava · aj kontakt v 2 firmách</div></span></span></td>
+<td class="mu">B2C</td>
+<td>Domácnosť</td>
+<td><span class="pill ok"><span class="dot"></span>Zákazník</span></td>
+<td class="num">1</td>
+<td class="num">5,6 MWh</td>
+<td>Peter Kalman</td>
+<td class="mu">6. 10. · e-mail</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; padding: 10px 16px; border-top: 1px solid #e7e9ec; font-size: 12px; color: #64748b;">
+<span>1–10 z 3 595 · stav a segment sa počítajú z OOM, dealov a zmlúv</span>
+<span style="display: flex; gap: 6px;"><button class="btn" type="button" style="padding: 4px 10px; font-size: 12px;">Predchádzajúca</button><button class="btn" type="button" style="padding: 4px 10px; font-size: 12px;">Ďalšia</button></span>
+</div>
+</section>
+
+</main>
+</div>
+</body>
+</html>
