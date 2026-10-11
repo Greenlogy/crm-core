@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<title>Pipeline dealov</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}.al{background:#fdecea;color:#b42318}.wa{background:#fff4e0;color:#b45309}.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.btn:focus-visible,.nav:focus-visible,.deal:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.col{background:#f0f1f3;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.colh{display:flex;justify-content:space-between;align-items:baseline;padding:2px 4px 4px;font-size:13px;white-space:nowrap}
+.colh b{font-weight:600}
+.colh span{font-size:12px;color:#64748b;font-variant-numeric:tabular-nums}
+.deal{display:block;background:#ffffff;border:1px solid #e7e9ec;border-radius:10px;padding:10px 12px;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.deal:hover{border-color:#cfd4da;text-decoration:none;color:#0f172a}
+.dt{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px;font-size:12px;color:#64748b;white-space:nowrap}
+.dv{font-size:13px;font-weight:600;color:#0f172a;font-variant-numeric:tabular-nums}
+.av{width:20px;height:20px;border-radius:6px;background:#f0f1f3;color:#0f172a;font-size:9px;font-weight:600;display:grid;place-items:center;flex:none}
+.sel{font-family:inherit;font-size:13px;font-weight:500;padding:7px 28px 7px 10px;border:1px solid #e7e9ec;border-radius:8px;background:#ffffff;color:#0f172a}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+
+<nav aria-label="Hlavné menu" style="flex: 1 1 232px; max-width: 232px; min-width: 200px; box-sizing: border-box; background: #ffffff; border-right: 1px solid #e7e9ec; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 6px 8px;"><span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span><div><div style="font-size: 14px; font-weight: 600; line-height: 17px;">Greenlogy</div><div style="font-size: 11px; color: #64748b; line-height: 15px;">CRM</div></div></div>
+<div class="grp">Obchod</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>Prehľad</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Firmy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>Odberné miesta</a>
+<a class="nav" href="#" aria-current="page" style="background: #f0f1f3; color: #0f172a; font-weight: 600;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Dealy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<div class="grp">Servis</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.4A8 8 0 1121 12z"></path></svg>Konverzácie<span class="pill al" style="margin-left: auto;">3</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>SLA prehľad</a>
+<div class="grp">Marketing</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>Segmenty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Kampane</a>
+<div style="flex-grow: 1; min-height: 24px;"></div>
+<div style="display: flex; align-items: center; gap: 8px; background: #f0f1f3; border-radius: 8px; padding: 7px 10px; font-size: 12px; color: #64748b;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a6b4a;"></span>Synchronizované 20:18</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 36px 48px; display: flex; flex-direction: column; gap: 16px;">
+
+<section aria-label="Hlavička" style="display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between;">
+<div>
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;">Dealy</h1>
+<div style="font-size: 13px; color: #64748b;">B2B elektrina · zmluvy na rok 2027 · všetci obchodníci</div>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+<label for="pl" style="position: absolute; left: -9999px;">Pipeline</label>
+<select id="pl" class="sel"><option>B2B elektrina</option><option>B2C elektrina</option><option>B2B výkup elektriny</option><option>Green VIWA B2B</option><option>GreenSolar</option><option>EFET elektrina</option></select>
+<label for="ob" style="position: absolute; left: -9999px;">Obchodník</label>
+<select id="ob" class="sel"><option>Všetci obchodníci</option><option>Moje dealy</option></select>
+<label for="rk" style="position: absolute; left: -9999px;">Rok dodávky</label>
+<select id="rk" class="sel"><option>Dodávka 2027</option><option>Dodávka 2028</option></select>
+<div role="group" aria-label="Zobrazenie" style="display: flex; gap: 2px; background: #f0f1f3; border-radius: 8px; padding: 2px;">
+<button class="btn" type="button" aria-pressed="true" style="padding: 5px 10px;">Kanban</button>
+<button class="btn" type="button" aria-pressed="false" style="padding: 5px 10px; background: transparent; border-color: transparent; box-shadow: none; color: #64748b;">Zoznam</button>
+</div>
+<button class="btn" type="button" style="background: #1a6b4a; border-color: #1a6b4a; color: #ffffff;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Nový deal</button>
+</div>
+</section>
+
+<section aria-label="Súhrn pipeline" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;">
+<div class="card" style="padding: 14px 16px;"><div class="kl">Otvorené dealy</div><div class="kv">48</div><div class="ks">31 400 MWh · 3,18 mil. €</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Vážená hodnota</div><div class="kv">1,42 mil. €</div><div class="ks">podľa pravdepodobnosti štádia</div></div>
+<div class="card" style="padding: 14px 16px;"><div style="display: flex; justify-content: space-between; align-items: center;"><span class="kl">Vyhraté 2027</span><span class="pill ok">64 %</span></div><div class="kv" style="color: #155a3d;">41 600 MWh</div><div class="ks">vs plán 65 000 MWh · 189 zmlúv</div></div>
+<div class="card" style="padding: 14px 16px;"><div style="display: flex; justify-content: space-between; align-items: center;"><span class="kl">Bez aktivity</span><span class="pill wa"><span class="dot"></span>14+ dní</span></div><div class="kv">7</div><div class="ks">dealov treba posunúť</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Úspešnosť ponúk</div><div class="kv">38 %</div><div class="ks">posledných 90 dní · ø 21 dní</div></div>
+</section>
+
+<div style="overflow-x: auto; padding-bottom: 4px;">
+<div style="display: grid; grid-template-columns: repeat(5, minmax(200px, 1fr)); gap: 12px; min-width: 1060px;">
+
+<section class="col" aria-label="Príležitosť">
+<div class="colh"><b>Príležitosť <span style="font-weight: 400;">9</span></b><span>4 100 MWh · 410 k€</span></div>
+<a class="deal" href="#"><div class="dt">Mliekareň Turiec s.r.o.</div><div class="dm"><span>3 OOM · 820 MWh</span><span class="dv">82 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>4 dni</span><span class="pill">nový lead</span></div></a>
+<a class="deal" href="#"><div class="dt">Kovovýroba Váh – výkup</div><div class="dm"><span>1 OOM · FVE 250 kWp</span><span class="dv">[hodnota]</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>8 dní</span><span class="pill">jar 2027</span></div></a>
+<a class="deal" href="#"><div class="dt">Hotel Lučivná a.s.</div><div class="dm"><span>1 OOM · 410 MWh</span><span class="dv">41 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>19 dní</span><span class="pill wa"><span class="dot"></span>bez aktivity</span></div></a>
+<a href="#" style="font-size: 12px; font-weight: 500; padding: 2px 4px;">+ 6 ďalších</a>
+</section>
+
+<section class="col" aria-label="Cenová ponuka">
+<div class="colh"><b>Cenová ponuka <span style="font-weight: 400;">14</span></b><span>9 800 MWh · 1,02 mil. €</span></div>
+<a class="deal" href="#" style="border-color: #cfd4da;"><div class="dt">Kovovýroba Váh a.s.</div><div class="dm"><span>4 OOM · 2 269 MWh</span><span class="dv">186 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>4 dni</span><span class="pill in">otvorená 2×</span></div></a>
+<a class="deal" href="#"><div class="dt">Drevospol Kysuce s.r.o.</div><div class="dm"><span>2 OOM · 1 150 MWh</span><span class="dv">112 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>9 dní</span><span class="pill">neotvorená</span></div></a>
+<a class="deal" href="#"><div class="dt">Obec Lietavská Lúčka</div><div class="dm"><span>12 OOM · 380 MWh</span><span class="dv">44 500 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>2 dni</span><span class="pill in">otvorená 1×</span></div></a>
+<a class="deal" href="#"><div class="dt">Autoservis Bytča s.r.o.</div><div class="dm"><span>1 OOM · 95 MWh</span><span class="dv">10 800 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>16 dní</span><span class="pill wa"><span class="dot"></span>platí do 15. 10.</span></div></a>
+<a href="#" style="font-size: 12px; font-weight: 500; padding: 2px 4px;">+ 10 ďalších</a>
+</section>
+
+<section class="col" aria-label="Vyjednávanie">
+<div class="colh"><b>Vyjednávanie <span style="font-weight: 400;">11</span></b><span>12 400 MWh · 1,21 mil. €</span></div>
+<a class="deal" href="#"><div class="dt">Strojárne Považie a.s.</div><div class="dm"><span>6 OOM · 4 800 MWh</span><span class="dv">468 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>6 dní</span><span class="pill">2. kolo ceny</span></div></a>
+<a class="deal" href="#"><div class="dt">Nemocnica Žilina n.o.</div><div class="dm"><span>3 OOM · 2 900 MWh</span><span class="dv">286 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>11 dní</span><span class="pill">verejné obstarávanie</span></div></a>
+<a class="deal" href="#"><div class="dt">Pekáreň Dolný Kubín</div><div class="dm"><span>2 OOM · 640 MWh</span><span class="dv">63 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>22 dní</span><span class="pill wa"><span class="dot"></span>bez aktivity</span></div></a>
+<a href="#" style="font-size: 12px; font-weight: 500; padding: 2px 4px;">+ 8 ďalších</a>
+</section>
+
+<section class="col" aria-label="Akceptácia">
+<div class="colh"><b>Akceptácia <span style="font-weight: 400;">5</span></b><span>3 300 MWh · 340 k€</span></div>
+<a class="deal" href="#"><div class="dt">Plastika Rajec s.r.o.</div><div class="dm"><span>2 OOM · 1 900 MWh</span><span class="dv">194 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>3 dni</span><span class="pill in">odoslaná na podpis</span></div></a>
+<a class="deal" href="#"><div class="dt">ZŠ Hlboká, Žilina</div><div class="dm"><span>1 OOM · 120 MWh</span><span class="dv">13 200 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>1 deň</span><span class="pill in">čaká na podpis</span></div></a>
+<a href="#" style="font-size: 12px; font-weight: 500; padding: 2px 4px;">+ 3 ďalšie</a>
+</section>
+
+<section class="col" aria-label="Vyhraté" style="background: #e8f2ee;">
+<div class="colh"><b>Vyhraté <span style="font-weight: 400;">9</span></b><span>1 850 MWh · 196 k€</span></div>
+<a class="deal" href="#"><div class="dt">Tlačiareň Martin s.r.o.</div><div class="dm"><span>1 OOM · 540 MWh</span><span class="dv">58 000 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">DD</span>8. 10.</span><span class="pill ok">Zmluva Z-2026-204 · do 31. 12. 2027</span></div></a>
+<a class="deal" href="#"><div class="dt">Penzión Terchová</div><div class="dm"><span>1 OOM · 85 MWh</span><span class="dv">9 600 €</span></div><div class="dm"><span style="display: flex; gap: 6px; align-items: center;"><span class="av">PK</span>6. 10.</span><span class="pill ok">Zmluva Z-2026-201</span></div></a>
+<a href="#" style="font-size: 12px; font-weight: 500; padding: 2px 4px;">+ 7 ďalších · prehraté 4 →</a>
+</section>
+
+</div>
+</div>
+</main>
+</div>
+</body>
+</html>

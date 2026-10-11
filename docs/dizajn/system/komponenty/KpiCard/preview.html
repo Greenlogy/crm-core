@@ -1,0 +1,22 @@
+<!-- @dsCard group="Dáta" height=260 subtitle="Číslo, porovnanie s plánom, progres" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400&display=swap"><style>
+body{margin:0;font-family:Geist,system-ui,sans-serif;color:var(--ink);background:var(--surface-page);-webkit-font-smoothing:antialiased}
+.wrap{padding:var(--space-5);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4)}
+.card{background:var(--surface-card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:var(--space-5)}
+.head{display:flex;justify-content:space-between;align-items:center}
+.t{font:400 14px/20px Geist,system-ui,sans-serif;color:var(--ink-muted)}
+.v{font:600 30px/36px Geist,system-ui,sans-serif;letter-spacing:-.01em;margin-top:6px}
+.cmp{font:400 13px/18px Geist,system-ui,sans-serif;color:var(--ink-muted);margin-top:2px}
+.cmp b{color:var(--ink);font-weight:500}.up{color:var(--positive)}.down{color:var(--negative)}
+.bar{height:6px;border-radius:var(--radius-pill);background:var(--surface-muted);margin-top:14px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:inherit}
+.pill{font:500 12px/16px Geist,system-ui,sans-serif;border-radius:var(--radius-pill);padding:3px 10px}
+.pos{background:var(--positive-tint);color:var(--positive-strong)}.neg{background:var(--negative-tint);color:var(--negative)}
+</style></head><body><div id="root" class="wrap">
+<div class="card"><div class="head"><span class="t">B2B firmy (FIX + SPOT)</span><span class="pill pos">115 %</span></div>
+<div class="v">923 171 €</div><div class="cmp">vs plán <b>800 000 €</b> · <span class="up">+123 171 €</span></div>
+<div class="bar"><i style="width:100%;background:var(--chart-1)"></i></div></div>
+<div class="card"><div class="head"><span class="t">GreenSolar</span><span class="pill neg">49 %</span></div>
+<div class="v">24 313 €</div><div class="cmp">vs plán <b>50 000 €</b> · <span class="down">−25 687 €</span></div>
+<div class="bar"><i style="width:49%;background:var(--negative)"></i></div></div>
+</div><script>/* statický náhľad */</script></body></html>

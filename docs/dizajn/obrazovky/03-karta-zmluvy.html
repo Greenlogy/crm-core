@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<title>Karta zmluvy</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}.al{background:#fdecea;color:#b42318}.wa{background:#fff4e0;color:#b45309}.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.btn:focus-visible,.nav:focus-visible,.tab:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.tab{font-family:inherit;font-size:13px;font-weight:500;padding:9px 2px;border:0;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;white-space:nowrap}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #f0f1f3;font-size:13px;line-height:19px;white-space:nowrap}
+.row:last-child{border-bottom:0}
+.row dt{color:#64748b;flex:none}
+.row dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:9px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.num{text-align:right !important}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:12px;color:#64748b}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px}
+.ch h2{margin:0;font-size:15px;font-weight:600}
+.bar{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0}
+.bars{display:flex;align-items:flex-end;gap:3px;height:150px;width:100%;justify-content:center}
+.b1{width:40%;background:#1a6b4a;border-radius:3px 3px 0 0}
+.b0{width:40%;background:#cfd4da;border-radius:3px 3px 0 0}
+.bl{font-size:11px;color:#64748b}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+
+<nav aria-label="Hlavné menu" style="flex: 1 1 232px; max-width: 232px; min-width: 200px; box-sizing: border-box; background: #ffffff; border-right: 1px solid #e7e9ec; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 6px 8px;"><span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span><div><div style="font-size: 14px; font-weight: 600; line-height: 17px;">Greenlogy</div><div style="font-size: 11px; color: #64748b; line-height: 15px;">CRM</div></div></div>
+<div class="grp">Obchod</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>Prehľad</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Firmy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>Odberné miesta</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Dealy</a>
+<a class="nav" href="#" aria-current="page" style="background: #f0f1f3; color: #0f172a; font-weight: 600;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 14l2 2 4-4"></path></svg>Zmluvy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<div class="grp">Servis</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.4A8 8 0 1121 12z"></path></svg>Konverzácie<span class="pill al" style="margin-left: auto;">3</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>SLA prehľad</a>
+<div class="grp">Marketing</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>Segmenty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Kampane</a>
+<div style="flex-grow: 1; min-height: 24px;"></div>
+<div style="display: flex; align-items: center; gap: 8px; background: #f0f1f3; border-radius: 8px; padding: 7px 10px; font-size: 12px; color: #64748b;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a6b4a;"></span>Synchronizované 20:18</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 36px 48px; display: flex; flex-direction: column; gap: 16px;">
+
+<section aria-label="Hlavička zmluvy" style="display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between;">
+<div style="min-width: 0;">
+<div style="font-size: 12px; color: #64748b; line-height: 16px;"><a href="#" style="color: #64748b;">Zmluvy</a> / <a href="#" style="color: #64748b;">Kovovýroba Váh a.s.</a> / Z-2024-031</div>
+<div style="display: flex; gap: 8px; align-items: center; white-space: nowrap;">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;">Zmluva Z-2024-031</h1>
+<span class="pill ok"><span class="dot"></span>Aktívna</span>
+<span class="pill">Dodávka</span>
+<span class="pill">Firma</span>
+<span style="font-size: 13px; color: #64748b; margin-left: 4px;"><a href="#">Kovovýroba Váh a.s.</a> · z dealu <a href="#">Dodávka 2024–2026</a> · Peter Kalman</span>
+</div>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6"></path></svg>PDF zmluvy</button>
+<button class="btn" type="button">Dodatok</button>
+<button class="btn" type="button" aria-label="Ďalšie akcie" style="padding: 8px 9px;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+<button class="btn" type="button" style="background: #1a6b4a; border-color: #1a6b4a; color: #ffffff;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Ponuka na predĺženie</button>
+</div>
+</section>
+
+<section aria-label="Kľúčové čísla" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;">
+<div class="card" style="padding: 14px 16px;"><div style="display: flex; justify-content: space-between; align-items: center;"><span class="kl">Účinnosť</span><span class="pill wa"><span class="dot"></span>82 dní</span></div><div class="kv">do 31. 12. 2026</div><div class="ks">od 1. 1. 2024 · bez automatického predĺženia</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Odberné miesta</div><div class="kv">3</div><div class="ks">2 160,2 MWh/rok · 1 neaktívne</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Výnos 2026 (plán)</div><div class="kv">242 958 €</div><div class="ks">elektrina 242 850 € pri SPOT 95 · fixy 108 €</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Hrubá marža 2026</div><div class="kv" style="color: #155a3d;">37 630 €</div><div class="ks">17,42 €/MWh · výpočet pri SPOT overiť</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Podpísaná</div><div class="kv">8. 11. 2023</div><div class="ks">potvrdená · splatnosť 14 dní</div></div>
+</section>
+
+<div role="tablist" aria-label="Sekcie zmluvy" style="display: flex; gap: 20px; border-bottom: 1px solid #e7e9ec; overflow-x: auto;">
+<button class="tab" role="tab" type="button" aria-selected="true" style="color: #0f172a; border-bottom-color: #1a6b4a;">Prehľad</button>
+<button class="tab" role="tab" type="button" aria-selected="false">Ceny po OOM</button>
+<button class="tab" role="tab" type="button" aria-selected="false">Nákup</button>
+<button class="tab" role="tab" type="button" aria-selected="false">Zmena dodávateľa</button>
+<button class="tab" role="tab" type="button" aria-selected="false">Dokumenty</button>
+<button class="tab" role="tab" type="button" aria-selected="false">História zmien</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+
+<div style="flex: 0 1 260px; min-width: 230px; display: flex; flex-direction: column; gap: 16px;">
+<section class="card" aria-label="Zmluvné podmienky">
+<div class="ch"><h2>Podmienky</h2><a href="#" style="font-size: 12px; font-weight: 500;">Upraviť</a></div>
+<dl style="margin: 0; padding: 0 16px 10px;">
+<div class="row"><dt>Číslo</dt><dd>Z-2024-031</dd></div>
+<div class="row"><dt>Stav</dt><dd><span class="pill ok">Aktívna</span></dd></div>
+<div class="row"><dt>Segment</dt><dd>Firma</dd></div>
+<div class="row"><dt>Účinnosť</dt><dd>1. 1. 2024 – 31. 12. 2026</dd></div>
+<div class="row"><dt>Auto. predĺženie</dt><dd>nie</dd></div>
+<div class="row"><dt>Splatnosť faktúr</dt><dd>14 dní</dd></div>
+<div class="row"><dt>Tolerancia odberu</dt><dd>±20 %</dd></div>
+<div class="row"><dt>Preddavok</dt><dd>80 %</dd></div>
+</dl>
+</section>
+<section class="card" aria-label="Priebeh zmluvy">
+<div class="ch"><h2>Priebeh</h2></div>
+<div style="padding: 0 16px 10px;">
+<div class="row"><span>Rozpracovaná</span><span style="color: #64748b;">20. 10. 2023</span></div>
+<div class="row"><span>Podpísaná</span><span style="color: #64748b;">8. 11. 2023</span></div>
+<div class="row"><span>Zmena dodávateľa (3× XML433)</span><span style="color: #64748b;">1. 1. 2024</span></div>
+<div class="row"><span><b style="font-weight: 600;">Aktívna</b></span><span style="color: #64748b;">1. 1. 2024</span></div>
+</div>
+</section>
+</div>
+
+<div style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+<section class="card" aria-label="Ceny po odberných miestach">
+<div class="ch"><h2>Ceny po odberných miestach</h2><a href="#" style="font-size: 12px; font-weight: 500;">+ Pridať cenu</a></div>
+<div style="overflow-x: auto;">
+<table class="tbl">
+<thead><tr><th>OOM</th><th>Obdobie</th><th>Produkt</th><th class="num">VT / 1T</th><th class="num">NT</th><th class="num">Aditív</th><th class="num">OM €/mes.</th><th>Stav</th></tr></thead>
+<tbody>
+<tr><td><a href="#" style="font-weight: 600;">Hala A</a></td><td>2026</td><td>Green_E_1T_SPOT+ aditív</td><td class="num">SPOT</td><td class="num">–</td><td class="num">17,42</td><td class="num">3,00</td><td><span class="pill ok">Platná</span></td></tr>
+<tr><td><a href="#" style="font-weight: 600;">Hala B</a></td><td>2026</td><td>Green_E_1T_SPOT+ aditív</td><td class="num">SPOT</td><td class="num">–</td><td class="num">17,42</td><td class="num">3,00</td><td><span class="pill ok">Platná</span></td></tr>
+<tr><td><a href="#" style="font-weight: 600;">Hala A</a></td><td>2025</td><td>Green_E_1T_SPOT+ aditív</td><td class="num">SPOT</td><td class="num">–</td><td class="num">18,90</td><td class="num">3,00</td><td><span class="pill">Neplatná</span></td></tr>
+<tr><td><a href="#" style="font-weight: 600;">Hala A</a></td><td>2024</td><td>Green_E_2T_FIX</td><td class="num">124,80</td><td class="num">114,20</td><td class="num">–</td><td class="num">3,00</td><td><span class="pill">Neplatná</span></td></tr>
+<tr style="color: #94a3b8;"><td>Sklad</td><td>2024–6/2026</td><td>Green_E_1T_FIX</td><td class="num">121,50</td><td class="num">–</td><td class="num">–</td><td class="num">3,00</td><td><span class="pill">Neplatná</span></td></tr>
+</tbody>
+</table>
+</div>
+<div style="padding: 0 16px 14px; font-size: 12px; color: #64748b;">Ceny v €/MWh bez DPH. Obdobie bez konca = na neurčito.</div>
+</section>
+
+<section class="card" aria-label="Nákupné tranže">
+<div class="ch"><h2>Nákupné tranže <span style="color: #94a3b8; font-weight: 400;">2</span></h2><span style="font-size: 12px; color: #64748b;">zdroj Cockpit</span></div>
+<div style="overflow-x: auto;">
+<table class="tbl">
+<thead><tr><th>Produkt</th><th>Rok dodávky</th><th>Nakúpené</th><th class="num">PXE BL</th><th class="num">PXE PL</th><th class="num">Cena €/MWh</th></tr></thead>
+<tbody>
+<tr><td class="mono" style="color: #0f172a;">SK BL CAL2024</td><td>2024</td><td>3. 11. 2023</td><td class="num">138,20</td><td class="num">161,40</td><td class="num" style="font-weight: 600;">152,28</td></tr>
+<tr><td class="mono" style="color: #0f172a;">SK BL CAL2025</td><td>2025</td><td>3. 11. 2023</td><td class="num">112,60</td><td class="num">131,90</td><td class="num" style="font-weight: 600;">124,39</td></tr>
+</tbody>
+</table>
+</div>
+<div style="padding: 0 16px 14px; font-size: 12px; color: #64748b;">2026 je SPOT bez tranže. Cena = vážený priemer BL/PL + 4 € odchýlka + 4 € marža.</div>
+</section>
+</div>
+
+<div style="flex: 0 1 340px; min-width: 280px; display: flex; flex-direction: column; gap: 16px;">
+<section class="card" aria-label="Zákazník a kontakty">
+<div class="ch"><h2>Zákazník</h2><a href="#" style="font-size: 12px; font-weight: 500;">Karta firmy →</a></div>
+<div style="padding: 0 16px 10px;">
+<div class="row"><b style="font-weight: 600;">Kovovýroba Váh a.s.</b><span style="color: #64748b;">IČO 36 412 578</span></div>
+<div class="row"><span style="display: flex; gap: 8px;"><b style="font-weight: 600;">Ing. Pavol Kráľ</b><span style="color: #64748b;">štatutár · podpísal</span></span></div>
+<div class="row"><span style="display: flex; gap: 8px;"><b style="font-weight: 600;">Eva Malá</b><span style="color: #64748b;">fakturácia</span></span></div>
+</div>
+</section>
+<section class="card" aria-label="Odberné miesta zmluvy">
+<div class="ch"><h2>Odberné miesta <span style="color: #94a3b8; font-weight: 400;">3</span></h2></div>
+<div style="padding: 0 16px 10px;">
+<div class="row"><span style="display: flex; gap: 8px; align-items: baseline;"><a href="#" style="font-weight: 600;">Hala A</a><span class="mono">24ZSS4100078132P</span></span><span class="pill ok">Aktívne</span></div>
+<div class="row"><span style="display: flex; gap: 8px; align-items: baseline;"><a href="#" style="font-weight: 600;">Hala B</a><span class="mono">24ZSS4100078140R</span></span><span class="pill ok">Aktívne</span></div>
+<div class="row"><span style="display: flex; gap: 8px; align-items: baseline;"><a href="#" style="font-weight: 600;">Sklad</a><span class="mono">24ZSS4100011907M</span></span><span class="pill">Neaktívne</span></div>
+</div>
+</section>
+<section class="card" aria-label="Nadväzujúce">
+<div class="ch"><h2>Nadväzujúce</h2></div>
+<div style="padding: 0 16px 10px;">
+<div class="row"><span style="display: flex; gap: 8px; align-items: center;"><a href="#" style="font-weight: 600;">Predĺženie 2027</a><span class="pill in">Cenová ponuka</span></span><span style="color: #64748b;">deal</span></div>
+<div class="row"><span style="display: flex; gap: 8px; align-items: center;"><a href="#" style="font-weight: 600;">Provízia Q4/2023</a><span class="pill ok">Vyplatená</span></span><span style="color: #64748b;">Peter Kalman</span></div>
+</div>
+</section>
+</div>
+
+</div>
+</main>
+</div>
+</body>
+</html>
