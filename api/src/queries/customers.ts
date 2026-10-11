@@ -1,51 +1,71 @@
-// Zoznam zákazníkov a karta zákazníka (firma alebo domácnosť).
-// Zákazník = firma, alebo kontakt, ktorý vlastní OOM, deal alebo zmluvu (person_id).
-// Nepoužíva customer_v: ten počíta každý kontakt bez firmy ako B2C (zistenie z kroku 2).
+// Zoznam zákazníkov a karta zákazníka (firma alebo domácnosť) – modul Zákazníci, migrácia 0004.
+// Zoznam ide z customer_v: firmy s označením zákazník + osoby-domácnosti (zadanie čl. 3, 9).
 
 import type { Sql } from '../db';
 
 export const PAGE_SIZE = 50;
 export type CustomerKind = 'company' | 'person';
 
-export async function listCustomers(sql: Sql, opts: { q: string; segment: string; page: number }) {
-  const like = `%${opts.q}%`;
+export const STATUSES = [
+  'marketingovy_kontakt', 'zaujemca', 'ponuka', 'cakajuci_zakaznik', 'zakaznik', 'byvaly_zakaznik', 'zruseny_zakaznik',
+] as const;
+// '' = predvolený zoznam (bez marketingových kontaktov a archívu), 'leady' = Záujemca + Ponuka, 'vsetky' = aj archív
+export const STATUS_FILTERS = new Set<string>(['', 'leady', 'vsetky', ...STATUSES]);
+export const SEGMENT_FILTERS = new Set(['', 'domacnost', 'firma', 'vyrobca']);
+
+export type CustomerFilter = { q: string; status: string; segment: string; owner: string; page: number };
+
+export async function listCustomers(sql: Sql, f: CustomerFilter) {
+  const like = `%${f.q}%`;
+  const statusCond =
+    f.status === ''
+      ? sql`cu.status IS DISTINCT FROM 'marketingovy_kontakt' AND NOT cu.archived`
+      : f.status === 'leady'
+        ? sql`cu.status IN ('zaujemca', 'ponuka')`
+        : f.status === 'vsetky'
+          ? sql`TRUE`
+          : sql`cu.status = ${f.status}`;
+  const segmentCond =
+    f.segment === 'domacnost'
+      ? sql`cu.customer_type = 'B2C'`
+      : f.segment === 'firma'
+        ? sql`cu.customer_type = 'B2B'`
+        : f.segment === 'vyrobca'
+          ? sql`cu.is_producer`
+          : sql`TRUE`;
   const rows = await sql`
-    WITH customer AS (
-      SELECT 'company' AS kind, c.id, c.name, c.ico, c.segment::text AS segment, c.owner_id, c.hubspot_id
-        FROM company c
-      UNION ALL
-      SELECT 'person', p.id, concat_ws(' ', p.first_name, p.last_name), NULL, p.segment::text, p.owner_id, p.hubspot_id
-        FROM contact p
-       WHERE EXISTS (SELECT 1 FROM oom o WHERE o.person_id = p.id)
-          OR EXISTS (SELECT 1 FROM deal d WHERE d.person_id = p.id)
-          OR EXISTS (SELECT 1 FROM contract k WHERE k.person_id = p.id)
-    )
-    SELECT cu.kind, cu.id, cu.name, cu.ico, cu.segment, cu.hubspot_id, u.name AS owner_name,
-           o.oom_count, o.oom_active, o.planned_consumption_mwh, o.planned_feed_in_mwh,
+    SELECT CASE cu.customer_type WHEN 'B2B' THEN 'company' ELSE 'person' END AS kind,
+           cu.id, cu.name, cu.ico, cu.customer_type, cu.status, cu.status_source, cu.is_former_customer, cu.is_producer,
+           cu.segment_label, cu.owner_id, u.name AS owner_name, cu.active_oom_count, cu.annual_mwh, cu.last_activity_at,
+           cu.archived,
            (SELECT count(*)::int FROM contract k
              WHERE (k.company_id = cu.id OR k.person_id = cu.id) AND k.status = 'aktivna') AS active_contracts,
            count(*) OVER ()::int AS total
-      FROM customer cu
+      FROM customer_v cu
       LEFT JOIN app_user u ON u.id = cu.owner_id
-      CROSS JOIN LATERAL (
-        SELECT count(*)::int AS oom_count,
-               count(*) FILTER (WHERE status = 'aktivne')::int AS oom_active,
-               sum(coalesce(planned_consumption_vt_mwh, 0) + coalesce(planned_consumption_nt_mwh, 0)) AS planned_consumption_mwh,
-               sum(planned_feed_in_mwh) AS planned_feed_in_mwh
-          FROM oom WHERE company_id = cu.id OR person_id = cu.id
-      ) o
-     WHERE (${opts.q} = '' OR cu.name ILIKE ${like} OR cu.ico LIKE ${opts.q + '%'})
-       AND (${opts.segment} = '' OR cu.segment = ${opts.segment})
+     WHERE (${f.q} = '' OR cu.name ILIKE ${like} OR cu.ico LIKE ${f.q + '%'} OR cu.email ILIKE ${like})
+       AND ${statusCond}
+       AND ${segmentCond}
+       AND (${f.owner} = '' OR cu.owner_id::text = ${f.owner})
      ORDER BY cu.name, cu.id
-     LIMIT ${PAGE_SIZE} OFFSET ${(opts.page - 1) * PAGE_SIZE}
+     LIMIT ${PAGE_SIZE} OFFSET ${(f.page - 1) * PAGE_SIZE}
   `;
   const total = rows[0]?.total ?? 0;
   return {
-    page: opts.page,
+    page: f.page,
     pageSize: PAGE_SIZE,
     total,
     items: rows.map(({ total: _t, ...r }) => r),
   };
+}
+
+// Obchodníci, ktorí vlastnia aspoň jedného zákazníka (filter zoznamu).
+export async function listOwners(sql: Sql) {
+  return sql`
+    SELECT u.id, u.name
+      FROM app_user u
+     WHERE EXISTS (SELECT 1 FROM customer_v cu WHERE cu.owner_id = u.id)
+     ORDER BY u.name`;
 }
 
 export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
@@ -55,8 +75,11 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
     kind === 'company'
       ? await sql`
           SELECT c.id, c.name, c.ico, c.dic, c.ic_dph, c.vat_payer, c.legal_form, c.registry_entry, c.nace, c.statutory,
-                 c.address, c.bank_account, c.segment, c.payment_rating, c.debts_note, c.insolvency_note, c.finstat_url,
-                 c.finstat_updated_at, c.lifecycle_stage, c.hubspot_id, c.created_at, c.updated_at,
+                 c.address, c.bank_account, c.payment_rating, c.debts_note, c.insolvency_note, c.finstat_url,
+                 c.finstat_updated_at, c.is_customer, c.is_partner, c.is_supplier,
+                 c.status, c.status_source, c.status_changed_at, c.is_former_customer, c.is_producer,
+                 CASE WHEN c.is_producer THEN 'Firma · výrobca' ELSE 'Firma' END AS segment_label,
+                 company_is_archived(c) AS archived, c.hubspot_id, c.created_at, c.updated_at,
                  u.name AS owner_name, t.name AS owner_team
             FROM company c
             LEFT JOIN app_user u ON u.id = c.owner_id
@@ -64,9 +87,12 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
            WHERE c.id = ${id}`
       : await sql`
           SELECT p.id, p.first_name, p.last_name, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email,
-                 p.phone, p.mobile, p.position, p.address, p.segment, p.lifecycle_stage, p.source, p.hubspot_id,
+                 p.phone, p.mobile, p.position, p.address, p.source, p.is_household,
+                 p.status, p.status_source, p.status_changed_at, p.is_former_customer, p.is_producer,
+                 CASE WHEN p.is_producer THEN 'Domácnosť · výrobca' ELSE 'Domácnosť' END AS segment_label,
+                 p.archived, p.marketing_allowed, p.marketing_opt_out_at, p.marketing_opt_out_source, p.hubspot_id,
                  p.created_at, p.updated_at, u.name AS owner_name, t.name AS owner_team
-            FROM contact p
+            FROM contact_v p
             LEFT JOIN app_user u ON u.id = p.owner_id
             LEFT JOIN team t ON t.id = u.team_id
            WHERE p.id = ${id}`;
@@ -84,14 +110,14 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
     kind === 'company'
       ? sql`
           SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email, p.phone, p.mobile,
-                 p.position, cc.is_primary, cc.role
+                 p.position, cc.is_main_contact, to_jsonb(cc.roles) AS roles, p.is_household, p.marketing_opt_out_at
             FROM company_contact cc JOIN contact p ON p.id = cc.contact_id
            WHERE cc.company_id = ${id}
-           ORDER BY cc.is_primary DESC, p.last_name, p.first_name`
+           ORDER BY cc.is_main_contact DESC, p.last_name, p.first_name`
       : sql`SELECT NULL LIMIT 0`,
     kind === 'person'
       ? sql`
-          SELECT c.id, c.name, c.ico, cc.is_primary
+          SELECT c.id, c.name, c.ico, cc.is_main_contact, to_jsonb(cc.roles) AS roles, company_is_archived(c) AS archived
             FROM company_contact cc JOIN company c ON c.id = cc.company_id
            WHERE cc.contact_id = ${id}
            ORDER BY c.name`

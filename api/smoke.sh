@@ -35,8 +35,15 @@ pick() { # súbor výraz – vyberie ID bez vypisovania dát
 echo "health:      $(call health /api/health) $(summary health)"
 echo "customers:   $(call customers '/api/customers') total $(pick customers 'd.total'), $(summary customers)"
 echo "hľadanie:    $(call customers-q '/api/customers?q=a&segment=firma') total $(pick customers-q 'd.total')"
+echo "všetky:      $(call customers-all '/api/customers?status=vsetky') total $(pick customers-all 'd.total') (aj marketingové kontakty a archív)"
+echo "leady:       $(call customers-leady '/api/customers?status=leady') total $(pick customers-leady 'd.total')"
+echo "výrobcovia:  $(call customers-vyr '/api/customers?segment=vyrobca') total $(pick customers-vyr 'd.total')"
+echo "obchodníci:  $(call owners /api/owners) $(pick owners 'd.length') s aspoň jedným zákazníkom"
+OWNER="$(pick owners 'd[0]?.id')"
+echo "obchodník:   $(call customers-owner "/api/customers?owner=$OWNER") total $(pick customers-owner 'd.total')"
+echo "zlý stav:    $(call bad-status '/api/customers?status=xyz') (čakám 400)"
 
-COMPANY="$(pick customers 'd.items.find(i => i.kind === "company" && i.oom_count > 1)?.id')"
+COMPANY="$(pick customers 'd.items.find(i => i.kind === "company" && i.active_oom_count > 1)?.id')"
 PERSON="$(pick customers 'd.items.find(i => i.kind === "person")?.id')"
 [[ -n "$PERSON" ]] || { call customers-p '/api/customers?segment=domacnost' >/dev/null; PERSON="$(pick customers-p 'd.items[0]?.id')"; }
 

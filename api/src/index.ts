@@ -1,10 +1,17 @@
-// API jadra Greenlogy CRM – prototyp iba na čítanie (modul 2, krok 4).
+// API jadra Greenlogy CRM – prototyp iba na čítanie (modul 2, krok 4; zoznam a karty podľa modulu Zákazníci).
 // Iba GET. Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
 
 import { Hono } from 'hono';
 import { connect, type Env, type Sql } from './db';
 import { contractCard } from './queries/contracts';
-import { customerCard, listCustomers, type CustomerKind } from './queries/customers';
+import {
+  customerCard,
+  listCustomers,
+  listOwners,
+  SEGMENT_FILTERS,
+  STATUS_FILTERS,
+  type CustomerKind,
+} from './queries/customers';
 import { oomCard } from './queries/oom';
 
 type Vars = { sql: Sql };
@@ -12,7 +19,6 @@ type Vars = { sql: Sql };
 const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SEGMENTS = new Set(['', 'domacnost', 'firma', 'dodavatel']);
 
 app.use('*', async (c, next) => {
   if (c.req.method !== 'GET') return c.json({ error: 'Povolené je iba čítanie (GET).' }, 405);
@@ -39,13 +45,21 @@ app.get('/health', async (c) => {
   return c.json({ ok: true });
 });
 
+// Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
+// segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
 app.get('/customers', async (c) => {
   const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const status = c.req.query('status') ?? '';
   const segment = c.req.query('segment') ?? '';
+  const owner = c.req.query('owner') ?? '';
   const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
-  if (!SEGMENTS.has(segment)) return c.json({ error: 'Neplatný segment.' }, 400);
-  return c.json(await listCustomers(c.var.sql, { q, segment, page }));
+  if (!STATUS_FILTERS.has(status)) return c.json({ error: 'Neplatný stav.' }, 400);
+  if (!SEGMENT_FILTERS.has(segment)) return c.json({ error: 'Neplatný segment.' }, 400);
+  if (owner !== '' && !UUID.test(owner)) return c.json({ error: 'Neplatný obchodník.' }, 400);
+  return c.json(await listCustomers(c.var.sql, { q, status, segment, owner, page }));
 });
+
+app.get('/owners', async (c) => c.json(await listOwners(c.var.sql)));
 
 const card = (kind: CustomerKind) =>
   app.get(`/${kind === 'company' ? 'companies' : 'persons'}/:id`, async (c) => {

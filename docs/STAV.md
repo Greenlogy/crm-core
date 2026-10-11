@@ -13,6 +13,7 @@ Aktualizované: 11. 10. 2026
 
 ## Prebieha
 
+- Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nasadený prototyp na workers.dev beží so starým kódom a nefunguje – nová vzorka (1 340 riadkov) nahratá na `dev`; API upravené a overené lokálne (`smoke.sh`); ďalej frontend, potom nasadenie Workera.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
@@ -22,7 +23,6 @@ Aktualizované: 11. 10. 2026
 - Opakované čísla zmlúv na dealoch (18 vo vzorke) vs. `contract.number` unikátne a 1 deal = 1 zmluva – rozhodnúť pred migráciou
 - Smer zmluvných cien pri veľkoobchodných OOM (pole `typ_oom` prázdne)
 - `customer_v`: B2C zákazník = kontakt bez firmy, ktorý vlastní OOM, deal alebo zmluvu (nie každý kontakt bez firmy)
-- Po skončení prototypu zmazať vzorku z `dev` (`exports/prototyp/vzorka-delete.sql`)
 
 - Prenos nákupných cien z Cockpitu (zdieľaná DB alebo API)
 - Potvrdiť definície rollupov v HubSpote (objemy, výnosy)

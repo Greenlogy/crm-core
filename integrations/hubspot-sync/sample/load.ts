@@ -1,4 +1,5 @@
 // Nahratie vzorky do Neon vetvy dev (modul 2, krok 2) – generátor SQL. Do databázy sa nepripája.
+// Schéma po migrácii 0004 (modul Zákazníci): príznaky firmy, is_household, roly, stav z HubSpotu.
 //
 //   cd ~/projects/greenlogy/crm-core/integrations/hubspot-sync
 //   npm run sample:load
@@ -6,7 +7,7 @@
 // Vstup:  exports/prototyp/vzorka-data.json, exports/prototyp/cache/index.json (z select.ts)
 // Výstup: exports/prototyp/vzorka-load.sql      – jedna transakcia s INSERT (ID generuje skript)
 //         exports/prototyp/vzorka-manifest.json – všetky vložené ID po tabuľkách
-//         exports/prototyp/vzorka-delete.sql    – presné zmazanie podľa manifestu vrátane audit_log
+//         exports/prototyp/vzorka-zmazanie*.sql – zmazanie podľa manifestu (sample/delete.ts, spustí sa na konci)
 //         exports/prototyp/nahratie-zistenia.md – čo sa nenahralo a prečo (iba HubSpot ID, bez mien)
 // SQL sa spúšťa samostatne cez sample/psql-dev.sh, iba s Petrovým súhlasom.
 // Z HubSpotu sa číta iba definícia pipelines dealov a zoznam vlastníkov (obchodníkov) s tímami.
@@ -24,6 +25,8 @@ const SOURCE = 'prototyp_vzorka';
 const TODAY = new Date().toISOString().slice(0, 10);
 const CONTRACT_PRICE_INVALID_STAGE = '89395222'; // Zmluvné ceny: Neplatné
 const DEAL_TO_COMPANY_PRIMARY = 5;
+const PRODUCER_PIPELINE = /B2B.*výkup/i; // „B2B_výkup elektriny“ – segment „+ výrobca“ (zadanie Zákazníci čl. 5)
+const EMAIL_FORMAT = /^[^@\s]+@[^@\s]+\.[^@\s]+$/; // rovnaké ako contact_email_format_check
 
 type SampleData = {
   customers: { kind: 'company' | 'contact'; hubspotId: string }[];
@@ -222,23 +225,31 @@ async function main() {
   }
   const ownerUuid = (p: Props) => userIds[txt(p.hubspot_owner_id) ?? ''] ?? null;
 
-  // --- Firmy ---
+  // --- Firmy (IČO je povinné: firma bez platného IČO sa nenahrá) ---
+  // Označenia: „Firma“/„Komunal“ → zákazník; „Dodávateľ“ → dodávateľ, a zákazník iba ak má OOM alebo deal.
+  const companyWithDeal = new Set(Object.values(A.dealCompany).flatMap((edges) => edges.map((e) => e.to)));
+  const companyWithOom = new Set(Object.values(owners).filter((k) => k.startsWith('company:')).map((k) => k.slice(8)));
   const companyIds: Record<string, string> = {};
   const icoSeen = new Set<string>();
   for (const [hs, p] of Object.entries(O.companies)) {
-    let ico: string | null = null;
     const raw = (p.ico_new ?? '').replace(/\D/g, '');
-    if (raw) {
-      if (raw.length <= 8) ico = raw.padStart(8, '0');
-      else note('company', hs, `IČO má ${raw.length} číslic, ostáva prázdne`);
+    if (!raw) {
+      note('company', hs, 'chýba IČO, firma sa nenahrala');
+      continue;
     }
-    if (ico && icoSeen.has(ico)) {
-      note('company', hs, 'duplicitné IČO vo vzorke, ostáva prázdne');
-      ico = null;
+    if (raw.length > 8) {
+      note('company', hs, `IČO má ${raw.length} číslic, firma sa nenahrala`);
+      continue;
     }
-    if (ico) icoSeen.add(ico);
+    const ico = raw.padStart(8, '0');
+    if (icoSeen.has(ico)) {
+      note('company', hs, 'duplicitné IČO vo vzorke, firma sa nenahrala');
+      continue;
+    }
+    icoSeen.add(ico);
     const seg = p.segment_zakaznika ?? '';
-    const segment = /Firma|Komunal/.test(seg) ? 'firma' : /Dodávateľ/.test(seg) ? 'dodavatel' : null;
+    const isSupplier = /Dodávateľ/.test(seg);
+    const isCustomer = /Firma|Komunal/.test(seg) || !isSupplier || companyWithDeal.has(hs) || companyWithOom.has(hs);
     companyIds[hs] = insert('company', {
       name: txt(p.name) ?? `(bez názvu ${hs})`,
       ico,
@@ -250,31 +261,49 @@ async function main() {
       address: joinParts(txt(p.address), txt(p.address2), txt(`${p.zip ?? ''} ${p.city ?? ''}`)),
       bank_account: txt(p.bank_account),
       payment_rating: paymentRating(hs, p.platobn_rating),
-      segment,
+      is_customer: isCustomer,
+      is_supplier: isSupplier,
       debts_note: txt(p.dlhy_a_nedoplatky),
       insolvency_note: txt(p.konkurzy_a_re_trukturaliz_cie),
       finstat_url: txt(p.finstat_url),
-      lifecycle_stage: txt(p.lifecyclestage),
       owner_id: ownerUuid(p),
       hubspot_id: hs,
     });
   }
 
-  // --- Kontakty ---
+  // --- Kontakty (povinné meno, priezvisko a e-mail alebo telefón) ---
+  // Domácnosť = zákazník B2C vo vzorke, alebo osoba bez akejkoľvek firmy v HubSpote.
+  // Mimo zoznamu Zákazníci ostávajú iba osoby, ktoré sú výlučne kontaktom vo firme.
   const b2c = new Set(data.customers.filter((c) => c.kind === 'contact').map((c) => c.hubspotId));
+  const contactWithCompany = new Set([
+    ...Object.entries(A.contactCompany).filter(([, edges]) => edges.length).map(([ct]) => ct),
+    ...Object.values(A.companyContact).flatMap((edges) => edges.map((e) => e.to)),
+  ]);
   const contactIds: Record<string, string> = {};
   for (const [hs, p] of Object.entries(O.contacts)) {
+    let email = txt(p.email);
+    if (email && !EMAIL_FORMAT.test(email)) {
+      note('contact', hs, 'e-mail nemá tvar x@y.z, ostáva prázdny');
+      email = null;
+    }
+    if (!txt(p.firstname) || !txt(p.lastname)) {
+      note('contact', hs, 'chýba meno alebo priezvisko, osoba sa nenahrala');
+      continue;
+    }
+    if (!email && !txt(p.phone) && !txt(p.mobilephone)) {
+      note('contact', hs, 'chýba e-mail aj telefón, osoba sa nenahrala');
+      continue;
+    }
     contactIds[hs] = insert('contact', {
       first_name: txt(p.firstname),
       last_name: txt(p.lastname),
       title: txt(p.titul),
-      email: txt(p.email),
+      email,
       phone: txt(p.phone),
       mobile: txt(p.mobilephone),
       position: txt(p.jobtitle),
       address: joinParts(txt(p.address), txt(`${p.zip ?? ''} ${p.city ?? ''}`)),
-      segment: b2c.has(hs) ? 'domacnost' : null,
-      lifecycle_stage: txt(p.lifecyclestage),
+      is_household: b2c.has(hs) || !contactWithCompany.has(hs),
       source: txt(p.zdroj_kontaktu_ako_vznikol_),
       owner_id: ownerUuid(p),
       hubspot_id: hs,
@@ -282,27 +311,34 @@ async function main() {
   }
 
   // --- Kontakt – firma ---
+  // Roly HubSpot nemá (väzby bez štítkov), ostávajú prázdne. Hlavný kontakt: iba ak má firma
+  // jediný kontakt; pri viacerých ho vyberie kontrolór (Peter, 11. 10. 2026).
   const pairs = new Set<string>();
   for (const [co, edges] of Object.entries(A.companyContact)) for (const e of edges) pairs.add(`${co}|${e.to}`);
   for (const [ct, edges] of Object.entries(A.contactCompany)) for (const e of edges) pairs.add(`${e.to}|${ct}`);
-  for (const pair of [...pairs].sort()) {
-    const [co, ct] = pair.split('|');
-    if (!companyIds[co] || !contactIds[ct]) continue;
+  const loadedPairs = [...pairs].sort().map((pair) => pair.split('|')).filter(([co, ct]) => companyIds[co] && contactIds[ct]);
+  const contactsPerCompany = loadedPairs.reduce<Record<string, number>>((acc, [co]) => ((acc[co] = (acc[co] ?? 0) + 1), acc), {});
+  for (const [co, ct] of loadedPairs) {
     insert('company_contact', {
       company_id: companyIds[co],
       contact_id: contactIds[ct],
-      is_primary: O.contacts[ct]?.associatedcompanyid === co,
+      is_main_contact: contactsPerCompany[co] === 1,
     });
+  }
+  for (const [co, n] of Object.entries(contactsPerCompany)) {
+    if (n > 1) note('company_contact', co, `firma má ${n} kontaktov, hlavný kontakt vyberie kontrolór`);
   }
 
   // --- Pipelines dealov (iba použité) ---
   const res = await client.get<{ results: HubSpotPipeline[] }>('/crm/v3/pipelines/deals');
   const usedPipelines = new Set(Object.values(O.deals).map((d) => d.pipeline ?? ''));
   const pipelineIds: Record<string, string> = {};
+  const producerPipelineIds: string[] = [];
   const stageIds: Record<string, string> = {};
   const stageClosed: Record<string, boolean> = {};
   for (const pl of res.results.filter((p) => usedPipelines.has(p.id))) {
     pipelineIds[pl.id] = insert('pipeline', { name: pl.label, sort_order: pl.displayOrder, hubspot_id: pl.id });
+    if (PRODUCER_PIPELINE.test(pl.label)) producerPipelineIds.push(pipelineIds[pl.id]);
     for (const st of pl.stages) {
       const isClosed = st.metadata.isClosed === 'true';
       const probability = num(st.metadata.probability ?? null);
@@ -609,14 +645,20 @@ async function main() {
   const syncRunId = randomUUID();
   const fullManifest = { generatedAt: new Date().toISOString(), source: SOURCE, syncRunId, tables: manifest };
 
+  const uuidArray = (ids: string[]) => `'{${ids.join(',')}}'::uuid[]`;
   const load = [
     '-- Vzorka pre prototyp (modul 2, krok 2). Iba Neon vetva dev. Obsahuje osobné údaje – nepatrí do gitu.',
-    `-- Vygenerované ${fullManifest.generatedAt}, ${total} riadkov. Zmazanie: vzorka-delete.sql`,
+    `-- Vygenerované ${fullManifest.generatedAt}, ${total} riadkov. Zmazanie: vzorka-zmazanie.sql`,
     '\\set ON_ERROR_STOP on',
     'BEGIN;',
     `DO $$ BEGIN IF EXISTS (SELECT 1 FROM sync_run WHERE source = '${SOURCE}') THEN RAISE EXCEPTION 'Vzorka už je nahratá (sync_run ${SOURCE}).'; END IF; END $$;`,
     `INSERT INTO sync_run (id, source) VALUES ('${syncRunId}', '${SOURCE}');`,
     ...ORDER.flatMap((t) => [`-- ${t}: ${manifest[t].length}`, ...statements[t]]),
+    '-- Východisková hodnota stavu a segmentu z údajov HubSpotu (zadanie Zákazníci čl. 11.4)',
+    `UPDATE company c SET is_producer = true WHERE c.id = ANY(${uuidArray(manifest.company)}) AND (EXISTS (SELECT 1 FROM oom o WHERE o.company_id = c.id AND o.type = 'vyroba') OR EXISTS (SELECT 1 FROM deal d WHERE d.company_id = c.id AND d.pipeline_id = ANY(${uuidArray(producerPipelineIds)})));`,
+    `UPDATE contact p SET is_producer = true WHERE p.id = ANY(${uuidArray(manifest.contact)}) AND p.is_household AND (EXISTS (SELECT 1 FROM oom o WHERE o.person_id = p.id AND o.type = 'vyroba') OR EXISTS (SELECT 1 FROM deal d WHERE d.person_id = p.id AND d.pipeline_id = ANY(${uuidArray(producerPipelineIds)})));`,
+    `UPDATE company c SET status = customer_status_calc(c.id, NULL, '${TODAY}'), status_source = 'hubspot', is_former_customer = customer_is_former_calc(c.id, NULL) WHERE c.id = ANY(${uuidArray(manifest.company)}) AND c.is_customer;`,
+    `UPDATE contact p SET status = customer_status_calc(NULL, p.id, '${TODAY}'), status_source = 'hubspot', is_former_customer = customer_is_former_calc(NULL, p.id) WHERE p.id = ANY(${uuidArray(manifest.contact)}) AND p.is_household;`,
     `UPDATE sync_run SET finished_at = now(), records_in = ${total}, errors = ${lit(JSON.stringify(reasons))}::jsonb WHERE id = '${syncRunId}';`,
     'COMMIT;',
     '',
@@ -624,20 +666,8 @@ async function main() {
   writeFileSync(join(outDir, 'vzorka-load.sql'), load.join('\n'));
   writeFileSync(join(outDir, 'vzorka-manifest.json'), JSON.stringify(fullManifest, null, 1));
 
-  const uuidArray = (ids: string[]) => `'{${ids.join(',')}}'::uuid[]`;
-  const allIds = ORDER.flatMap((t) => manifest[t]);
-  const del = [
-    '-- Zmazanie vzorky prototypu podľa manifestu. Iba Neon vetva dev.',
-    `-- Manifest z ${fullManifest.generatedAt}, ${total} riadkov.`,
-    '\\set ON_ERROR_STOP on',
-    'BEGIN;',
-    ...[...ORDER].reverse().map((t) => `DELETE FROM ${t} WHERE id = ANY(${uuidArray(manifest[t])});`),
-    `DELETE FROM audit_log WHERE record_id = ANY(${uuidArray(allIds)});`,
-    `DELETE FROM sync_run WHERE id = '${syncRunId}';`,
-    'COMMIT;',
-    '',
-  ];
-  writeFileSync(join(outDir, 'vzorka-delete.sql'), del.join('\n'));
+  // Zmazanie podľa nového manifestu (s kontrolami pred a po)
+  await import('./delete.ts');
 
   const md = [
     '# Nahratie vzorky – zistenia',
@@ -668,7 +698,7 @@ async function main() {
 
   console.log(`Riadky: ${ORDER.map((t) => `${t} ${manifest[t].length}`).join(', ')}`);
   console.log(`Spolu ${total} riadkov, zistení ${findings.length}.`);
-  console.log('Výstup: exports/prototyp/vzorka-load.sql, vzorka-manifest.json, vzorka-delete.sql, nahratie-zistenia.md');
+  console.log('Výstup: exports/prototyp/vzorka-load.sql, vzorka-manifest.json, vzorka-zmazanie*.sql, nahratie-zistenia.md');
 }
 
 main().catch((err) => {

@@ -9,21 +9,21 @@ INSERT INTO app_user (id, email, name, role, team_id) VALUES
   ('00000000-0000-4000-8000-000000000011', 'obchodnik@example.test', 'Testovací Obchodník', 'obchodnik',
    '00000000-0000-4000-8000-000000000001');
 
--- Firmy (B2B): firma, obec (segment firma) a dodávateľ
-INSERT INTO company (id, name, ico, segment, owner_id) VALUES
-  ('00000000-0000-4000-8000-000000000101', 'Alfa Test s.r.o.', '00123456', 'firma',
+-- Firmy (B2B): firma, obec (zákazník) a dodávateľ (iba dodávateľ, nie je zákazník)
+INSERT INTO company (id, name, ico, is_customer, is_supplier, owner_id) VALUES
+  ('00000000-0000-4000-8000-000000000101', 'Alfa Test s.r.o.', '00123456', true, false,
    '00000000-0000-4000-8000-000000000011'),
-  ('00000000-0000-4000-8000-000000000102', 'Obec Betová', '12345678', 'firma', NULL),
-  ('00000000-0000-4000-8000-000000000103', 'Gama Dodávky a.s.', '87654321', 'dodavatel', NULL);
+  ('00000000-0000-4000-8000-000000000102', 'Obec Betová', '12345678', true, false, NULL),
+  ('00000000-0000-4000-8000-000000000103', 'Gama Dodávky a.s.', '87654321', false, true, NULL);
 
--- Kontakty: B2C zákazník bez firmy a kontakt s dvoma firmami
-INSERT INTO contact (id, first_name, last_name, email, segment, owner_id) VALUES
-  ('00000000-0000-4000-8000-000000000201', 'Ján', 'Testovací', 'jan.testovaci@example.test', 'domacnost',
+-- Osoby: domácnosť bez firmy a kontakt v dvoch firmách
+INSERT INTO contact (id, first_name, last_name, email, is_household, owner_id) VALUES
+  ('00000000-0000-4000-8000-000000000201', 'Ján', 'Testovací', 'jan.testovaci@example.test', true,
    '00000000-0000-4000-8000-000000000011'),
-  ('00000000-0000-4000-8000-000000000202', 'Eva', 'Vzorová', 'eva.vzorova@example.test', 'firma', NULL);
-INSERT INTO company_contact (company_id, contact_id, is_primary, role) VALUES
-  ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000202', true,  'statutar'),
-  ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000202', false, 'kontaktna_osoba');
+  ('00000000-0000-4000-8000-000000000202', 'Eva', 'Vzorová', 'eva.vzorova@example.test', false, NULL);
+INSERT INTO company_contact (company_id, contact_id, is_main_contact, roles) VALUES
+  ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000202', true,  '{statutar,decision_maker}'),
+  ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000202', false, '{kontaktna_osoba}');
 
 -- OOM všetkých typov
 INSERT INTO oom (id, company_id, person_id, eic, type, status, segment, name,

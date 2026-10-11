@@ -40,7 +40,8 @@ CREATE TYPE public.app_user_role AS ENUM (
     'vedenie',
     'obchodnik',
     'servis',
-    'marketing'
+    'marketing',
+    'externy_obchodnik'
 );
 
 
@@ -70,14 +71,15 @@ CREATE TYPE public.commission_status AS ENUM (
 
 
 --
--- Name: company_contact_role; Type: TYPE; Schema: public; Owner: -
+-- Name: company_role; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.company_contact_role AS ENUM (
+CREATE TYPE public.company_role AS ENUM (
     'statutar',
+    'decision_maker',
     'kontaktna_osoba',
     'fakturacia',
-    'ine'
+    'technik'
 );
 
 
@@ -150,6 +152,21 @@ CREATE TYPE public.customer_segment AS ENUM (
     'domacnost',
     'firma',
     'dodavatel'
+);
+
+
+--
+-- Name: customer_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.customer_status AS ENUM (
+    'marketingovy_kontakt',
+    'zaujemca',
+    'ponuka',
+    'cakajuci_zakaznik',
+    'zakaznik',
+    'byvaly_zakaznik',
+    'zruseny_zakaznik'
 );
 
 
@@ -325,6 +342,16 @@ CREATE TYPE public.source_type AS ENUM (
 
 
 --
+-- Name: status_source; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.status_source AS ENUM (
+    'hubspot',
+    'vypocet'
+);
+
+
+--
 -- Name: switch_message_type; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -431,6 +458,351 @@ $$;
 
 
 --
+-- Name: company_ico_check(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_ico_check(p_ico text) RETURNS TABLE(company_exists boolean, company_id uuid, owner_name text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT true,
+         CASE WHEN crm_sees_all() OR c.owner_id = crm_external_user_id() THEN c.id END,
+         u.name
+    FROM company c
+    LEFT JOIN app_user u ON u.id = c.owner_id
+   WHERE c.ico = lpad(regexp_replace(p_ico, '[^0-9]', '', 'g'), 8, '0')
+$$;
+
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: company; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.company (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    ico text NOT NULL,
+    dic text,
+    ic_dph text,
+    vat_payer boolean,
+    legal_form text,
+    registry_entry text,
+    nace text,
+    statutory text,
+    address text,
+    payment_rating public.payment_rating,
+    debts_note text,
+    insolvency_note text,
+    finstat_url text,
+    finstat_updated_at timestamp with time zone,
+    owner_id uuid,
+    hubspot_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    bank_account text,
+    is_customer boolean DEFAULT true NOT NULL,
+    is_partner boolean DEFAULT false NOT NULL,
+    is_supplier boolean DEFAULT false NOT NULL,
+    status public.customer_status,
+    status_source public.status_source,
+    status_changed_at timestamp with time zone,
+    is_former_customer boolean DEFAULT false NOT NULL,
+    is_producer boolean DEFAULT false NOT NULL,
+    CONSTRAINT company_ico_format_check CHECK ((ico ~ '^[0-9]{8}$'::text)),
+    CONSTRAINT company_kind_check CHECK ((is_customer OR is_partner OR is_supplier)),
+    CONSTRAINT company_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT company_status_source_check CHECK (((status IS NULL) = (status_source IS NULL)))
+);
+
+
+--
+-- Name: COLUMN company.ico; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.ico IS 'IČO, 8 číslic vrátane úvodných núl';
+
+
+--
+-- Name: COLUMN company.bank_account; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.bank_account IS 'bankový účet firmy (zvyčajne IBAN), HubSpot bank_account';
+
+
+--
+-- Name: COLUMN company.is_customer; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.is_customer IS 'označenie zákazník (predvolené); firma môže mať viac označení';
+
+
+--
+-- Name: COLUMN company.is_partner; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.is_partner IS 'označenie partner; partner bez is_customer nie je v zozname Zákazníci';
+
+
+--
+-- Name: COLUMN company.is_supplier; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.is_supplier IS 'označenie dodávateľ; dodávateľ bez is_customer nie je v zozname Zákazníci';
+
+
+--
+-- Name: COLUMN company.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.status IS 'stav zákazníka (čl. 4 zadania); NULL, ak firma nie je zákazník';
+
+
+--
+-- Name: COLUMN company.is_former_customer; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.is_former_customer IS 'príznak „bývalý“: mal odídené OOM; automaticky sa nezruší';
+
+
+--
+-- Name: COLUMN company.is_producer; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.is_producer IS 'segment „+ výrobca“';
+
+
+--
+-- Name: company_is_archived(public.company); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_is_archived(c public.company) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT c.status IS NOT DISTINCT FROM 'zruseny_zakaznik' AND NOT c.is_partner AND NOT c.is_supplier
+$$;
+
+
+--
+-- Name: contact_duplicate_check(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contact_duplicate_check(p_email text, p_phone text) RETURNS TABLE(match_on text, contact_id uuid, owner_name text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT m.match_on,
+         CASE WHEN crm_sees_all() OR p.owner_id = crm_external_user_id() OR crm_external_sees_contact(p.id)
+              THEN p.id END,
+         u.name
+    FROM (
+      SELECT 'email'::text AS match_on, p.id
+        FROM contact p
+       WHERE nullif(btrim(p_email), '') IS NOT NULL
+         AND lower(btrim(p.email)) = lower(btrim(p_email))
+      UNION
+      SELECT 'telefon', p.id
+        FROM contact p
+       WHERE normalize_phone(p_phone) IS NOT NULL
+         AND normalize_phone(p_phone) IN (p.phone_norm, p.mobile_norm)
+    ) m
+    JOIN contact p ON p.id = m.id
+    LEFT JOIN app_user u ON u.id = p.owner_id
+   ORDER BY m.match_on, p.created_at
+$$;
+
+
+--
+-- Name: crm_current_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_current_user_id() RETURNS uuid
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT nullif(current_setting('app.user_id', true), '')::uuid
+$$;
+
+
+--
+-- Name: crm_external_owns_company(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_external_owns_company(p_company_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM company c
+                  WHERE c.id = p_company_id AND c.owner_id = crm_external_user_id())
+$$;
+
+
+--
+-- Name: crm_external_sees_contact(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_external_sees_contact(p_contact_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM company_contact cc JOIN company c ON c.id = cc.company_id
+                  WHERE cc.contact_id = p_contact_id AND c.owner_id = crm_external_user_id())
+$$;
+
+
+--
+-- Name: crm_external_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_external_user_id() RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT u.id FROM app_user u
+   WHERE u.id = crm_current_user_id()
+     AND u.active
+     AND u.role::text = 'externy_obchodnik'
+$$;
+
+
+--
+-- Name: crm_sees_all(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_sees_all() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE
+           WHEN crm_current_user_id() IS NULL
+             THEN coalesce(current_setting('app.require_user', true), '') <> 'on'
+           ELSE EXISTS (SELECT 1 FROM app_user u
+                         WHERE u.id = crm_current_user_id()
+                           AND u.active
+                           AND u.role::text <> 'externy_obchodnik')
+         END
+$$;
+
+
+--
+-- Name: customer_is_former_calc(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_is_former_calc(p_company_id uuid, p_person_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM oom o
+                  WHERE o.company_id IS NOT DISTINCT FROM p_company_id
+                    AND o.person_id IS NOT DISTINCT FROM p_person_id
+                    AND o.status = 'odidene')
+$$;
+
+
+--
+-- Name: customer_status_calc(uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_status_calc(p_company_id uuid, p_person_id uuid, p_today date DEFAULT ((now() AT TIME ZONE 'Europe/Bratislava'::text))::date) RETURNS public.customer_status
+    LANGUAGE plpgsql STABLE
+    AS $$
+BEGIN
+  IF num_nonnulls(p_company_id, p_person_id) <> 1 THEN
+    RAISE EXCEPTION 'customer_status_calc: zadaj práve jedno z company_id / person_id';
+  END IF;
+
+  -- 1. aspoň jedno OOM Aktívne alebo Neaktívne
+  IF EXISTS (SELECT 1 FROM oom o
+              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
+                AND o.person_id IS NOT DISTINCT FROM p_person_id
+                AND o.status IN ('aktivne', 'neaktivne')) THEN
+    RETURN 'zakaznik';
+  END IF;
+
+  -- 2. podpísaná zmluva s budúcou účinnosťou (aj vracajúci sa zákazník)
+  IF EXISTS (SELECT 1 FROM contract c
+              WHERE c.company_id IS NOT DISTINCT FROM p_company_id
+                AND c.person_id IS NOT DISTINCT FROM p_person_id
+                AND c.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')
+                AND c.valid_from > p_today) THEN
+    RETURN 'cakajuci_zakaznik';
+  END IF;
+
+  -- 3. a 4. otvorený deal s odoslanou ponukou / bez nej
+  IF EXISTS (SELECT 1 FROM deal d
+               JOIN pipeline_stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+               JOIN offer f ON f.deal_id = d.id
+              WHERE d.company_id IS NOT DISTINCT FROM p_company_id
+                AND d.person_id IS NOT DISTINCT FROM p_person_id
+                AND NOT s.is_closed
+                AND (f.sent_at IS NOT NULL OR f.status <> 'koncept')) THEN
+    RETURN 'ponuka';
+  END IF;
+  IF EXISTS (SELECT 1 FROM deal d
+               JOIN pipeline_stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              WHERE d.company_id IS NOT DISTINCT FROM p_company_id
+                AND d.person_id IS NOT DISTINCT FROM p_person_id
+                AND NOT s.is_closed) THEN
+    RETURN 'zaujemca';
+  END IF;
+
+  -- 5. aspoň jedno OOM Odídené
+  IF EXISTS (SELECT 1 FROM oom o
+              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
+                AND o.person_id IS NOT DISTINCT FROM p_person_id
+                AND o.status = 'odidene') THEN
+    RETURN 'byvaly_zakaznik';
+  END IF;
+
+  -- 6. má OOM a všetky sú Zrušené alebo Prepísané
+  IF EXISTS (SELECT 1 FROM oom o
+              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
+                AND o.person_id IS NOT DISTINCT FROM p_person_id) THEN
+    RETURN 'zruseny_zakaznik';
+  END IF;
+
+  -- 7. inak (aj záujemca, ktorému deal prepadol a nikdy nebol zákazník)
+  RETURN 'marketingovy_kontakt';
+END;
+$$;
+
+
+--
+-- Name: customer_status_track(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_status_track() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_is_customer boolean := CASE TG_TABLE_NAME
+                             WHEN 'company' THEN (to_jsonb(NEW) ->> 'is_customer')::boolean
+                             ELSE (to_jsonb(NEW) ->> 'is_household')::boolean
+                           END;
+BEGIN
+  IF v_is_customer AND NEW.status IS NULL THEN
+    NEW.status := 'marketingovy_kontakt';
+    NEW.status_source := 'vypocet';
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status IS NOT NULL AND NEW.status_changed_at IS NULL THEN
+      NEW.status_changed_at := now();
+    END IF;
+  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
+    NEW.status_changed_at := now();
+  END IF;
+
+  IF NEW.status = 'byvaly_zakaznik' THEN
+    NEW.is_former_customer := true;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: inherit_customer_segment(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -440,9 +812,71 @@ CREATE FUNCTION public.inherit_customer_segment() RETURNS trigger
 BEGIN
   IF NEW.segment IS NULL THEN
     IF NEW.company_id IS NOT NULL THEN
-      SELECT c.segment INTO NEW.segment FROM company c WHERE c.id = NEW.company_id;
+      SELECT CASE WHEN c.is_supplier AND NOT c.is_customer THEN 'dodavatel' ELSE 'firma' END::customer_segment
+        INTO NEW.segment FROM company c WHERE c.id = NEW.company_id;
     ELSE
-      SELECT p.segment INTO NEW.segment FROM contact p WHERE p.id = NEW.person_id;
+      NEW.segment := 'domacnost';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: mark_household(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mark_household() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.person_id IS NOT NULL THEN
+    UPDATE contact SET is_household = true WHERE id = NEW.person_id AND NOT is_household;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: normalize_phone(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.normalize_phone(p text) RETURNS text
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $$
+  SELECT CASE
+           WHEN d IS NULL OR d = '' OR d = '+' THEN NULL
+           WHEN d LIKE '+%'  THEN '+' || replace(substr(d, 2), '+', '')
+           WHEN d LIKE '00%' THEN '+' || substr(d, 3)
+           WHEN d LIKE '421%' AND length(d) = 12 THEN '+' || d
+           WHEN d LIKE '0%'  THEN '+421' || substr(d, 2)
+           WHEN length(d) = 9 THEN '+421' || d
+           ELSE d
+         END
+    FROM (SELECT regexp_replace(p, '[^0-9+]', '', 'g') AS d) x
+$$;
+
+
+--
+-- Name: owner_change_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.owner_change_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_role text;
+BEGIN
+  IF NEW.owner_id IS DISTINCT FROM OLD.owner_id AND current_user <> 'crm_sync' THEN
+    SELECT u.role::text INTO v_role
+      FROM app_user u
+     WHERE u.id = nullif(current_setting('app.user_id', true), '')::uuid
+       AND u.active;
+    IF v_role IS NULL OR v_role NOT IN ('vedenie', 'admin') THEN
+      RAISE EXCEPTION 'Vlastníka (obchodníka) môže zmeniť iba vedenie.'
+        USING ERRCODE = 'insufficient_privilege';
     END IF;
   END IF;
   RETURN NEW;
@@ -463,10 +897,6 @@ BEGIN
 END;
 $$;
 
-
-SET default_tablespace = '';
-
-SET default_table_access_method = heap;
 
 --
 -- Name: activity; Type: TABLE; Schema: public; Owner: -
@@ -653,53 +1083,6 @@ CREATE TABLE public.commission_rule (
 
 
 --
--- Name: company; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.company (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    name text NOT NULL,
-    ico text,
-    dic text,
-    ic_dph text,
-    vat_payer boolean,
-    legal_form text,
-    registry_entry text,
-    nace text,
-    statutory text,
-    address text,
-    segment public.customer_segment,
-    payment_rating public.payment_rating,
-    debts_note text,
-    insolvency_note text,
-    finstat_url text,
-    finstat_updated_at timestamp with time zone,
-    lifecycle_stage text,
-    owner_id uuid,
-    hubspot_id text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    bank_account text,
-    CONSTRAINT company_ico_format_check CHECK ((ico ~ '^[0-9]{8}$'::text)),
-    CONSTRAINT company_segment_check CHECK ((segment <> 'domacnost'::public.customer_segment))
-);
-
-
---
--- Name: COLUMN company.ico; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.company.ico IS 'IČO, 8 číslic vrátane úvodných núl';
-
-
---
--- Name: COLUMN company.bank_account; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.company.bank_account IS 'bankový účet firmy (zvyčajne IBAN), HubSpot bank_account';
-
-
---
 -- Name: company_contact; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -707,11 +1090,18 @@ CREATE TABLE public.company_contact (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     company_id uuid NOT NULL,
     contact_id uuid NOT NULL,
-    is_primary boolean DEFAULT false NOT NULL,
-    role public.company_contact_role,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    roles public.company_role[] DEFAULT '{}'::public.company_role[] NOT NULL,
+    is_main_contact boolean DEFAULT false NOT NULL
 );
+
+
+--
+-- Name: COLUMN company_contact.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company_contact.roles IS 'roly osoby vo firme, aj viac naraz';
 
 
 --
@@ -738,24 +1128,65 @@ CREATE TABLE public.consent (
 
 CREATE TABLE public.contact (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    first_name text,
-    last_name text,
+    first_name text NOT NULL,
+    last_name text NOT NULL,
     title text,
     email text,
     phone text,
     mobile text,
     "position" text,
     address text,
-    segment public.customer_segment,
-    lifecycle_stage text,
     source text,
     campaign text,
     owner_id uuid,
     hubspot_id text,
     posthog_distinct_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    phone_norm text GENERATED ALWAYS AS (public.normalize_phone(phone)) STORED,
+    mobile_norm text GENERATED ALWAYS AS (public.normalize_phone(mobile)) STORED,
+    is_household boolean NOT NULL,
+    status public.customer_status,
+    status_source public.status_source,
+    status_changed_at timestamp with time zone,
+    is_former_customer boolean DEFAULT false NOT NULL,
+    is_producer boolean DEFAULT false NOT NULL,
+    marketing_opt_out_at timestamp with time zone,
+    marketing_opt_out_source text,
+    CONSTRAINT contact_email_format_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
+    CONSTRAINT contact_marketing_opt_out_check CHECK (((marketing_opt_out_at IS NULL) = (marketing_opt_out_source IS NULL))),
+    CONSTRAINT contact_name_check CHECK (((btrim(first_name) <> ''::text) AND (btrim(last_name) <> ''::text))),
+    CONSTRAINT contact_reachable_check CHECK ((num_nonnulls(NULLIF(btrim(email), ''::text), NULLIF(btrim(phone), ''::text), NULLIF(btrim(mobile), ''::text)) >= 1)),
+    CONSTRAINT contact_status_source_check CHECK (((status IS NULL) = (status_source IS NULL)))
 );
+
+
+--
+-- Name: COLUMN contact.is_household; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.is_household IS 'osoba je zákazník za domácnosť (aj marketingový kontakt bez firmy); false = iba kontakt vo firme; automaticky sa nikdy nezruší';
+
+
+--
+-- Name: COLUMN contact.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.status IS 'stav zákazníka (čl. 4 zadania); NULL, ak osoba nie je domácnosť';
+
+
+--
+-- Name: COLUMN contact.marketing_opt_out_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.marketing_opt_out_at IS '„nechce marketing“ od (čl. 8); plné súhlasy prídu v module Marketing';
+
+
+--
+-- Name: COLUMN contact.marketing_opt_out_source; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.marketing_opt_out_source IS 'zdroj „nechce marketing“, napr. hubspot, brevo, telefon, email';
 
 
 --
@@ -860,6 +1291,55 @@ CREATE VIEW public.contact_oom_v AS
      JOIN public.oom o ON ((o.id = dom.oom_id)))
   WHERE (o.status = ANY (ARRAY['aktivne'::public.oom_status, 'neaktivne'::public.oom_status]))
   GROUP BY dc.contact_id, dom.oom_id, o.status;
+
+
+--
+-- Name: contact_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.contact_v WITH (security_invoker='true') AS
+ SELECT p.id,
+    p.first_name,
+    p.last_name,
+    p.title,
+    p.email,
+    p.phone,
+    p.mobile,
+    p."position",
+    p.address,
+    p.source,
+    p.campaign,
+    p.owner_id,
+    p.hubspot_id,
+    p.posthog_distinct_id,
+    p.created_at,
+    p.updated_at,
+    p.phone_norm,
+    p.mobile_norm,
+    p.is_household,
+    p.status,
+    p.status_source,
+    p.status_changed_at,
+    p.is_former_customer,
+    p.is_producer,
+    p.marketing_opt_out_at,
+    p.marketing_opt_out_source,
+    x.archived,
+    ((NOT x.archived) AND (p.marketing_opt_out_at IS NULL)) AS marketing_allowed
+   FROM (public.contact p
+     CROSS JOIN LATERAL ( SELECT ((NOT (p.is_household AND (p.status IS DISTINCT FROM 'zruseny_zakaznik'::public.customer_status))) AND (NOT (EXISTS ( SELECT 1
+                   FROM (public.company_contact cc
+                     JOIN public.company c ON ((c.id = cc.company_id)))
+                  WHERE ((cc.contact_id = p.id) AND (NOT public.company_is_archived(c.*)))))) AND (p.is_household OR (EXISTS ( SELECT 1
+                   FROM public.company_contact cc
+                  WHERE (cc.contact_id = p.id))))) AS archived) x);
+
+
+--
+-- Name: VIEW contact_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.contact_v IS 'zoznam Kontakty: archived = skryť z Kontaktov, vyhľadávania a marketingu (čl. 4, 13)';
 
 
 --
@@ -1038,7 +1518,21 @@ COMMENT ON COLUMN public.conversation.quality_standard IS 'regulačný štandard
 -- Name: customer_v; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE VIEW public.customer_v AS
+CREATE VIEW public.customer_v WITH (security_invoker='true') AS
+ WITH oom_sum AS (
+         SELECT o.company_id,
+            o.person_id,
+            count(*) FILTER (WHERE (o.status = 'aktivne'::public.oom_status)) AS active_oom_count,
+            sum((COALESCE(o.planned_consumption_vt_mwh, (0)::numeric) + COALESCE(o.planned_consumption_nt_mwh, (0)::numeric))) FILTER (WHERE (o.status = 'aktivne'::public.oom_status)) AS annual_mwh
+           FROM public.oom o
+          GROUP BY o.company_id, o.person_id
+        ), last_activity AS (
+         SELECT a.company_id,
+            a.contact_id,
+            max(a.occurred_at) AS last_activity_at
+           FROM public.activity a
+          GROUP BY a.company_id, a.contact_id
+        )
  SELECT c.id,
     'B2B'::text AS customer_type,
     c.id AS company_id,
@@ -1046,9 +1540,24 @@ CREATE VIEW public.customer_v AS
     c.name,
     c.ico,
     NULL::text AS email,
-    c.segment,
-    c.owner_id
-   FROM public.company c
+    c.status,
+    c.status_source,
+    c.is_former_customer,
+    c.is_producer,
+        CASE
+            WHEN c.is_producer THEN 'Firma · výrobca'::text
+            ELSE 'Firma'::text
+        END AS segment_label,
+    c.owner_id,
+    COALESCE(s.active_oom_count, (0)::bigint) AS active_oom_count,
+    COALESCE(s.annual_mwh, (0)::numeric) AS annual_mwh,
+    ( SELECT max(la.last_activity_at) AS max
+           FROM last_activity la
+          WHERE (la.company_id = c.id)) AS last_activity_at,
+    public.company_is_archived(c.*) AS archived
+   FROM (public.company c
+     LEFT JOIN oom_sum s ON ((s.company_id = c.id)))
+  WHERE c.is_customer
 UNION ALL
  SELECT p.id,
     'B2C'::text AS customer_type,
@@ -1057,12 +1566,31 @@ UNION ALL
     concat_ws(' '::text, p.first_name, p.last_name) AS name,
     NULL::text AS ico,
     p.email,
-    p.segment,
-    p.owner_id
-   FROM public.contact p
-  WHERE (NOT (EXISTS ( SELECT 1
-           FROM public.company_contact cc
-          WHERE (cc.contact_id = p.id))));
+    p.status,
+    p.status_source,
+    p.is_former_customer,
+    p.is_producer,
+        CASE
+            WHEN p.is_producer THEN 'Domácnosť · výrobca'::text
+            ELSE 'Domácnosť'::text
+        END AS segment_label,
+    p.owner_id,
+    COALESCE(s.active_oom_count, (0)::bigint) AS active_oom_count,
+    COALESCE(s.annual_mwh, (0)::numeric) AS annual_mwh,
+    ( SELECT max(la.last_activity_at) AS max
+           FROM last_activity la
+          WHERE (la.contact_id = p.id)) AS last_activity_at,
+    (NOT (p.status IS DISTINCT FROM 'zruseny_zakaznik'::public.customer_status)) AS archived
+   FROM (public.contact p
+     LEFT JOIN oom_sum s ON ((s.person_id = p.id)))
+  WHERE (p.is_household AND (( SELECT public.crm_sees_all() AS crm_sees_all) OR (p.owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id))));
+
+
+--
+-- Name: VIEW customer_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.customer_v IS 'zoznam Zákazníci: firmy s is_customer a osoby s is_household; archived = zrušený zákazník';
 
 
 --
@@ -2109,17 +2637,17 @@ CREATE INDEX company_contact_contact_id_idx ON public.company_contact USING btre
 
 
 --
--- Name: company_contact_one_primary_key; Type: INDEX; Schema: public; Owner: -
+-- Name: company_contact_one_main_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX company_contact_one_primary_key ON public.company_contact USING btree (contact_id) WHERE is_primary;
+CREATE UNIQUE INDEX company_contact_one_main_key ON public.company_contact USING btree (company_id) WHERE is_main_contact;
 
 
 --
 -- Name: company_ico_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX company_ico_key ON public.company USING btree (ico) WHERE (ico IS NOT NULL);
+CREATE UNIQUE INDEX company_ico_key ON public.company USING btree (ico);
 
 
 --
@@ -2127,6 +2655,13 @@ CREATE UNIQUE INDEX company_ico_key ON public.company USING btree (ico) WHERE (i
 --
 
 CREATE INDEX company_owner_id_idx ON public.company USING btree (owner_id);
+
+
+--
+-- Name: company_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_status_idx ON public.company USING btree (status) WHERE is_customer;
 
 
 --
@@ -2140,7 +2675,14 @@ CREATE INDEX consent_contact_purpose_idx ON public.consent USING btree (contact_
 -- Name: contact_email_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX contact_email_idx ON public.contact USING btree (lower(email));
+CREATE INDEX contact_email_idx ON public.contact USING btree (lower(btrim(email)));
+
+
+--
+-- Name: contact_mobile_norm_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contact_mobile_norm_idx ON public.contact USING btree (mobile_norm);
 
 
 --
@@ -2151,10 +2693,24 @@ CREATE INDEX contact_owner_id_idx ON public.contact USING btree (owner_id);
 
 
 --
+-- Name: contact_phone_norm_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contact_phone_norm_idx ON public.contact USING btree (phone_norm);
+
+
+--
 -- Name: contact_posthog_distinct_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX contact_posthog_distinct_id_idx ON public.contact USING btree (posthog_distinct_id);
+
+
+--
+-- Name: contact_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contact_status_idx ON public.contact USING btree (status) WHERE is_household;
 
 
 --
@@ -2662,6 +3218,20 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.voucher FOR 
 
 
 --
+-- Name: company trg_customer_status; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.company FOR EACH ROW EXECUTE FUNCTION public.customer_status_track();
+
+
+--
+-- Name: contact trg_customer_status; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.contact FOR EACH ROW EXECUTE FUNCTION public.customer_status_track();
+
+
+--
 -- Name: contract trg_inherit_segment; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2673,6 +3243,41 @@ CREATE TRIGGER trg_inherit_segment BEFORE INSERT ON public.contract FOR EACH ROW
 --
 
 CREATE TRIGGER trg_inherit_segment BEFORE INSERT ON public.deal FOR EACH ROW EXECUTE FUNCTION public.inherit_customer_segment();
+
+
+--
+-- Name: contract trg_mark_household; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_mark_household AFTER INSERT OR UPDATE OF person_id ON public.contract FOR EACH ROW EXECUTE FUNCTION public.mark_household();
+
+
+--
+-- Name: deal trg_mark_household; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_mark_household AFTER INSERT OR UPDATE OF person_id ON public.deal FOR EACH ROW EXECUTE FUNCTION public.mark_household();
+
+
+--
+-- Name: oom trg_mark_household; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_mark_household AFTER INSERT OR UPDATE OF person_id ON public.oom FOR EACH ROW EXECUTE FUNCTION public.mark_household();
+
+
+--
+-- Name: company trg_owner_change_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_owner_change_guard BEFORE UPDATE OF owner_id ON public.company FOR EACH ROW EXECUTE FUNCTION public.owner_change_guard();
+
+
+--
+-- Name: contact trg_owner_change_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_owner_change_guard BEFORE UPDATE OF owner_id ON public.contact FOR EACH ROW EXECUTE FUNCTION public.owner_change_guard();
 
 
 --
@@ -3347,6 +3952,45 @@ ALTER TABLE ONLY public.web_event
 
 
 --
+-- Name: company; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.company ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: company company_access; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY company_access ON public.company USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id))));
+
+
+--
+-- Name: company_contact; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.company_contact ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: company_contact company_contact_access; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY company_contact_access ON public.company_contact USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR public.crm_external_owns_company(company_id))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR public.crm_external_owns_company(company_id)));
+
+
+--
+-- Name: contact; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contact ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: contact contact_access; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contact_access ON public.contact USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)) OR public.crm_external_sees_contact(id))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)) OR public.crm_external_sees_contact(id)));
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -3360,4 +4004,6 @@ ALTER TABLE ONLY public.web_event
 INSERT INTO public.schema_migrations (version) VALUES
     ('0001'),
     ('0002'),
-    ('0003');
+    ('0003'),
+    ('0004'),
+    ('0005');

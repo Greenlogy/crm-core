@@ -2,6 +2,12 @@
 
 ## 2026-10-11
 
+- Modul Zákazníci (zadanie v0.3): migrácie `0004_zakaznici.sql` (príznaky firmy, povinné IČO a údaje osoby, `is_household`, stav a jeho výpočet, „nechce marketing“, roly a hlavný kontakt, normalizovaný telefón, ochrana vlastníka, nové `customer_v` a `contact_v`) a `0005_rls_zakaznici.sql` (RLS pre externého obchodníka, kontrola duplicít IČO a osoby) – spustené na Neon `dev` po zmazaní vzorky prototypu, testy prešli (36 kontrol)
+- Testy: `db/test/seed.sql` a `checks.sql` upravené na novú schému, nové `db/test/checks_zakaznici.sql` (22 kontrol vrátane RLS s dočasnou rolou; pridelenie roly kvôli PostgreSQL 16+ bez superusera), `run.sh` ich spúšťa
+- `integrations/hubspot-sync/sample/load.ts` na schému 0004: firma bez IČO a osoba bez mena alebo kontaktu sa nenahrá; označenia firmy zo segmentu HubSpotu (dodávateľ s OOM alebo dealom je aj zákazník); `is_household`; hlavný kontakt iba pri jedinom kontakte firmy; výrobca (OOM výroba alebo pipeline B2B výkup); východiskový stav cez `customer_status_calc` (zdroj `hubspot`); na konci vygeneruje zmazanie cez `delete.ts`
+- API prototypu na schému 0004: zoznam z `customer_v` s filtrami stav (predvolene bez marketingových kontaktov a archívu, `leady`, `vsetky`), segment (domácnosť, firma, výrobca) a obchodník; nový `GET /api/owners`; karty so stavom, príznakmi, označeniami firmy, „nechce marketing“, rolami a hlavným kontaktom; `smoke.sh` s novými filtrami
+- Nová vzorka (1 340 riadkov) nahratá na `dev` (Peter)
+- `integrations/hubspot-sync/sample/delete.ts`: zmazanie vzorky prototypu s kontrolami pred a po, skúška (ROLLBACK) a ostré zmazanie
 - Modul 2 (prototyp): zadanie `docs/moduly/02-prototyp.md`, technické rozhodnutia (React + Vite, Hono + postgres.js, adresy `*.workers.dev`/`*.pages.dev`)
 - `integrations/hubspot-sync/sample/`: výber vzorky (`select.ts`, iba čítanie), generátor SQL (`load.ts`), spoločné pravidlo vlastníka OOM (`owners.ts`), spúšťač iba pre `dev` (`psql-dev.sh`); klient HubSpotu povoľuje aj hromadné čítanie záznamov
 - Rola `crm_prototype_ro` (iba čítanie) na Neon `dev`: `api/db/prototype-role.sql`, `api/db/create-prototype-role.sh`

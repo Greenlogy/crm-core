@@ -29,14 +29,14 @@ BEGIN
 END;
 $$;
 
--- 2. Firma: segment, IČO
+-- 2. Firma: IČO povinné, 8 číslic, unikátne
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO company (name, segment) VALUES ('Zlá firma', 'domacnost');
-    RAISE EXCEPTION 'CHYBA: firma so segmentom domacnost prešla';
-  EXCEPTION WHEN check_violation THEN
-    RAISE NOTICE 'OK: firma so segmentom domacnost odmietnutá';
+    INSERT INTO company (name) VALUES ('Firma bez IČO');
+    RAISE EXCEPTION 'CHYBA: firma bez IČO prešla';
+  EXCEPTION WHEN not_null_violation THEN
+    RAISE NOTICE 'OK: firma bez IČO odmietnutá';
   END;
   BEGIN
     INSERT INTO company (name, ico) VALUES ('Krátke IČO', '123456');
@@ -53,19 +53,18 @@ BEGIN
 END;
 $$;
 
--- 3. Kontakt s dvoma firmami, najviac jedna hlavná
+-- 3. Osoba v dvoch firmách; firma má najviac jeden hlavný kontakt
 DO $$
 BEGIN
   ASSERT (SELECT count(*) FROM company_contact
            WHERE contact_id = '00000000-0000-4000-8000-000000000202') = 2,
-         'kontakt má mať 2 firmy';
+         'osoba má mať 2 firmy';
   BEGIN
-    UPDATE company_contact SET is_primary = true
-     WHERE contact_id = '00000000-0000-4000-8000-000000000202'
-       AND company_id = '00000000-0000-4000-8000-000000000102';
-    RAISE EXCEPTION 'CHYBA: druhá hlavná firma prešla';
+    INSERT INTO company_contact (company_id, contact_id, is_main_contact)
+    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000201', true);
+    RAISE EXCEPTION 'CHYBA: druhý hlavný kontakt firmy prešiel';
   EXCEPTION WHEN unique_violation THEN
-    RAISE NOTICE 'OK: kontakt s dvoma firmami, druhá hlavná firma odmietnutá';
+    RAISE NOTICE 'OK: osoba v dvoch firmách, druhý hlavný kontakt firmy odmietnutý';
   END;
 END;
 $$;
@@ -127,13 +126,13 @@ BEGIN
 END;
 $$;
 
--- 8. customer_v: 3 firmy (B2B) + 1 kontakt bez firmy (B2C)
+-- 8. customer_v: 2 firmy so zákazníckym označením (B2B) + 1 domácnosť (B2C); dodávateľ nie
 DO $$
 BEGIN
-  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2B') = 3, 'B2B zákazníci';
+  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2B') = 2, 'B2B zákazníci';
   ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2C') = 1, 'B2C zákazníci';
   ASSERT (SELECT name FROM customer_v WHERE customer_type = 'B2C') = 'Ján Testovací', 'B2C meno';
-  RAISE NOTICE 'OK: customer_v má 3 B2B a 1 B2C zákazníka';
+  RAISE NOTICE 'OK: customer_v má 2 B2B a 1 B2C zákazníka (dodávateľ vynechaný)';
 END;
 $$;
 
