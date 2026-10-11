@@ -679,6 +679,7 @@ CREATE TABLE public.company (
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    bank_account text,
     CONSTRAINT company_ico_format_check CHECK ((ico ~ '^[0-9]{8}$'::text)),
     CONSTRAINT company_segment_check CHECK ((segment <> 'domacnost'::public.customer_segment))
 );
@@ -689,6 +690,13 @@ CREATE TABLE public.company (
 --
 
 COMMENT ON COLUMN public.company.ico IS 'IČO, 8 číslic vrátane úvodných núl';
+
+
+--
+-- Name: COLUMN company.bank_account; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.bank_account IS 'bankový účet firmy (zvyčajne IBAN), HubSpot bank_account';
 
 
 --
@@ -3351,4 +3359,5 @@ ALTER TABLE ONLY public.web_event
 
 INSERT INTO public.schema_migrations (version) VALUES
     ('0001'),
-    ('0002');
+    ('0002'),
+    ('0003');

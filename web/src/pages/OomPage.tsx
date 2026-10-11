@@ -72,6 +72,7 @@ export function OomPage() {
         <div className="col-left">
           <Card title="Miesto a distribúcia">
             <Rows
+              stacked
               rows={[
                 ['Adresa', text([street, [o.address_zip, o.address_city].filter(Boolean).join(' ')].filter(Boolean).join(', '))],
                 ['Segment', text(label(SEGMENT, o.segment))],
@@ -88,6 +89,7 @@ export function OomPage() {
           </Card>
           <Card title="Fakturácia">
             <Rows
+              stacked
               rows={[
                 ['Cenová regulácia', text(o.price_regulation)],
                 ['Spotrebná daň', text(o.excise_tax)],
@@ -100,6 +102,7 @@ export function OomPage() {
           {producer && (
             <Card title="Zdroj">
               <Rows
+                stacked
                 rows={[
                   ['Druh zdroja', text(label(SOURCE_KIND, o.source_kind))],
                   ['Typ zdroja', text(label(SOURCE_TYPE, o.source_type))],
@@ -113,6 +116,7 @@ export function OomPage() {
           )}
           <Card title="Zmena dodávateľa">
             <Rows
+              stacked
               rows={[
                 ['Dodávka', period(o.supply_from, o.supply_to)],
                 ['Výpoveď predošlému', text(label(SUPPLIER_NOTICE, o.previous_supplier_notice))],
@@ -178,7 +182,7 @@ export function OomPage() {
                     <Item
                       key={d.id}
                       title={d.contract_id ? <Link to={`/zmluvy/${d.contract_id}`}>{d.name}</Link> : d.name}
-                      meta={[d.pipeline, d.closed_at ? `uzavretý ${date(d.closed_at)}` : null].filter(Boolean).join(' · ')}
+                      meta={[d.pipeline, d.owner_name, d.closed_at ? `uzavretý ${date(d.closed_at)}` : null].filter(Boolean).join(' · ')}
                       side={<Pill tone={dealTone(d)}>{d.stage}</Pill>}
                     />
                   ))

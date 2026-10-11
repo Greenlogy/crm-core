@@ -11,6 +11,7 @@ export type CustomerListItem = {
   ico: string | null;
   segment: string | null;
   hubspot_id: string | null;
+  owner_name: string | null;
   oom_count: number;
   oom_active: number;
   planned_consumption_mwh: Num;
@@ -47,6 +48,7 @@ export type DealRow = {
   closed_at: string | null;
   created_at?: string;
   hubspot_id?: string | null;
+  owner_name?: string | null;
   oom_count?: number;
   contract_id: string | null;
   contract_number?: string | null;
@@ -95,6 +97,8 @@ export type CustomerCard = {
   segment: string | null;
   lifecycle_stage: string | null;
   address: string | null;
+  owner_name: string | null;
+  owner_team: string | null;
   // firma
   ico?: string | null;
   dic?: string | null;
@@ -102,6 +106,8 @@ export type CustomerCard = {
   registry_entry?: string | null;
   nace?: string | null;
   statutory?: string | null;
+  bank_account?: string | null;
+  payment_rating?: string | null;
   debts_note?: string | null;
   insolvency_note?: string | null;
   finstat_url?: string | null;
@@ -190,6 +196,7 @@ export type ContractCard = {
   customer_name: string;
   deal_name: string | null;
   deal_hubspot_id: string | null;
+  owner_name: string | null;
   pipeline: string | null;
   stage: string | null;
   ooms: Pick<

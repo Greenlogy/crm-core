@@ -11,21 +11,22 @@ export async function listCustomers(sql: Sql, opts: { q: string; segment: string
   const like = `%${opts.q}%`;
   const rows = await sql`
     WITH customer AS (
-      SELECT 'company' AS kind, c.id, c.name, c.ico, c.segment::text AS segment, c.hubspot_id
+      SELECT 'company' AS kind, c.id, c.name, c.ico, c.segment::text AS segment, c.owner_id, c.hubspot_id
         FROM company c
       UNION ALL
-      SELECT 'person', p.id, concat_ws(' ', p.first_name, p.last_name), NULL, p.segment::text, p.hubspot_id
+      SELECT 'person', p.id, concat_ws(' ', p.first_name, p.last_name), NULL, p.segment::text, p.owner_id, p.hubspot_id
         FROM contact p
        WHERE EXISTS (SELECT 1 FROM oom o WHERE o.person_id = p.id)
           OR EXISTS (SELECT 1 FROM deal d WHERE d.person_id = p.id)
           OR EXISTS (SELECT 1 FROM contract k WHERE k.person_id = p.id)
     )
-    SELECT cu.kind, cu.id, cu.name, cu.ico, cu.segment, cu.hubspot_id,
+    SELECT cu.kind, cu.id, cu.name, cu.ico, cu.segment, cu.hubspot_id, u.name AS owner_name,
            o.oom_count, o.oom_active, o.planned_consumption_mwh, o.planned_feed_in_mwh,
            (SELECT count(*)::int FROM contract k
              WHERE (k.company_id = cu.id OR k.person_id = cu.id) AND k.status = 'aktivna') AS active_contracts,
            count(*) OVER ()::int AS total
       FROM customer cu
+      LEFT JOIN app_user u ON u.id = cu.owner_id
       CROSS JOIN LATERAL (
         SELECT count(*)::int AS oom_count,
                count(*) FILTER (WHERE status = 'aktivne')::int AS oom_active,
@@ -53,14 +54,22 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
   const [head] =
     kind === 'company'
       ? await sql`
-          SELECT id, name, ico, dic, ic_dph, vat_payer, legal_form, registry_entry, nace, statutory, address,
-                 segment, payment_rating, debts_note, insolvency_note, finstat_url, finstat_updated_at,
-                 lifecycle_stage, hubspot_id, created_at, updated_at
-            FROM company WHERE id = ${id}`
+          SELECT c.id, c.name, c.ico, c.dic, c.ic_dph, c.vat_payer, c.legal_form, c.registry_entry, c.nace, c.statutory,
+                 c.address, c.bank_account, c.segment, c.payment_rating, c.debts_note, c.insolvency_note, c.finstat_url,
+                 c.finstat_updated_at, c.lifecycle_stage, c.hubspot_id, c.created_at, c.updated_at,
+                 u.name AS owner_name, t.name AS owner_team
+            FROM company c
+            LEFT JOIN app_user u ON u.id = c.owner_id
+            LEFT JOIN team t ON t.id = u.team_id
+           WHERE c.id = ${id}`
       : await sql`
-          SELECT id, first_name, last_name, concat_ws(' ', first_name, last_name) AS name, title, email, phone,
-                 mobile, position, address, segment, lifecycle_stage, source, hubspot_id, created_at, updated_at
-            FROM contact WHERE id = ${id}`;
+          SELECT p.id, p.first_name, p.last_name, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email,
+                 p.phone, p.mobile, p.position, p.address, p.segment, p.lifecycle_stage, p.source, p.hubspot_id,
+                 p.created_at, p.updated_at, u.name AS owner_name, t.name AS owner_team
+            FROM contact p
+            LEFT JOIN app_user u ON u.id = p.owner_id
+            LEFT JOIN team t ON t.id = u.team_id
+           WHERE p.id = ${id}`;
   if (!head) return null;
 
   const [kpi, contacts, companies, ooms, deals, contracts] = await Promise.all([
@@ -95,13 +104,14 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
        ORDER BY status, eic`,
     sql`
       SELECT d.id, d.name, pl.name AS pipeline, st.name AS stage, st.is_closed, st.is_won,
-             d.closed_at, d.created_at, d.hubspot_id,
+             d.closed_at, d.created_at, d.hubspot_id, u.name AS owner_name,
              (SELECT count(*)::int FROM deal_oom x WHERE x.deal_id = d.id) AS oom_count,
              k.id AS contract_id
         FROM deal d
         JOIN pipeline pl ON pl.id = d.pipeline_id
         JOIN pipeline_stage st ON st.id = d.stage_id
         LEFT JOIN contract k ON k.deal_id = d.id
+        LEFT JOIN app_user u ON u.id = d.owner_id
        WHERE d.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY d.closed_at DESC NULLS LAST, d.created_at DESC`,
     sql`

@@ -51,9 +51,10 @@ export function Kpi(props: { label: string; value: string; sub?: string }) {
   );
 }
 
-export function Rows(props: { rows: [string, ReactNode][] }) {
+// Údaje kľúč – hodnota. `stacked`: popis nad hodnotou, dlhý text sa zalomí (karty s údajmi v ľavom stĺpci).
+export function Rows(props: { rows: [string, ReactNode][]; stacked?: boolean }) {
   return (
-    <dl className="rows">
+    <dl className={props.stacked ? 'rows stacked' : 'rows'}>
       {props.rows.map(([k, v]) => (
         <div className="row" key={k}>
           <dt>{k}</dt>

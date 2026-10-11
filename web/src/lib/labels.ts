@@ -36,6 +36,18 @@ export const PRICE_STATUS: Record<string, { label: string; tone: Tone }> = {
   neplatna: { label: 'Neplatná', tone: 'neutral' },
 };
 
+export const PAYMENT_RATING: Record<string, string> = {
+  A: 'A – bez meškania',
+  B: 'B – občasné meškanie',
+  C: 'C – opakované meškania',
+  D: 'D – black list',
+  E: 'E – ARCA Capital',
+  X: 'X – bez histórie',
+};
+
+// Polia z FinStatu v HubSpote nesú text „true“/„false“.
+export const yesNo = (v: string | null | undefined) => (v === 'true' ? 'Áno' : v === 'false' ? 'Nie' : v ?? null);
+
 export const SEGMENT: Record<string, string> = { domacnost: 'Domácnosť', firma: 'Firma', dodavatel: 'Dodávateľ' };
 export const DIRECTION: Record<string, string> = { odber: 'Odber', dodavka: 'Dodávka' };
 

@@ -1,8 +1,12 @@
-# Dátový model jadra – v0.3.1
+# Dátový model jadra – v0.3.2
 
-Stav: SCHVÁLENÝ (Peter, 11. 10. 2026; v0.3 schválená 10. 10. 2026). Z neho sa vytvorí migrácia `0001_jadro.sql` (modul 1).
+Stav: SCHVÁLENÝ (Peter, 11. 10. 2026; v0.3 schválená 10. 10. 2026; v0.3.2 – bankový účet firmy, migrácia `0003`). Z neho sa vytvorí migrácia `0001_jadro.sql` (modul 1).
 
 Podklad: inventár HubSpotu (modul 0), najmä `docs/inventar/suhrn.md`. Čísla návrhov (N1–N20) odkazujú na kapitolu 3 súhrnu.
+
+## Zmeny oproti v0.3.1 (v0.3.2)
+
+- `company.bank_account` (text, zvyčajne IBAN; HubSpot `bank_account`) – migrácia `0003_company_bank_account.sql`, doplnené po kontrole prototypu (11. 10. 2026).
 
 ## Zmeny oproti v0.3
 
@@ -87,7 +91,7 @@ kontakt ↔ OOM: odvodené cez deal_oom + deal_contact (pohľad contact_oom_v)
 | --- | --- | --- |
 | `team` | name, hubspot_id | Sales_external, Sales_internal, OfficeZA, OfficeZA_Frontoffice, Marketing, Sourcing, Supplier_external, CEO |
 | `app_user` | email, name, role (`admin`, `vedenie`, `obchodnik`, `servis`, `marketing`), team_id, active, hubspot_owner_id | ~30 aktívnych používateľov. Prihlásenie cez Cloudflare Access podľa e-mailu. Externí obchodníci majú rolu `obchodnik` (tím Sales_external). |
-| `company` | name, ico (text, 8 číslic, unikátne), dic, ic_dph, vat_payer, legal_form, registry_entry, nace, statutory, address, segment (`firma`, `dodavatel`), payment_rating (A–E, X), debts_note, insolvency_note, finstat_url, finstat_updated_at, lifecycle_stage, owner_id, hubspot_id | iba B2B, údaje z Finstatu |
+| `company` | name, ico (text, 8 číslic, unikátne), dic, ic_dph, vat_payer, legal_form, registry_entry, nace, statutory, address, bank_account, segment (`firma`, `dodavatel`), payment_rating (A–E, X), debts_note, insolvency_note, finstat_url, finstat_updated_at, lifecycle_stage, owner_id, hubspot_id | iba B2B, údaje z Finstatu |
 | `contact` | first_name, last_name, title, email, phone, mobile, position, address, segment (`domacnost`, `firma`, `dodavatel`), lifecycle_stage, source, campaign, owner_id, hubspot_id, posthog_distinct_id | E-mail je kľúč na párovanie s PostHog, Chatwoot, Brevo, CloudTalk. B2C zákazník = kontakt bez záznamu v `company_contact`. |
 | `company_contact` | company_id, contact_id, is_primary, role (`statutar`, `kontaktna_osoba`, `fakturacia`, `ine`) | n:n, 215 kontaktov má dnes viac firiem |
 

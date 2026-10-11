@@ -13,6 +13,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VARS_FILE="$ROOT/.dev.vars"
 DBMATE="$ROOT/node_modules/.bin/dbmate"
+# pg_dump (aktualizácia db/schema.sql po migrácii) z Postgres.app
+export PATH="/Applications/Postgres.app/Contents/Versions/latest/bin:$PATH"
 
 usage() {
   echo "Použitie: ./db/dbmate.sh dev|main <príkaz dbmate> [parametre]" >&2

@@ -16,12 +16,14 @@ export async function oomCard(sql: Sql, id: string) {
   const [deals, prices, contacts] = await Promise.all([
     sql`
       SELECT d.id, d.name, pl.name AS pipeline, st.name AS stage, st.is_closed, st.is_won, d.closed_at,
+             u.name AS owner_name,
              k.id AS contract_id, k.number AS contract_number
         FROM deal_oom x
         JOIN deal d ON d.id = x.deal_id
         JOIN pipeline pl ON pl.id = d.pipeline_id
         JOIN pipeline_stage st ON st.id = d.stage_id
         LEFT JOIN contract k ON k.deal_id = d.id
+        LEFT JOIN app_user u ON u.id = d.owner_id
        WHERE x.oom_id = ${id}
        ORDER BY d.closed_at DESC NULLS LAST, d.created_at DESC`,
     sql`

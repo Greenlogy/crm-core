@@ -15,6 +15,7 @@ Stav k 11. 10. 2026. Zdroj: návrhy v projekte (plátno „Greenlogy CRM – kar
 - Písmo: Geist (Google Fonts), kódy EIC a ID: Geist Mono. Farby a rozmery z Greenlogy Cockpitu.
 - Rozloženie: ľavé menu 232 px, obsah s okrajom 24 × 36 px, karty s rohmi 12 px. Každý záznam v zozname na jednom riadku, dlhý text sa skráti.
 - Karta firmy: KPI v jednom rade; vľavo údaje a FinStat, v strede časová os, vpravo kontakty, OOM, dealy, zmluvy (rozhodnutie z 10. 10. 2026).
+- Výnimka (Peter, 11. 10. 2026): karty s údajmi v ľavom stĺpci (Firemné informácie, FinStat, údaje OOM a zmluvy) majú popis nad hodnotou a dlhý text sa zalomí, neskracuje sa. Ľavý stĺpec má 360 px.
 - Časy SLA sa počítajú v pracovnom čase Po–Pi 7:30–15:30.
 
 | Súbor | Obrazovka |

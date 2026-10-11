@@ -7,13 +7,15 @@ export async function contractCard(sql: Sql, id: string) {
     SELECT k.*,
            CASE WHEN k.company_id IS NOT NULL THEN 'company' ELSE 'person' END AS customer_kind,
            coalesce(c.name, concat_ws(' ', p.first_name, p.last_name)) AS customer_name,
-           d.name AS deal_name, d.hubspot_id AS deal_hubspot_id, pl.name AS pipeline, st.name AS stage
+           d.name AS deal_name, d.hubspot_id AS deal_hubspot_id, pl.name AS pipeline, st.name AS stage,
+           u.name AS owner_name
       FROM contract k
       LEFT JOIN company c ON c.id = k.company_id
       LEFT JOIN contact p ON p.id = k.person_id
       LEFT JOIN deal d ON d.id = k.deal_id
       LEFT JOIN pipeline pl ON pl.id = d.pipeline_id
       LEFT JOIN pipeline_stage st ON st.id = d.stage_id
+      LEFT JOIN app_user u ON u.id = d.owner_id
      WHERE k.id = ${id}`;
   if (!contract) return null;
 

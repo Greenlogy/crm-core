@@ -20,7 +20,7 @@ import {
 } from '../components/ui';
 import { useApi, type CustomerCard } from '../lib/api';
 import { date, kw, mwh, num, period, sumNum, text } from '../lib/format';
-import { CONTRACT_STATUS, dealTone, label, OOM_STATUS, OOM_TYPE, SEGMENT } from '../lib/labels';
+import { CONTRACT_STATUS, dealTone, label, OOM_STATUS, OOM_TYPE, PAYMENT_RATING, SEGMENT, yesNo } from '../lib/labels';
 
 export function CustomerPage(props: { kind: 'company' | 'person' }) {
   const { id = '' } = useParams();
@@ -32,6 +32,7 @@ export function CustomerPage(props: { kind: 'company' | 'person' }) {
 
   const isCompany = c.kind === 'company';
   const k = c.kpi;
+  const owner = c.owner_name ? [c.owner_name, c.owner_team].filter(Boolean).join(' · ') : text(null);
 
   return (
     <>
@@ -47,6 +48,7 @@ export function CustomerPage(props: { kind: 'company' | 'person' }) {
               <span>{isCompany ? 'Firma' : 'Domácnosť'}</span>
               {isCompany && c.ico && <span className="mono">IČO {c.ico}</span>}
               {c.segment && <Pill>{label(SEGMENT, c.segment)}</Pill>}
+              {c.owner_name && <span>Obchodník: {c.owner_name}</span>}
               <HubSpotLink object={isCompany ? 'company' : 'contact'} id={c.hubspot_id} />
             </div>
           </div>
@@ -63,22 +65,27 @@ export function CustomerPage(props: { kind: 'company' | 'person' }) {
 
       <div className="columns">
         <div className="col-left">
-          <Card title="Údaje">
+          <Card title={isCompany ? 'Firemné informácie' : 'Údaje'}>
             <Rows
+              stacked
               rows={
                 isCompany
                   ? [
+                      ['Obchodník', owner],
                       ['IČO', <span className="mono">{text(c.ico)}</span>],
                       ['DIČ', text(c.dic)],
                       ['IČ DPH', text(c.ic_dph)],
-                      ['Zápis v OR', text(c.registry_entry)],
+                      ['Bankový účet', <span className="mono">{text(c.bank_account)}</span>],
+                      ['Platobný rating', text(label(PAYMENT_RATING, c.payment_rating))],
+                      ['Zastúpený', text(c.statutory)],
+                      ['Zapísaný v Obchodnom registri', text(c.registry_entry)],
                       ['SK NACE', text(c.nace)],
-                      ['Zastúpenie', text(c.statutory)],
                       ['Adresa', text(c.address)],
                       ['Segment', text(label(SEGMENT, c.segment))],
                       ['Fáza (HubSpot)', text(c.lifecycle_stage)],
                     ]
                   : [
+                      ['Obchodník', owner],
                       ['E-mail', c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : text(null)],
                       ['Telefón', text(c.phone)],
                       ['Mobil', text(c.mobile)],
@@ -94,9 +101,10 @@ export function CustomerPage(props: { kind: 'company' | 'person' }) {
           {isCompany ? (
             <Card title="FinStat" aside={c.finstat_url ? <a href={c.finstat_url} target="_blank" rel="noreferrer">Otvoriť ↗</a> : undefined}>
               <Rows
+                stacked
                 rows={[
-                  ['Dlhy a nedoplatky', text(c.debts_note)],
-                  ['Konkurzy a reštrukturalizácie', text(c.insolvency_note)],
+                  ['Dlhy a nedoplatky', text(yesNo(c.debts_note))],
+                  ['Konkurzy a reštrukturalizácie', text(yesNo(c.insolvency_note))],
                 ]}
               />
               <NotInPrototype what="platobné hodnotenie a dáta z FinStatu sa nenačítavajú." />
@@ -178,7 +186,7 @@ export function CustomerPage(props: { kind: 'company' | 'person' }) {
                 <Item
                   key={d.id}
                   title={d.contract_id ? <Link to={`/zmluvy/${d.contract_id}`}>{d.name}</Link> : d.name}
-                  meta={[d.pipeline, d.closed_at ? `uzavretý ${date(d.closed_at)}` : null, `${d.oom_count ?? 0} OOM`]
+                  meta={[d.pipeline, d.owner_name, d.closed_at ? `uzavretý ${date(d.closed_at)}` : null, `${d.oom_count ?? 0} OOM`]
                     .filter(Boolean)
                     .join(' · ')}
                   side={<Pill tone={dealTone(d)}>{d.stage}</Pill>}

@@ -9,7 +9,7 @@
 //         exports/prototyp/vzorka-delete.sql    – presné zmazanie podľa manifestu vrátane audit_log
 //         exports/prototyp/nahratie-zistenia.md – čo sa nenahralo a prečo (iba HubSpot ID, bez mien)
 // SQL sa spúšťa samostatne cez sample/psql-dev.sh, iba s Petrovým súhlasom.
-// Z HubSpotu sa číta iba definícia pipelines dealov (poradie, pravdepodobnosť, uzavretie).
+// Z HubSpotu sa číta iba definícia pipelines dealov a zoznam vlastníkov (obchodníkov) s tímami.
 
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -40,6 +40,15 @@ type SampleData = {
     | 'contactCompany',
     Record<string, Edge[]>
   >;
+};
+
+type HubSpotOwner = {
+  id: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  archived: boolean;
+  teams?: { id: string; name: string; primary?: boolean }[];
 };
 
 type HubSpotPipeline = {
@@ -107,6 +116,16 @@ const SUPPLIER_NOTICE: Record<string, string> = {
 };
 const OOM_SEGMENT: Record<string, string> = { Domácnosti: 'domacnost', 'Firmy a organizácie': 'firma' };
 
+// HubSpot platobn_rating „A - bez meškania“ … „X - bez histórie“ → enum payment_rating (prvé písmeno).
+function paymentRating(hs: string, value: string | null | undefined) {
+  const t = txt(value);
+  if (!t) return null;
+  const letter = t.charAt(0).toUpperCase();
+  if (['A', 'B', 'C', 'D', 'E', 'X'].includes(letter)) return letter;
+  note('company', hs, `platobný rating „${t}“ sa nedá preložiť, ostáva prázdny`);
+  return null;
+}
+
 // --- Zápis SQL a manifest ---
 
 type SqlValue = string | number | boolean | null;
@@ -114,6 +133,8 @@ const lit = (v: SqlValue) =>
   v === null ? 'NULL' : typeof v === 'number' ? String(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : `'${v.replace(/'/g, "''")}'`;
 
 const ORDER = [
+  'team',
+  'app_user',
   'company',
   'contact',
   'company_contact',
@@ -153,6 +174,53 @@ async function main() {
   const { owners } = deriveOomOwners(index);
   const A = data.associations;
   const O = data.objects;
+  const client = new HubSpotClient(loadToken(root));
+
+  // --- Tímy a obchodníci (vlastníci v HubSpote), iba tí, ktorí sa vo vzorke vyskytujú ---
+  const hubspotOwners: HubSpotOwner[] = [];
+  for (const archived of [false, true]) {
+    let after: string | undefined;
+    do {
+      const page = await client.get<{ results: HubSpotOwner[]; paging?: { next?: { after: string } } }>('/crm/v3/owners', {
+        limit: 500,
+        archived,
+        after,
+      });
+      hubspotOwners.push(...page.results);
+      after = page.paging?.next?.after;
+    } while (after);
+  }
+  const ownerById = new Map(hubspotOwners.map((o) => [o.id, o]));
+  const usedOwners = new Set(
+    [O.companies, O.contacts, O.deals].flatMap((objs) => Object.values(objs).map((p) => txt(p.hubspot_owner_id))).filter((v): v is string => !!v),
+  );
+  const teamIds: Record<string, string> = {};
+  const userIds: Record<string, string> = {};
+  const emailSeen = new Set<string>();
+  for (const ownerId of [...usedOwners].sort()) {
+    const o = ownerById.get(ownerId);
+    const email = txt(o?.email);
+    if (!o || !email) {
+      note('app_user', ownerId, o ? 'vlastník nemá e-mail' : 'vlastník neexistuje v HubSpote');
+      continue;
+    }
+    if (emailSeen.has(email.toLowerCase())) {
+      note('app_user', ownerId, 'duplicitný e-mail vlastníka');
+      continue;
+    }
+    emailSeen.add(email.toLowerCase());
+    const team = o.teams?.find((t) => t.primary) ?? o.teams?.[0];
+    if (team && !teamIds[team.id]) teamIds[team.id] = insert('team', { name: team.name, hubspot_id: team.id });
+    userIds[ownerId] = insert('app_user', {
+      email,
+      name: [txt(o.firstName), txt(o.lastName)].filter(Boolean).join(' ') || email,
+      role: 'obchodnik', // rola pre prototyp (rozhodnutie 2026-10-11), skutočné roly v module používateľov
+      team_id: team ? teamIds[team.id] : null,
+      active: !o.archived,
+      hubspot_owner_id: ownerId,
+    });
+  }
+  const ownerUuid = (p: Props) => userIds[txt(p.hubspot_owner_id) ?? ''] ?? null;
 
   // --- Firmy ---
   const companyIds: Record<string, string> = {};
@@ -180,11 +248,14 @@ async function main() {
       nace: txt(p.sk_nace_group),
       statutory: txt(p.zast_pen_),
       address: joinParts(txt(p.address), txt(p.address2), txt(`${p.zip ?? ''} ${p.city ?? ''}`)),
+      bank_account: txt(p.bank_account),
+      payment_rating: paymentRating(hs, p.platobn_rating),
       segment,
       debts_note: txt(p.dlhy_a_nedoplatky),
       insolvency_note: txt(p.konkurzy_a_re_trukturaliz_cie),
       finstat_url: txt(p.finstat_url),
       lifecycle_stage: txt(p.lifecyclestage),
+      owner_id: ownerUuid(p),
       hubspot_id: hs,
     });
   }
@@ -205,6 +276,7 @@ async function main() {
       segment: b2c.has(hs) ? 'domacnost' : null,
       lifecycle_stage: txt(p.lifecyclestage),
       source: txt(p.zdroj_kontaktu_ako_vznikol_),
+      owner_id: ownerUuid(p),
       hubspot_id: hs,
     });
   }
@@ -224,7 +296,6 @@ async function main() {
   }
 
   // --- Pipelines dealov (iba použité) ---
-  const client = new HubSpotClient(loadToken(root));
   const res = await client.get<{ results: HubSpotPipeline[] }>('/crm/v3/pipelines/deals');
   const usedPipelines = new Set(Object.values(O.deals).map((d) => d.pipeline ?? ''));
   const pipelineIds: Record<string, string> = {};
@@ -370,6 +441,7 @@ async function main() {
       campaign: txt(p.kampan),
       closed_at: stageClosed[p.dealstage ?? ''] ? toTs(p[`hs_v2_date_entered_${p.dealstage}`]) : null,
       lost_reason: txt(p.closed_lost_reason),
+      owner_id: ownerUuid(p),
       hubspot_id: hs,
     });
     dealCustomer[hs] = customer;

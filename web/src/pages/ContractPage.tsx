@@ -59,6 +59,7 @@ export function ContractPage() {
         <div className="col-left">
           <Card title="Údaje">
             <Rows
+              stacked
               rows={[
                 ['Číslo zmluvy', text(k.number)],
                 ['Stav', <StatusPill map={CONTRACT_STATUS} value={k.status} />],
@@ -73,8 +74,10 @@ export function ContractPage() {
           </Card>
           <Card title="Deal">
             <Rows
+              stacked
               rows={[
                 ['Názov', text(k.deal_name)],
+                ['Obchodník', text(k.owner_name)],
                 ['Pipeline', text(k.pipeline)],
                 ['Štádium', text(k.stage)],
               ]}

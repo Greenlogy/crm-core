@@ -91,6 +91,7 @@ export function CustomersPage() {
                   <th>Typ</th>
                   <th>IČO</th>
                   <th>Segment</th>
+                  <th>Obchodník</th>
                   <th className="num">OOM</th>
                   <th className="num">Aktívne OOM</th>
                   <th className="num">Aktívne zmluvy</th>
@@ -101,7 +102,7 @@ export function CustomersPage() {
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="muted">
+                    <td colSpan={10} className="muted">
                       Žiadny zákazník nezodpovedá hľadaniu.
                     </td>
                   </tr>
@@ -125,6 +126,7 @@ export function CustomersPage() {
                     <td>{c.kind === 'company' ? 'Firma' : 'Domácnosť'}</td>
                     <td className="mono">{text(c.ico)}</td>
                     <td>{text(label(SEGMENT, c.segment))}</td>
+                    <td>{text(c.owner_name)}</td>
                     <td className="num">{num(c.oom_count, 0)}</td>
                     <td className="num">{num(c.oom_active, 0)}</td>
                     <td className="num">{num(c.active_contracts, 0)}</td>

@@ -232,8 +232,8 @@ a:hover {
   align-items: flex-start;
 }
 .col-left {
-  flex: 0 1 280px;
-  min-width: 240px;
+  flex: 0 1 360px;
+  min-width: 300px;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -316,6 +316,26 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: right;
+}
+
+/* Karty s údajmi: popis nad hodnotou, dlhý text sa zalomí (výnimka z pravidla „na jeden riadok“). */
+.rows.stacked .row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 0;
+  white-space: normal;
+}
+.rows.stacked .row dt {
+  font-size: 12px;
+  line-height: 17px;
+}
+.rows.stacked .row dd {
+  text-align: left;
+  font-size: 14px;
+  line-height: 20px;
+  overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 /* --- Zoznam položiek v karte --- */
