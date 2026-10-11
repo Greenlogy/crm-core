@@ -69,7 +69,7 @@ crm-core/
 - OOM (odberné miesto) má jedinečný EIC kód. Typ: spotreba, výroba, sharing alebo veľkoobchod. Stav: Aktívne, Neaktívne, Zrušené, Odídené, Prepísané.
 - Kontakt sa s OOM prepája cez dealy: OOM sa priraďuje všetkým kontaktom na jeho dealoch, iba pri stave Aktívne alebo Neaktívne.
 - Jeden zákazník môže mať viac OOM, vrátane FVE (výroba).
-- SLA servisu na všetkých kanáloch: prvá reakcia do 8 pracovných hodín, odpoveď do 24 pracovných hodín. Počíta sa iba v pracovnom čase v pracovných dňoch podľa slovenského kalendára sviatkov. Pracovný čas: Po–Pi 7:30–15:30 (Europe/Bratislava). Príklad: správa prijatá v piatok o 15:00 má termín prvej reakcie v pondelok o 14:30.
+- SLA servisu na všetkých kanáloch: prvá reakcia do 8 pracovných hodín, odpoveď do 24 pracovných hodín. Počíta sa iba v pracovnom čase v pracovných dňoch podľa slovenského kalendára sviatkov. Pracovný čas: Po–Pi 7:30–15:30 (Europe/Bratislava). Príklad: správa prijatá v piatok o 15:00 má termín prvej reakcie v pondelok o 15:00.
 - B2C zákazník je kontakt bez firmy. Zákazník (vlastník OOM, dealu, zmluvy) je teda buď firma, alebo kontakt – vždy práve jedno z nich.
 - Trading book nie je súčasťou CRM. Žije v Cockpite a z HubSpotu sa nemigruje.
 

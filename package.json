@@ -1,0 +1,8 @@
+{
+  "name": "crm-core",
+  "private": true,
+  "description": "Greenlogy CRM jadro",
+  "devDependencies": {
+    "dbmate": "2.36.0"
+  }
+}
