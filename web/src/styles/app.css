@@ -1,0 +1,593 @@
+/* Vzhľad aplikácie podľa docs/dizajn/ (system/README.md, komponenty, obrazovky). Iba premenné z tokens.css. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--brand-text);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--brand-hover);
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- Rozloženie --- */
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  flex: 0 0 232px;
+  background: var(--surface-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 12px;
+}
+.logo-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: var(--on-brand);
+  display: grid;
+  place-items: center;
+}
+.logo-name {
+  font-weight: 600;
+  line-height: 1.2;
+}
+.logo-app {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.2;
+}
+
+.group-label {
+  color: var(--ink-subtle);
+  padding: 14px 10px 6px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font-weight: 500;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.nav:hover {
+  background: var(--surface-muted);
+  color: var(--ink);
+  text-decoration: none;
+}
+.nav.active {
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-weight: 600;
+}
+.nav[aria-disabled='true'] {
+  cursor: default;
+  color: var(--ink-subtle);
+}
+.nav[aria-disabled='true']:hover {
+  background: none;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.sidebar-foot .caption {
+  padding: 0 10px;
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 28px var(--space-page) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ic {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* --- Hlavička stránky --- */
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+.page-head-main {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+}
+.page-head h1 {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  color: var(--ink-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.back {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--brand-tint);
+  color: var(--brand-text);
+  font-size: 15px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.avatar.sm {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+/* --- Karty --- */
+
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  min-width: 0;
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 6px;
+}
+.card-head h2 {
+  margin: 0;
+}
+.card-body {
+  padding: 4px 16px 12px;
+}
+.card-foot {
+  padding: 0 16px 12px;
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+.col-left {
+  flex: 0 1 280px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.col-mid {
+  flex: 1 1 380px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.col-right {
+  flex: 0 1 440px;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.col-wide {
+  flex: 1 1 560px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* --- KPI --- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-3);
+}
+.kpi {
+  padding: 14px 16px;
+}
+.kpi-label {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.kpi-value {
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kpi-sub {
+  color: var(--ink-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Údaje (kľúč – hodnota) --- */
+
+.rows {
+  margin: 0;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--surface-muted);
+  font-size: 13px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+.row:last-child {
+  border-bottom: 0;
+}
+.row dt {
+  color: var(--ink-muted);
+  flex: none;
+}
+.row dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+/* --- Zoznam položiek v karte --- */
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--surface-muted);
+  min-width: 0;
+}
+.item:last-child {
+  border-bottom: 0;
+}
+.item-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.item-title {
+  font-size: 13px;
+  line-height: 19px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-meta {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-side {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* --- Tabuľka --- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 19px;
+  font-variant-numeric: tabular-nums;
+}
+.tbl th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--surface-muted);
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tbl tr:last-child td {
+  border-bottom: 0;
+}
+.tbl tbody tr.clickable {
+  cursor: pointer;
+}
+.tbl tbody tr:hover td {
+  background: var(--surface-muted);
+}
+.tbl th:first-child,
+.tbl td:first-child {
+  padding-left: 16px;
+}
+.tbl th:last-child,
+.tbl td:last-child {
+  padding-right: 16px;
+}
+.num {
+  text-align: right !important;
+}
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  min-width: 0;
+}
+.name-cell span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.muted {
+  color: var(--ink-muted);
+}
+.caption {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* --- Štítok stavu --- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+}
+.pill.positive {
+  background: var(--positive-tint);
+  color: var(--brand-text);
+}
+.pill.negative {
+  background: var(--negative-tint);
+  color: var(--negative);
+}
+.pill.warning {
+  background: var(--warning-tint);
+  color: var(--warning);
+}
+.pill.info {
+  background: var(--info-tint);
+  color: var(--info);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* --- Ovládacie prvky --- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+}
+.input {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--ink);
+  min-width: 260px;
+}
+.input::placeholder {
+  color: var(--ink-subtle);
+}
+.segmented {
+  display: inline-flex;
+  background: var(--surface-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+.segmented button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.segmented button[aria-pressed='true'] {
+  background: var(--surface-card);
+  color: var(--ink);
+  box-shadow: var(--shadow-card);
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-card);
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow-card);
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.btn:disabled {
+  color: var(--ink-subtle);
+  cursor: default;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Stavy --- */
+
+.empty {
+  color: var(--ink-muted);
+  padding: 12px 0;
+  font-size: 13px;
+}
+.skeleton {
+  background: var(--surface-muted);
+  border-radius: var(--radius-xs);
+  height: 14px;
+  margin: 10px 0;
+}
+.error-box {
+  border: 1px solid var(--negative);
+  background: var(--negative-tint);
+  color: var(--negative);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+@media (max-width: 900px) {
+  .app {
+    flex-direction: column;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .main {
+    padding: 20px 16px 40px;
+  }
+  .input {
+    min-width: 0;
+    flex: 1 1 200px;
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@greenlogy/crm-web",
+  "private": true,
+  "type": "module",
+  "description": "Frontend Greenlogy CRM (Cloudflare Pages). Prototyp: iba čítanie.",
+  "scripts": {
+    "tokens": "node scripts/tokens.ts",
+    "dev": "npm run tokens && vite",
+    "build": "npm run tokens && tsc --noEmit && vite build",
+    "typecheck": "npm run tokens && tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router-dom": "7.18.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.0"
+  }
+}

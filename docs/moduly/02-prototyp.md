@@ -1,6 +1,6 @@
 # Modul 2 – Prototyp na prezeranie dát
 
-Stav: zadanie schválené 11. 10. 2026; kroky 1–4 hotové (API lokálne), ďalej frontend alebo Hyperdrive.
+Stav: zadanie schválené 11. 10. 2026; kroky 1–4 a 6 hotové (API a frontend lokálne), ďalej nasadenie (kroky 5 a 7).
 
 ## Priebeh
 
@@ -9,6 +9,7 @@ Stav: zadanie schválené 11. 10. 2026; kroky 1–4 hotové (API lokálne), ďal
 - Zistenia z nahratia (53, `exports/prototyp/nahratie-zistenia.md`): 18 dealov má opakované číslo zmluvy (zmluvy bez čísla – rozpor s `contract.number` unikátnym a 1 deal = 1 zmluva); 10 veľkoobchodných cien bez smeru (nastavené „odber“); 13 zmluvných cien a 4 OOM nenahraté; 7 OOM s účinnosťou „do“ pred „od“.
 - 11. 10.: krok 3 – rola `crm_prototype_ro` na `dev` (`api/db/create-prototype-role.sh` + `prototype-role.sql`): SELECT na všetko, `default_transaction_read_only`, pripojenie v `.dev.vars` ako `DATABASE_URL_DEV_RO`. Overené: SELECT prechádza, INSERT zamietnutý.
 - 11. 10.: krok 4 – API v `api/` (Hono 4.13.8, postgres.js 3.4.9, wrangler 4.135.0, TypeScript 5.9.3). Lokálne `api/dev.sh` (rola iba na čítanie), test `api/smoke.sh`: všetky endpointy 200, zoznam vracia 44 zákazníkov, zlé ID 400, neexistujúci záznam 404, POST 405. Typová kontrola bez chýb. `npm audit`: produkčné balíky bez zraniteľností, 4 vysoké vo vývojových nástrojoch (wrangler).
+- 11. 10.: krok 6 (pred krokom 5, Peter schválil poradie) – frontend vo `web/` (React 19.3, Vite 8.3, react-router-dom 7.18): zoznam zákazníkov, karty zákazníka, OOM a zmluvy. Tokeny generuje `web/scripts/tokens.ts` z `docs/dizajn/system/tokens.json`. Lokálne `npm run dev` s proxy `/api` na `api/dev.sh`. Build a typová kontrola bez chýb, `npm audit` bez zraniteľností.
 - Zistenie: 21 zmlúv B2B_elektrina a 3 B2C nemajú zmluvnú cenu (pravdepodobne dealy s opakovaným číslom zmluvy – cena sa priradila najnovšiemu dealu); 5 zmlúv EFET nemá OOM ani ceny.
 - Zistenie k `customer_v`: vracia 53 zákazníkov namiesto 44 – kontakt bez firmy sa počíta ako B2C, aj keď je iba kontaktom na deale firmy. Zoznam zákazníkov v API preto bude brať iba kontakty, ktoré vlastnia OOM, deal alebo zmluvu; úprava pohľadu sa navrhne samostatne.
 - Zistenie pre migráciu: 297 OOM nemá deal v stave zmluvy ani ukončený deal, vlastníka nemožno odvodiť; pri 124 OOM sa vlastník odvodil z ukončeného dealu. Veľkoobchodné OOM majú iba 2 zákazníkov.

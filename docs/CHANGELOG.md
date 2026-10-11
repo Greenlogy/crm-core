@@ -6,6 +6,7 @@
 - `integrations/hubspot-sync/sample/`: výber vzorky (`select.ts`, iba čítanie), generátor SQL (`load.ts`), spoločné pravidlo vlastníka OOM (`owners.ts`), spúšťač iba pre `dev` (`psql-dev.sh`); klient HubSpotu povoľuje aj hromadné čítanie záznamov
 - Rola `crm_prototype_ro` (iba čítanie) na Neon `dev`: `api/db/prototype-role.sql`, `api/db/create-prototype-role.sh`
 - API prototypu v `api/` (Cloudflare Worker, Hono, postgres.js): zoznam zákazníkov, karty firmy, domácnosti, OOM a zmluvy, iba GET; `api/dev.sh`, `api/smoke.sh`
+- Frontend prototypu vo `web/` (React + Vite): zoznam zákazníkov, karty zákazníka, OOM a zmluvy; CSS premenné generované z `docs/dizajn/system/tokens.json`
 - Vzorka 44 zákazníkov (1 363 riadkov) nahratá na Neon `dev`, výnimka pre skutočné osobné údaje v `docs/rozhodnutia.md`
 - Modul 1: migrácie `0001_jadro.sql` (35 tabuliek, 27 enumov, `updated_at`, `audit_log`, preberanie segmentu, pohľady `customer_v` a `contact_oom_v`) a `0002_pracovny_kalendar.sql` (kalendár 2026–2028, `add_business_minutes`) na vetve `dev`
 - `db/schema.sql`, spúšťač `db/dbmate.sh`, dbmate cez npm (`package.json`)
