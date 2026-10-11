@@ -27,8 +27,8 @@ Vlastník projektu a schvaľovateľ: Peter Kalman (CEO). Kód píše Claude, Pet
 | --- | --- |
 | Databáza | PostgreSQL na Neone (EÚ, Frankfurt), vetvy `main` = produkcia a `dev` = vývoj. Migrácie dbmate v `db/migrations/` (`-- migrate:up` / `-- migrate:down`), `db/schema.sql` sa commituje. Migrácie najprv na `dev`, na `main` až po schválení. |
 | API | Cloudflare Workers, TypeScript, napojenie na DB cez Cloudflare Hyperdrive |
-| Frontend | Cloudflare Pages, TypeScript (framework sa potvrdí v module 1) |
-| Prihlasovanie | Cloudflare Access so SSO cez Google, rovnako ako Cockpit |
+| Frontend | React + Vite + TypeScript, servíruje ho ten istý Cloudflare Worker ako API (statické súbory, rozhodnutie 2026-10-11) |
+| Prihlasovanie | Cloudflare Access so SSO cez Google, rovnako ako Cockpit; na Workeri „Protect this Worker behind Access“ (All traffic) |
 | Servis | Chatwoot (self-host, Google Cloud) |
 | Call centrum | CloudTalk (API a webhooky: hovory, nahrávky, prepisy, udalosti v reálnom čase) |
 | E-mail marketing | Brevo |
@@ -60,7 +60,7 @@ crm-core/
     moduly/            zadania jednotlivých modulov
   db/migrations/       SQL migrácie
   api/                 Cloudflare Worker (API jadra)
-  web/                 frontend (Cloudflare Pages)
+  web/                 frontend (React + Vite, nasadzuje sa s Workerom z api/)
   integrations/        hubspot-sync, chatwoot, cloudtalk, posthog, brevo
 ```
 

@@ -13,7 +13,7 @@ Aktualizované: 11. 10. 2026
 
 ## Prebieha
 
-- Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 3 (rola iba na čítanie), 4 (API) a 6 (frontend) hotové lokálne
+- Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
 
@@ -36,5 +36,5 @@ Aktualizované: 11. 10. 2026
 
 ## Ďalší krok
 
-- Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. API a frontend bežia lokálne (`api/dev.sh`, `web` → `npm run dev`). Ďalej nasadenie: Hyperdrive, Worker, Pages a Cloudflare Access.
+- Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. Prototyp beží na https://crm-core.peter-700.workers.dev (Access, iba Peter). Ďalej krok 8: Peter prezrie vzorku a zapíše zistenia.
 - Nasadenie modulu 1 na `main` po Petrovom pokyne.

@@ -2,7 +2,7 @@
   "name": "@greenlogy/crm-web",
   "private": true,
   "type": "module",
-  "description": "Frontend Greenlogy CRM (Cloudflare Pages). Prototyp: iba čítanie.",
+  "description": "Frontend Greenlogy CRM (statické súbory Workera crm-core z api/). Prototyp: iba čítanie.",
   "scripts": {
     "tokens": "node scripts/tokens.ts",
     "dev": "npm run tokens && vite",
