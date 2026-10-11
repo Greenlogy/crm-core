@@ -11,6 +11,7 @@ const MAX_RETRIES = 6;
 // POST je povolený iba na endpointy, ktoré nič nemenia. Všetko ostatné okrem GET sa zablokuje.
 const READ_ONLY_POST: RegExp[] = [
   /^\/crm\/v3\/objects\/[\w-]+\/search$/,
+  /^\/crm\/v3\/objects\/[\w-]+\/batch\/read$/,
   /^\/crm\/v4\/associations\/[\w-]+\/[\w-]+\/batch\/read$/,
   /^\/oauth\/v2\/private-apps\/get\/access-token-info$/,
 ];

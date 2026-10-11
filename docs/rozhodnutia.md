@@ -48,3 +48,7 @@
 | 2026-10-11 | Výpočtové pohľady (`contract_price_volume_v`, `contract_revenue_v`, `deal_margin_v`, `commission_base_v`) nie sú v `0001`; prídu samostatnou migráciou po inventári `products` a `formulas` a potvrdení rollupov. Rozhodnutia z 2026-10-10 o vstupoch a ročných hodnotách platia pre túto migráciu. | vzorce a rollupy nie sú overené |
 | 2026-10-11 | Roly `externy_obchodnik` a `externy_dodavatel` sa rušia; externý obchodník má rovnaké práva ako interný. RLS sa nerobí. Nahrádza rozhodnutie o obmedzenom prístupe externých. | Peter |
 | 2026-10-11 | Typ kontaktu sa zjednocuje so segmentom: `contact.type` nahrádza `contact.segment` (enum `segment`) | typ kontaktu a segment sú ten istý pojem |
+| 2026-10-11 | Prototyp na prezeranie dát (modul 2) používa na `dev` vzorku 40 skutočných zákazníkov z HubSpotu vrátane osobných údajov domácností. Výnimka z pravidla modulu 1 „na `dev` iba vymyslené dáta“. Vzorka sa po skončení prototypu zmaže podľa manifestu. | kontrola modelu na skutočných dátach; hosting v EÚ (Neon Frankfurt), prístup iba Peter cez Cloudflare Access |
+| 2026-10-11 | Frontend CRM: React + Vite + TypeScript (potvrdenie frameworku z CLAUDE.md) | rozšírený, vhodný aj pre zložité obrazovky (pipeline, editor ponuky) |
+| 2026-10-11 | API: Cloudflare Worker s routerom Hono a ovládačom `postgres` (postgres.js) cez Hyperdrive | ľahký router; ovládač odporúčaný Cloudflare pre Hyperdrive |
+| 2026-10-11 | Prototyp beží na predvolených adresách `*.workers.dev` a `*.pages.dev` za Cloudflare Access; vlastná doména neskôr | bez zmien DNS počas prototypu |

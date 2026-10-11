@@ -1,0 +1,83 @@
+// API jadra Greenlogy CRM – prototyp iba na čítanie (modul 2, krok 4).
+// Iba GET. Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
+
+import { Hono } from 'hono';
+import { connect, type Env, type Sql } from './db';
+import { contractCard } from './queries/contracts';
+import { customerCard, listCustomers, type CustomerKind } from './queries/customers';
+import { oomCard } from './queries/oom';
+
+type Vars = { sql: Sql };
+
+const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SEGMENTS = new Set(['', 'domacnost', 'firma', 'dodavatel']);
+
+app.use('*', async (c, next) => {
+  if (c.req.method !== 'GET') return c.json({ error: 'Povolené je iba čítanie (GET).' }, 405);
+  await next();
+});
+
+// Pripojenie na požiadavku; zatvorí sa po odoslaní odpovede.
+app.use('*', async (c, next) => {
+  const sql = connect(c.env);
+  c.set('sql', sql);
+  try {
+    await next();
+  } finally {
+    c.executionCtx.waitUntil(sql.end());
+  }
+  c.header('Cache-Control', 'no-store');
+});
+
+const notFound = (c: { json: (b: unknown, s: 404) => Response }) => c.json({ error: 'Záznam neexistuje.' }, 404);
+const badId = (c: { json: (b: unknown, s: 400) => Response }) => c.json({ error: 'Neplatné ID.' }, 400);
+
+app.get('/health', async (c) => {
+  await c.var.sql`SELECT 1`;
+  return c.json({ ok: true });
+});
+
+app.get('/customers', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const segment = c.req.query('segment') ?? '';
+  const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
+  if (!SEGMENTS.has(segment)) return c.json({ error: 'Neplatný segment.' }, 400);
+  return c.json(await listCustomers(c.var.sql, { q, segment, page }));
+});
+
+const card = (kind: CustomerKind) =>
+  app.get(`/${kind === 'company' ? 'companies' : 'persons'}/:id`, async (c) => {
+    const id = c.req.param('id');
+    if (!UUID.test(id)) return badId(c);
+    const result = await customerCard(c.var.sql, kind, id);
+    return result ? c.json(result) : notFound(c);
+  });
+card('company');
+card('person');
+
+app.get('/oom/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!UUID.test(id)) return badId(c);
+  const result = await oomCard(c.var.sql, id);
+  return result ? c.json(result) : notFound(c);
+});
+
+app.get('/contracts/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!UUID.test(id)) return badId(c);
+  const result = await contractCard(c.var.sql, id);
+  return result ? c.json(result) : notFound(c);
+});
+
+app.notFound((c) => c.json({ error: 'Neznáma cesta.' }, 404));
+
+app.onError((err, c) => {
+  // Bez správy chyby: môže obsahovať hodnoty z databázy.
+  const code = (err as { code?: string }).code ?? 'unknown';
+  console.error(`API chyba ${c.req.method} ${c.req.routePath}: ${err.name} ${code}`);
+  return c.json({ error: 'Chyba servera.' }, 500);
+});
+
+export default app;

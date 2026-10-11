@@ -1,0 +1,19 @@
+{
+  "name": "@greenlogy/crm-api",
+  "private": true,
+  "type": "module",
+  "description": "API jadra Greenlogy CRM (Cloudflare Worker). Prototyp: iba čítanie.",
+  "scripts": {
+    "dev": "./dev.sh",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "4.13.8",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260920.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.135.0"
+  }
+}

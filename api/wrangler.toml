@@ -1,0 +1,15 @@
+# API jadra Greenlogy CRM – prototyp iba na čítanie (modul 2).
+name = "crm-core-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Hyperdrive na Neon vetvu dev s rolou crm_prototype_ro.
+# ID doplní krok 5 (vytvorenie Hyperdrive). Lokálne (wrangler dev) sa použije
+# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE z ./dev.sh.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000000"
+
+[observability]
+enabled = true

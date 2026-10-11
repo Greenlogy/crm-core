@@ -13,9 +13,16 @@ Aktualizované: 11. 10. 2026
 
 ## Prebieha
 
+- Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 3 (rola iba na čítanie) a 4 (API lokálne) hotové
+
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
 
 ## Otvorené
+
+- Opakované čísla zmlúv na dealoch (18 vo vzorke) vs. `contract.number` unikátne a 1 deal = 1 zmluva – rozhodnúť pred migráciou
+- Smer zmluvných cien pri veľkoobchodných OOM (pole `typ_oom` prázdne)
+- `customer_v`: B2C zákazník = kontakt bez firmy, ktorý vlastní OOM, deal alebo zmluvu (nie každý kontakt bez firmy)
+- Po skončení prototypu zmazať vzorku z `dev` (`exports/prototyp/vzorka-delete.sql`)
 
 - Prenos nákupných cien z Cockpitu (zdieľaná DB alebo API)
 - Potvrdiť definície rollupov v HubSpote (objemy, výnosy)
@@ -29,5 +36,5 @@ Aktualizované: 11. 10. 2026
 
 ## Ďalší krok
 
-- Prototyp na prezeranie dát (iba čítanie, iba `dev`): vzorka 40 zákazníkov z HubSpotu, API (Worker + Hyperdrive), frontend (Pages, 4 obrazovky), Cloudflare Access. Postup po krokoch so schválením každého kroku.
+- Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. API beží lokálne (`api/dev.sh`). Ďalej frontend (krok 6) alebo Hyperdrive (krok 5).
 - Nasadenie modulu 1 na `main` po Petrovom pokyne.
