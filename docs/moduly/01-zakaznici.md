@@ -1,6 +1,6 @@
 # Modul 1 – Zákazníci: zadanie
 
-Verzia 0.2 · 11. 10. 2026 · **schválené Petrom**.
+Verzia 0.3 · 11. 10. 2026 · **schválené Petrom** (v0.3 = doplnky po kontrole návrhu migrácie, časť 13).
 Vychádza z odpovedí v `01-zakaznici-otazky.md`. Model v0.3 je iba podklad, platí toto zadanie.
 
 ## 1. Čo modul rieši
@@ -23,7 +23,7 @@ V databáze sú dva druhy záznamov a jedna väzba medzi nimi:
 ### Firma
 - Povinné: IČO, názov.
 - Z FinStatu (denná aktualizácia, dnes cez Make): DIČ, IČ DPH, sídlo, právna forma, štatutár, NACE, platobný rating, dlhy. Používajú sa na hlavičku ponuky.
-- Označenie: zákazník (predvolené), partner, dodávateľ. Partner a dodávateľ sa nepočítajú medzi zákazníkov.
+- Označenie: zákazník, partner, dodávateľ. Firma môže mať viac označení naraz (napr. partner, ktorý od nás aj odoberá). V zozname Zákazníci je firma, ktorá má označenie zákazník.
 
 ### Osoba
 - Povinné: meno, priezvisko a e-mail alebo telefón.
@@ -37,7 +37,9 @@ V databáze sú dva druhy záznamov a jedna väzba medzi nimi:
 
 Zákazníkom (riadkom v zozname Zákazníci) je:
 - **firma**, alebo
-- **osoba ako domácnosť**, t. j. osoba, ktorá podpisuje zmluvu za domácnosť.
+- **osoba ako domácnosť**, t. j. osoba, ktorá podpisuje zmluvu za domácnosť, alebo osoba bez firmy, ktorá k nám prišla z webu, newslettera či kampane (stav Marketingový kontakt).
+
+Domácnosťou sa osoba stane automaticky (deal, OOM alebo zmluva na osobu; osoba bez firmy z webu či marketingu) alebo ručne pri založení „nová domácnosť“. Automaticky sa nikdy nezruší.
 
 Kontakt vo firme nie je zákazník, ale osoba na karte firmy. V zozname Kontakty ho nájdeš podľa mena, e-mailu alebo telefónu.
 
@@ -50,7 +52,7 @@ Stav sa **nevyberá ručne, vypočíta sa** z OOM, dealov a zmlúv.
 | Marketingový kontakt | Je v databáze (newsletter, e-book…), ale nemá otvorený deal ani históriu zákazníka | predvolene skrytý |
 | Záujemca | Má otvorený deal bez odoslanej ponuky | áno |
 | Ponuka | Má otvorený deal s odoslanou ponukou | áno |
-| Čakajúci zákazník | Podpísal zmluvu s budúcou účinnosťou a nikdy nemal aktívne OOM | áno |
+| Čakajúci zákazník | Má zmluvu podpísanú, čakajúcu na zaradenie alebo aktívnu s budúcou účinnosťou a nemá aktívne ani neaktívne OOM (nový alebo vracajúci sa zákazník) | áno |
 | Zákazník | Má aspoň jedno OOM Aktívne alebo Neaktívne | áno |
 | Bývalý zákazník | Nemá aktívne ani neaktívne OOM a aspoň jedno OOM je Odídené (asset existuje, ide ku konkurencii) | áno, cieľ kampane na návrat |
 | Zrušený zákazník | Všetky jeho OOM sú Zrušené alebo Prepísané (nemá čo zazmluvniť) | nie, archív |
@@ -82,11 +84,13 @@ Zobrazenie: „Domácnosť“, „Domácnosť · výrobca“, „Firma“, „Fi
 
 - Firma: IČO je unikátne. CRM pri zakladaní ponúkne existujúcu firmu a nedovolí založiť druhú.
 - Osoba: rovnaký e-mail, potom rovnaký telefón → CRM upozorní a ponúkne existujúcu osobu.
+- E-mail sa nevynucuje ako unikátny (spoločný e-mail manželov, info@ vo firme), CRM iba upozorní.
+- Externý obchodník pri duplicite osoby vidí iba „osoba už existuje“ a meno vlastníka, rovnako ako pri firme.
 - O zlúčení pri migrácii rozhoduje kontrolór.
 
 ## 8. Marketing a súhlasy (v tomto module)
 
-- Iba príznak „nechce marketing“ s dátumom a zdrojom.
+- Iba príznak „nechce marketing“ s dátumom a zdrojom, iba na osobe (firma ho nemá).
 - Plná evidencia súhlasov príde v module Marketing.
 
 ## 9. Obrazovky
@@ -119,3 +123,10 @@ Zobrazenie: „Domácnosť“, „Domácnosť · výrobca“, „Firma“, „Fi
 - Záujemca, ktorému deal prepadne a nikdy nebol zákazník, sa vráti na stav Marketingový kontakt.
 - Bývalý zákazník, ktorému pošleme novú ponuku, má stav Ponuka s príznakom „bývalý“.
 - Externý obchodník pri zadaní IČO firmy, ktorú vlastní iný obchodník, vidí hlášku „firma už existuje“ a meno vlastníka, ale nie údaje firmy.
+
+## 13. Doplnky po kontrole návrhu migrácie (schválené 11. 10. 2026)
+
+- **Vracajúci sa zákazník.** Bývalý zákazník, ktorý podpíše novú zmluvu s budúcou účinnosťou, má stav Čakajúci zákazník s príznakom „bývalý“.
+- **Kontakt zrušenej firmy.** Osoba, ktorá je iba kontaktom firmy v archíve (nemá inú aktívnu firmu a nie je sama zákazníkom), sa skryje z Kontaktov aj z marketingu.
+- **Ochrana prístupu v databáze.** Obmedzenie externého obchodníka (čl. 6) platí priamo v databáze (Row Level Security), nie iba v API. Nahrádza skoršie rozhodnutie „externý má rovnaké práva ako interný, RLS sa nerobí“.
+- **Zmena vlastníka** mimo vedenia je povolená iba jednej určenej databázovej role pre synchronizáciu, nie každému spojeniu bez prihláseného používateľa.
