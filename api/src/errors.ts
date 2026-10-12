@@ -42,6 +42,14 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   pipeline_org_name_key: 'Pipeline s týmto názvom už existuje.',
   pipeline_stage_pipeline_id_name_key: 'Stage s týmto názvom už v pipeline je.',
   pipeline_stage_probability_check: 'Pravdepodobnosť: 0 až 100 %.',
+  oom_eic_key: 'Odberné miesto s týmto EIC už v CRM je.',
+  oom_eic_check: 'Neplatný formát alebo kontrolná číslica EIC.',
+  oom_phases_check: 'Počet fáz: 1 alebo 3.',
+  oom_advance_pct_check: 'Záloha v percentách: 0 až 100.',
+  oom_supply_period_check: 'Dodávka do nemôže byť pred dodávkou od.',
+  oom_switch_steps_check:
+    'Kroky prechodu idú po poradí: výpoveď odoslaná → akceptovaná → zmena potvrdená (bez výpovede iba potvrdenie zmeny).',
+  oom_customer_check: 'Odberné miesto patrí práve jednému zákazníkovi (firme alebo domácnosti).',
 };
 
 export type ApiErrorBody = { error: string; code?: string; field?: string; constraint?: string };

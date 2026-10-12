@@ -136,7 +136,7 @@ export function CustomerPage() {
         <div className="col-right">
           <CompanyContactsCard company={c} onChanged={reload} />
 
-          <OomsCard ooms={c.ooms} />
+          <OomsCard ooms={c.ooms} customer={{ kind: 'company', id: c.id, name: c.name, org_id: c.org_id }} />
           <DealsCard deals={c.deals} />
           <ContractsCard contracts={c.contracts} />
         </div>

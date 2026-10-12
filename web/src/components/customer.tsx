@@ -6,6 +6,8 @@ import { date, mwh, period, sumNum } from '../lib/format';
 import { CONTRACT_STATUS, CUSTOMER_STATUS, dealTone, label, OOM_STATUS, OOM_TYPE, showFormer, STATUS_SOURCE } from '../lib/labels';
 import { Card, Empty, Item, Pill, StatusPill } from './ui';
 import { planText } from './oom-actions';
+import { useState } from 'react';
+import { OomCreatePanel, useCanCreateOom } from './oom-forms';
 
 // Stav zákazníka + „bývalý“ (napr. „Ponuka · bývalý“) + archív.
 export function CustomerStatus(props: { status: string | null; former: boolean; archived?: boolean }) {
@@ -44,10 +46,28 @@ export function StatusHistoryCard(props: { history: StatusChange[] }) {
 }
 
 // OOM zákazníka zo všetkých väzieb: stav platí pre obdobie väzby (po prepise u starého zákazníka „Prepísané“).
-export function OomsCard(props: { ooms: OomRow[] }) {
+export function OomsCard(props: { ooms: OomRow[]; customer?: { kind: 'company' | 'person'; id: string; name: string; org_id: string } }) {
   const open = props.ooms.filter((o) => !o.valid_to).length;
+  const canCreate = useCanCreateOom();
+  const [creating, setCreating] = useState(false);
+  const aside = (
+    <span className="pills">
+      {props.ooms.length > open && <span className="caption">a {props.ooms.length - open} v histórii</span>}
+      {canCreate && props.customer && (
+        <button type="button" className="btn btn-ghost" onClick={() => setCreating(true)}>
+          + Nové OOM
+        </button>
+      )}
+    </span>
+  );
   return (
-    <Card title={`Odberné miesta (${open})`} aside={props.ooms.length > open ? <span className="caption">a {props.ooms.length - open} v histórii</span> : undefined}>
+    <Card title={`Odberné miesta (${open})`} aside={aside}>
+      {creating && props.customer && (
+        <OomCreatePanel
+          customer={{ ...props.customer, ico: null, email: null, archived: false }}
+          onClose={() => setCreating(false)}
+        />
+      )}
       {props.ooms.length === 0 ? (
         <Empty>Zatiaľ žiadne OOM.</Empty>
       ) : (

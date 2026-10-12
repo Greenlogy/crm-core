@@ -189,7 +189,7 @@ export function PersonPage() {
         </div>
 
         <div className="col-right">
-          {p.is_household || p.ooms.length > 0 ? <OomsCard ooms={p.ooms} /> : null}
+          {p.is_household || p.ooms.length > 0 ? <OomsCard ooms={p.ooms} customer={{ kind: 'person', id: p.id, name: p.name, org_id: p.org_id }} /> : null}
           {p.is_household || p.deals.length > 0 ? <DealsCard deals={p.deals} /> : null}
           {p.is_household || p.contracts.length > 0 ? <ContractsCard contracts={p.contracts} /> : null}
           {!p.is_household && p.ooms.length === 0 && p.deals.length === 0 && (

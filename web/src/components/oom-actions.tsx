@@ -7,6 +7,7 @@ import { get, send, type OomCard, type OomPlan } from '../lib/api';
 import { date } from '../lib/format';
 import { Field, Notice, Segmented, SidePanel, TextInput, useSave } from './form';
 import { Pill } from './ui';
+import { OomEditPanel } from './oom-forms';
 
 export const PLAN_KIND: Record<string, string> = { prepis: 'prepis', odchod: 'odchod', zrusenie: 'zrušenie' };
 const PLAN_KIND_TITLE: Record<string, string> = { prepis: 'Plánovaný prepis', odchod: 'Plánovaný odchod', zrusenie: 'Plánované zrušenie' };
@@ -29,7 +30,7 @@ const dueOn = (kind: string, d: string) => (kind === 'prepis' ? d : addDays(d, 1
 export const planText = (kind: string | null | undefined, d: string | null | undefined) =>
   kind && d ? `${PLAN_KIND_TITLE[kind].toLowerCase()} k ${date(d)}` : null;
 
-type Action = 'stav' | 'prepis' | 'navrat' | null;
+type Action = 'stav' | 'prepis' | 'navrat' | 'udaje' | null;
 
 /** Tlačidlá v hlavičke karty OOM podľa stavu a práv. */
 export function OomActions(props: { o: OomCard; onChanged: () => void }) {
@@ -46,6 +47,7 @@ export function OomActions(props: { o: OomCard; onChanged: () => void }) {
     if (ok) props.onChanged();
   };
 
+  const canEditData = o.status !== 'aktivne' || o.can_edit_active;
   return (
     <div className="head-actions">
       {o.status === 'pripravovane' && (
@@ -74,7 +76,17 @@ export function OomActions(props: { o: OomCard; onChanged: () => void }) {
           Návrat k Greenlogy
         </button>
       )}
+      <button
+        type="button"
+        className="btn primary"
+        disabled={!canEditData}
+        title={canEditData ? undefined : 'Aktívne OOM upravuje iba tím s právom „upravovať Aktívne OOM“ (Servis, Nákup, CEO).'}
+        onClick={() => setOpen('udaje')}
+      >
+        Upraviť údaje
+      </button>
       {save.error && <Notice tone="error">{save.error}</Notice>}
+      {open === 'udaje' && <OomEditPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'stav' && <StatusPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'prepis' && <TransferPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'navrat' && <ReconnectPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
@@ -138,9 +150,9 @@ function StatusPanel(props: { o: OomCard; onClose: () => void; onSaved: () => vo
   );
 }
 
-type CustomerHit = { kind: 'company' | 'person'; id: string; name: string; ico: string | null; email: string | null; archived: boolean };
+export type CustomerHit = { kind: 'company' | 'person'; id: string; name: string; ico: string | null; email: string | null; archived: boolean };
 
-function CustomerPicker(props: { orgId: string; value: CustomerHit | null; onChange: (v: CustomerHit | null) => void; exclude?: string }) {
+export function CustomerPicker(props: { orgId: string; value: CustomerHit | null; onChange: (v: CustomerHit | null) => void; exclude?: string }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<CustomerHit[]>([]);
   useEffect(() => {

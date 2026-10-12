@@ -147,3 +147,7 @@ Rozhodnuté po F1 (12. 10. 2026):
 6. **História po prepise pre „iba svoje“:** obchodník starého zákazníka vidí v histórii aj EIC (funkcia v databáze, `0016`).
 7. **RLS na audite** je podmienkou odomknutia externého tímu (`docs/STAV.md`).
 
+F2b (rozhodnuté pri implementácii, Peter môže zmeniť):
+8. Nové OOM je vždy **Pripravované**; Aktívne bude automaticky (potvrdená zmena + začiatok dodávky) alebo tlačidlom Aktivovať, ak má povinné údaje.
+9. **EIC sa dá opraviť** (preklep) – s kontrolou formátu, kontrolnej číslice a duplicity; zmena je v audite.
+

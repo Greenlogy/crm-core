@@ -11,6 +11,7 @@ import { useMe } from '../lib/me';
 import { label, OOM_STATUS, OOM_TYPE } from '../lib/labels';
 import { oomAddress } from './OomPage';
 import { planText } from '../components/oom-actions';
+import { OomCreatePanel, useCanCreateOom } from '../components/oom-forms';
 
 const CHIPS: [string, string, keyof OomList['counts']][] = [
   ['', 'Všetky', 'all'],
@@ -46,6 +47,8 @@ export function OomListPage() {
   const org = params.get('spolocnost') ?? '';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
+  const canCreate = useCanCreateOom();
+  const [creating, setCreating] = useState(false);
 
   const update = (next: Record<string, string>) => {
     const merged = { q, stav: chip, typ: type, pds, vlastnik: owner, spolocnost: org, page: String(page), ...next };
@@ -74,7 +77,15 @@ export function OomListPage() {
             <Source />
           </div>
         </div>
+        {canCreate && (
+          <div className="head-actions">
+            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+              Nové odberné miesto
+            </button>
+          </div>
+        )}
       </header>
+      {creating && <OomCreatePanel onClose={() => setCreating(false)} />}
 
       <Card flush label="Zoznam odberných miest">
         <div className="toolbar">
