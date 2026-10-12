@@ -2,7 +2,7 @@
 
 export type Tone = 'positive' | 'negative' | 'warning' | 'info' | 'neutral';
 
-export const SOURCE_NOTE = 'Zdroj: HubSpot, vzorka z 11. 10. 2026';
+export const SOURCE_NOTE = 'Údaje z Greenlogy CRM';
 export const HUBSPOT_PORTAL = '5964726';
 
 export const OOM_TYPE: Record<string, string> = {

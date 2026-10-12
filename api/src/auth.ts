@@ -10,6 +10,7 @@ export type AuthEnv = {
   ACCESS_TEAM_DOMAIN: string; // https://greenlogy.cloudflareaccess.com
   ACCESS_AUD: string;
   DEV_USER_EMAIL?: string; // iba lokálne (dev.sh: wrangler dev --var); na Cloudflare sa nenastavuje
+  ENVIRONMENT?: string; // 'test' alebo 'ostre' (wrangler.toml)
 };
 
 // Kľúče Access sa načítajú raz na inštanciu Workera a jose ich obnovuje sám.

@@ -8,6 +8,8 @@ import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { OomPage } from './pages/OomPage';
 import { PersonPage } from './pages/PersonPage';
+import { SETTINGS_SECTIONS, SettingsLayout, SettingsPending } from './pages/settings/SettingsLayout';
+import { MeProvider } from './lib/me';
 import './styles/tokens.css';
 import './styles/app.css';
 
@@ -30,6 +32,14 @@ const router = createBrowserRouter([
       { path: 'domacnosti/:id', element: <OldPersonRedirect /> },
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
+      {
+        path: 'nastavenia',
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="pouzivatelia" replace /> },
+          ...SETTINGS_SECTIONS.map((s) => ({ path: s.path, element: <SettingsPending title={s.label} /> })),
+        ],
+      },
       { path: '*', element: <Navigate to="/zakaznici" replace /> },
     ],
   },
@@ -37,6 +47,8 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <MeProvider>
+      <RouterProvider router={router} />
+    </MeProvider>
   </StrictMode>,
 );

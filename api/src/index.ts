@@ -1,11 +1,14 @@
-// API jadra Greenlogy CRM. Zatiaľ iba čítanie (GET); zápis príde s obrazovkami Nastavení.
+// API jadra Greenlogy CRM. Čítanie (GET) a zápis (POST, PATCH, DELETE – zatiaľ iba Nastavenia).
 // Každá požiadavka: overenie prihlásenia (Cloudflare Access) → používateľ z CRM (app_user_login)
 // → transakcia s app.user_id, takže platia práva tímu a spoločností priamo v databáze.
 // Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
 
 import { Hono } from 'hono';
 import { accessEmail } from './auth';
-import { asUser, connect, type Env, type Sql } from './db';
+import { asUser, connect } from './db';
+import { dbErrorResponse } from './errors';
+import { settings } from './routes/settings';
+import { type AppEnv, UUID } from './types';
 import { listContacts, ROLE_FILTERS } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
@@ -19,14 +22,23 @@ import {
 } from './queries/customers';
 import { oomCard } from './queries/oom';
 
-type Vars = { sql: Sql; userId: string };
+const app = new Hono<AppEnv>().basePath('/api');
 
-const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
+const WRITE_METHODS = new Set(['POST', 'PATCH', 'DELETE']);
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
+// Zápis iba ako JSON z vlastnej stránky: cudzia stránka nemôže v mene prihláseného nič zmeniť
+// (formulár inej stránky nepošle JSON a prehliadač pošle jej Origin).
 app.use('*', async (c, next) => {
-  if (c.req.method !== 'GET') return c.json({ error: 'Povolené je iba čítanie (GET).' }, 405);
+  const method = c.req.method;
+  if (method === 'GET' || method === 'HEAD') return next();
+  if (!WRITE_METHODS.has(method)) return c.json({ error: 'Nepovolená metóda.' }, 405);
+  const origin = c.req.header('origin');
+  if (origin && new URL(origin).host !== new URL(c.req.url).host) {
+    return c.json({ error: 'Požiadavka z inej stránky.' }, 403);
+  }
+  if (method !== 'DELETE' && !(c.req.header('content-type') ?? '').startsWith('application/json')) {
+    return c.json({ error: 'Očakávaný JSON.' }, 415);
+  }
   await next();
 });
 
@@ -78,6 +90,7 @@ app.get('/me', async (c) => {
   const [me] = await c.var.sql`
     SELECT u.id, u.name, u.email, u.is_admin, t.code AS team_code, t.name AS team_name,
            t.can_change_owner OR u.is_admin AS can_change_owner,
+           ${c.env.ENVIRONMENT ?? 'test'}::text AS environment,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
                                                        'currency', o.currency, 'status', o.status, 'default', o.is_default)
                                      ORDER BY o.is_default DESC, o.legal_name)
@@ -141,9 +154,13 @@ app.get('/contracts/:id', async (c) => {
   return result ? c.json(result) : notFound(c);
 });
 
+app.route('/settings', settings);
+
 app.notFound((c) => c.json({ error: 'Neznáma cesta.' }, 404));
 
 app.onError((err, c) => {
+  const known = dbErrorResponse(err);
+  if (known) return c.json(known.body, known.status);
   // Bez správy chyby: môže obsahovať hodnoty z databázy.
   const code = (err as { code?: string }).code ?? 'unknown';
   console.error(`API chyba ${c.req.method} ${c.req.routePath}: ${err.name} ${code}`);

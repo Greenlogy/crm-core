@@ -1,10 +1,10 @@
-// Ľavé menu (logo, skupiny, stav dát a tmavý režim dole) a obsah stránky.
+// Ľavé menu (logo, skupiny; dole Nastavenia pre admina, prostredie, používateľ, tmavý režim) a obsah stránky.
 
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useApi, type MenuCounts } from '../lib/api';
 import { num } from '../lib/format';
-import { SOURCE_NOTE } from '../lib/labels';
+import { ENVIRONMENT_LABEL, useMe } from '../lib/me';
 
 type Theme = 'light' | 'dark';
 
@@ -32,10 +32,13 @@ const ICONS = {
   deals: 'M3 3h18v4H3zM5 7v14h14V7M9 11h6',
   contracts: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8',
   moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
 };
 
 export function Layout() {
+  const me = useMe();
+  const defaultOrg = me.orgs.find((o) => o.default) ?? me.orgs[0];
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const { data: counts } = useApi<MenuCounts>('/api/counts');
   const navClass = ({ isActive }: { isActive: boolean }) => `nav${isActive ? ' active' : ''}`;
@@ -50,7 +53,7 @@ export function Layout() {
   }, [theme]);
 
   const disabled = (label: string, icon: string) => (
-    <span className="nav" aria-disabled="true" title="V prototype nie je">
+    <span className="nav" aria-disabled="true" title="Pripravuje sa">
       <Icon d={icon} />
       {label}
     </span>
@@ -67,7 +70,7 @@ export function Layout() {
           </span>
           <span>
             <div className="logo-name">Greenlogy</div>
-            <div className="logo-app">CRM · prototyp</div>
+            <div className="logo-app">CRM</div>
           </span>
         </div>
 
@@ -90,8 +93,20 @@ export function Layout() {
         {disabled('Zmluvy', ICONS.contracts)}
 
         <div className="sidebar-foot">
-          <span className="caption">{SOURCE_NOTE}</span>
-          <span className="caption">Iba na čítanie</span>
+          {me.is_admin && (
+            <NavLink to="/nastavenia" className={navClass}>
+              <Icon d={ICONS.settings} />
+              Nastavenia
+            </NavLink>
+          )}
+          <div className={`env-badge env-${me.environment}`} title="Prostredie a spoločnosť">
+            <span className="env-dot" aria-hidden="true" />
+            {ENVIRONMENT_LABEL[me.environment] ?? me.environment}
+            {defaultOrg ? ` · ${defaultOrg.name}` : ''}
+          </div>
+          <span className="caption" title={me.email}>
+            {me.name} · {me.team_name}
+          </span>
           <button type="button" className="nav" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             <Icon d={theme === 'dark' ? ICONS.sun : ICONS.moon} />
             {theme === 'dark' ? 'Svetlý režim' : 'Tmavý režim'}

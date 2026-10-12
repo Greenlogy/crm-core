@@ -24,6 +24,7 @@ id = "c7a47fba727d45ec83565393f125c9d0"
 
 # Cloudflare Access (nie sú tajné): tím a AUD aplikácie crm-core (rozhodnutie 2026-10-12).
 [vars]
+ENVIRONMENT = "test"   # Test (Neon dev); Ostré dostane vlastné prostredie
 ACCESS_TEAM_DOMAIN = "https://greenlogy.cloudflareaccess.com"
 ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 

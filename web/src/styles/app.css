@@ -764,3 +764,112 @@ a:hover {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* --- Prihlásenie a prostredie --- */
+
+.gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--surface-page);
+}
+.gate-card {
+  max-width: 440px;
+  padding: 24px;
+}
+.gate-card h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.gate-card p {
+  margin: 0;
+}
+.env-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.env-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+}
+.env-ostre .env-dot {
+  background: var(--negative);
+}
+
+/* --- Nastavenia (dizajn 11–16) --- */
+
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+.settings-nav {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav-label {
+  padding: 0 10px 6px;
+  text-transform: uppercase;
+}
+.settings-nav-note {
+  padding: 12px 10px 0;
+}
+.snav {
+  display: block;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  color: var(--ink-muted);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 19px;
+}
+.snav:hover {
+  background: var(--surface-muted);
+  color: var(--ink);
+  text-decoration: none;
+}
+.snav.active {
+  background: var(--surface-card);
+  color: var(--ink);
+  font-weight: 600;
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+.snav:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.settings-body {
+  flex: 1 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings-title {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.settings-title h1 {
+  margin: 0;
+}

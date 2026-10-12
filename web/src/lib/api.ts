@@ -1,6 +1,6 @@
-// Volania API jadra (iba GET) a typy odpovedí. Číselné hodnoty z databázy prichádzajú ako text.
+// Volania API jadra (čítanie aj zápis) a typy odpovedí. Číselné hodnoty z databázy prichádzajú ako text.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export type Num = string | number | null;
 
@@ -294,18 +294,32 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, { signal, headers: { Accept: 'application/json' } });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new ApiError(res.status, body.error ?? `Chyba ${res.status}`);
   return body as T;
 }
 
-export type Loadable<T> = { data?: T; error?: ApiError; loading: boolean };
+/** Zápis (POST, PATCH, DELETE) ako JSON; chyba nesie slovenskú správu z API. */
+export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: { Accept: 'application/json', ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new ApiError(res.status, body.error ?? `Chyba ${res.status}`);
+  return body as T;
+}
 
-// Načíta dáta z API pri zmene cesty; starú požiadavku zruší.
+export type Loadable<T> = { data?: T; error?: ApiError; loading: boolean; reload: () => void };
+
+// Načíta dáta z API pri zmene cesty; starú požiadavku zruší. reload() načíta znova (po uložení).
 export function useApi<T>(path: string): Loadable<T> {
-  const [state, setState] = useState<Loadable<T>>({ loading: true });
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const [state, setState] = useState<Omit<Loadable<T>, 'reload'>>({ loading: true });
   useEffect(() => {
     const ctrl = new AbortController();
     setState((s) => ({ data: s.data, loading: true }));
@@ -316,6 +330,26 @@ export function useApi<T>(path: string): Loadable<T> {
         setState({ error: err instanceof ApiError ? err : new ApiError(0, 'API nie je dostupné.'), loading: false });
       });
     return () => ctrl.abort();
-  }, [path]);
-  return state;
+  }, [path, version]);
+  return { ...state, reload };
 }
+
+// --- Prihlásený používateľ ---
+
+export type Scope = 'nic' | 'iba_svoje' | 'vsetko';
+export type ModuleCode = 'zakaznici' | 'odberne_miesta' | 'obchod' | 'zmluvy' | 'provizie' | 'servis' | 'marketing';
+export type Permission = { view: Scope; edit: Scope; archive: boolean; export: boolean };
+export type OrgRef = { id: string; name: string; country: string; currency: string; status: string; default: boolean };
+
+export type Me = {
+  id: string;
+  name: string;
+  email: string;
+  is_admin: boolean;
+  team_code: string;
+  team_name: string;
+  can_change_owner: boolean;
+  environment: string;
+  orgs: OrgRef[];
+  permissions: Partial<Record<ModuleCode, Permission>>;
+};
