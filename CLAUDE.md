@@ -20,6 +20,7 @@ Vlastník projektu a schvaľovateľ: Peter Kalman (CEO). Kód píše Claude, Pet
 6. Keď niečo nie je jasné, opýtaj sa. Obchodnú logiku nehádaj.
 7. Dokumentácia sa vedie priebežne: po dokončení úlohy aktualizuj `docs/STAV.md`, `docs/CHANGELOG.md` a dokument modulu, ktorého sa zmena týka. Rozhodnutia zapisuj do `docs/rozhodnutia.md`.
 8. Každý modul začína novou session a zadaním v `docs/moduly/`.
+9. Existujúce súbory v `docs/` mení iba Claude Code. Od Clauda z chatu prichádzajú len nové súbory alebo pokyn „doplň do súboru X časť Y“. Ak by sa zmena z chatu predsa dotkla existujúceho súboru, pred commitom ju porovnaj s poslednou verziou v repozitári (`git diff`) a upozorni Petra na všetko, čo by sa zmazalo.
 
 ## Technológie
 

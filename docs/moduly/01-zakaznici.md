@@ -134,3 +134,23 @@ Zobrazenie: „Domácnosť“, „Domácnosť · výrobca“, „Firma“, „Fi
 ## 14. Zmena podľa modulu 2 (12. 10. 2026)
 
 Stav OOM „Neaktívne“ v HubSpote v skutočnosti znamenal OOM, ktoré čaká na začiatok dodávky. V CRM sa volá **Pripravované** a stav Neaktívne sa ruší. Pravidlá stavov v časti 4 sú upravené: Zákazník = aspoň jedno Aktívne OOM; Čakajúci zákazník = žiadne Aktívne, ale Pripravované OOM alebo podpísaná zmluva s budúcou účinnosťou.
+
+## 15. Dokončenie modulu nad Nastaveniami (F1–F4)
+
+Schválené 12. 10. 2026.
+
+Plán (fázy, každá s testovacím scenárom pre Petra; nasadenie na Test robí Peter, commit až po jeho vyskúšaní):
+
+- **F1 – Nová firma, nová osoba, úprava:** spoločnosť, krajina a IČO/OIB, označenia, vlastník; kontrola duplicít (IČO; e-mail a telefón iba upozornenie); úprava podľa práv tímu.
+- **F2 – Firma – osoba, vlastník, marketing, časová os:** pridanie a odobratie osoby vo firme, roly z číselníka, hlavný kontakt; zmena vlastníka (CEO a admin); „nechce marketing“ (dátum a zdroj); poznámka na časovej osi firmy a osoby (autor a čas); „Vývoj stavu“ na karte firmy aj osoby z auditu.
+- **F3 – Vlastné polia** na kartách (po sekciách), v zoznamoch ako stĺpce a filtre.
+- **F4 – Zoznamy a export:** zoznam Zákazníci predvolene bez marketingových kontaktov a archívu (prepínač „zobraziť aj…“); Leady = filter Záujemca + Ponuka; hľadanie podľa názvu, IČO/OIB, e-mailu a telefónu; filter a stĺpec Spoločnosť pre tímy so všetkými spoločnosťami; export do .xlsx s právom „exportovať“ a záznamom exportu.
+
+Rozhodnuté:
+
+1. **FinStat:** v F1 ručné vyplnenie; napojenie podľa IČO neskôr ako samostatný krok, API kľúč iba cez `wrangler secret`.
+2. **Servis** mení e-mail, telefón, mobil, adresu, „nechce marketing“, pridáva a odoberá osobu vo firme a mení jej roly. Nemení názov, IČO, označenia ani vlastníka.
+3. **Mazanie:** admin smie zmazať firmu alebo osobu bez väzieb (deal, odberné miesto, zmluva, osoba vo firme, aktivita); audit zapíše kto, kedy a celý obsah záznamu. Inak iba archív.
+4. **Export:** súbor .xlsx; IČO/OIB, telefóny a EIC ako text (bez straty úvodných núl).
+
+Stav: F1–F4 na Teste, Peter vyskúšal 12. 10. 2026.
