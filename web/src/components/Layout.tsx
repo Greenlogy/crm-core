@@ -88,7 +88,10 @@ export function Layout() {
           <Icon d={ICONS.customers} />
           Kontakty
         </NavLink>
-        {disabled('Odberné miesta', ICONS.oom)}
+        <NavLink to="/oom" end={false} className={navClass}>
+          <Icon d={ICONS.oom} />
+          Odberné miesta
+        </NavLink>
         {disabled('Dealy', ICONS.deals)}
         {disabled('Zmluvy', ICONS.contracts)}
 

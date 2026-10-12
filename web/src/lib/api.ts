@@ -60,12 +60,17 @@ export type ContactListItem = {
 
 export type ContactList = { page: number; pageSize: number; total: number; items: ContactListItem[] };
 
+/** OOM zákazníka (väzba): stav podľa obdobia väzby; eic a údaje sú null, ak OOM už patrí inému a používateľ ho nevidí. */
 export type OomRow = {
   id: string;
-  eic: string;
-  type: string;
+  link_id?: string;
+  eic: string | null;
+  name?: string | null;
+  type: string | null;
   status: string;
-  segment: string | null;
+  valid_from?: string;
+  valid_to?: string | null;
+  end_reason?: string | null;
   address_street: string | null;
   address_city: string | null;
   address_zip: string | null;
@@ -233,19 +238,70 @@ export type PersonCard = CardBase & {
   }[];
 };
 
-export type OomCard = OomRow & {
+export type OomLink = {
+  id: string;
   company_id: string | null;
   person_id: string | null;
   customer_kind: 'company' | 'person';
-  customer_name: string;
+  customer_name: string | null;
+  valid_from: string;
+  valid_to: string | null;
+  status: string;
+  end_reason: string | null;
+};
+
+export type OomDevice = {
+  id: string;
+  device_type: string;
+  brand: string | null;
+  model: string | null;
+  power_kw: Num;
+  capacity_kwh: Num;
+  count: number;
+};
+
+export type AuditEvent = {
+  id: string;
+  table_name: 'oom' | 'oom_customer' | 'oom_device' | 'oom_contact';
+  record_id: string;
+  action: 'insert' | 'update' | 'delete';
+  diff: Record<string, unknown>;
+  changed_at: string;
+  source: string;
+  user_name: string | null;
+  import_file: string | null;
+};
+
+/** Karta OOM (api/src/queries/oom.ts): riadok oom + údaje z oom_v + popisy číselníkov + práva. */
+export type OomCard = {
+  id: string;
+  eic: string;
+  name: string | null;
+  type: string;
+  status: string;
+  company_id: string | null;
+  person_id: string | null;
+  customer_kind: 'company' | 'person';
+  customer_type: 'B2B' | 'B2C';
+  customer_name: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  org_id: string;
+  org_name: string;
   hubspot_id: string | null;
+  address_street: string | null;
   address_number_supisne: string | null;
   address_number_orientacne: string | null;
+  address_city: string | null;
+  address_zip: string | null;
   pds: string | null;
+  pds_label: string | null;
   pds_point_id: string | null;
   pds_tariff: string | null;
+  pds_tariff_label: string | null;
   voltage_level: string | null;
   metering_type: string | null;
+  metering_type_label: string | null;
   phases: number | null;
   breaker_a: Num;
   reserved_capacity_kw: Num;
@@ -254,19 +310,99 @@ export type OomCard = OomRow & {
   price_regulation: string | null;
   excise_tax: string | null;
   billing_period: string | null;
+  billing_period_label: string | null;
   advance_payment_method: string | null;
+  advance_payment_method_label: string | null;
   advance_payment_pct: Num;
+  advance_payment_eur: Num;
+  planned_consumption_vt_mwh: Num;
+  planned_consumption_nt_mwh: Num;
+  planned_feed_in_mwh: Num;
+  planned_mwh: Num;
   source_kind: string | null;
-  source_type: string | null;
-  feed_in_contract_type: string | null;
+  source_category: string | null;
+  source_power_kw: Num;
   inverter_power_kw: Num;
   panels_power_kw: Num;
-  previous_supplier_notice: string | null;
-  previous_supplier_notice_accepted_at: string | null;
+  feed_in_contract_type: string | null;
+  feed_in_contract_type_label: string | null;
+  supply_from: string | null;
+  supply_to: string | null;
+  previous_supplier: string | null;
+  previous_supplier_label: string | null;
+  switch_notice_required: boolean;
+  switch_notice_sent_on: string | null;
+  switch_notice_accepted_on: string | null;
+  switch_confirmed_on: string | null;
+  switch_stuck: boolean;
+  oom_switch_accept_days: number;
+  oom_switch_confirm_days: number;
+  active_missing: string[] | null;
+  transferred_from_name: string | null;
+  transferred_on: string | null;
+  custom: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  can_edit: boolean;
+  can_edit_active: boolean;
+  links: OomLink[];
+  devices: OomDevice[];
+  contacts: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    mobile: string | null;
+    sources: string[];
+    roles: string[];
+    role_labels: string[];
+  }[];
   deals: DealRow[];
   prices: PriceRow[];
-  contacts: { id: string; name: string; email: string | null; phone: string | null; mobile: string | null }[];
+  timeline: AuditEvent[];
+  names: Record<string, string>;
 };
+
+export type OomListItem = {
+  id: string;
+  eic: string;
+  name: string | null;
+  address_street: string | null;
+  address_number_supisne: string | null;
+  address_number_orientacne: string | null;
+  address_city: string | null;
+  address_zip: string | null;
+  type: string;
+  status: string;
+  company_id: string | null;
+  person_id: string | null;
+  customer_type: 'B2B' | 'B2C';
+  customer_name: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  org_id: string;
+  org_name: string;
+  pds: string | null;
+  pds_label: string | null;
+  pds_tariff_label: string | null;
+  planned_mwh: Num;
+  supply_from: string | null;
+  supply_to: string | null;
+  switch_stuck: boolean;
+  active_missing: string[] | null;
+  transferred_from_name: string | null;
+  transferred_on: string | null;
+};
+
+export type OomList = {
+  page: number;
+  pageSize: number;
+  total: number;
+  counts: { all: number; pripravovane: number; aktivne: number; odidene: number; zrusene: number; prepisane: number; zasekol: number };
+  items: OomListItem[];
+};
+
+export type OomFilters = { pds: { code: string; label: string }[]; owners: { id: string; name: string }[] };
 
 export type ContractCard = {
   id: string;

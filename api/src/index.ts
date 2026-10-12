@@ -23,7 +23,7 @@ import {
   STATUS_FILTERS,
   type CustomerKind,
 } from './queries/customers';
-import { oomCard } from './queries/oom';
+import { listOom, OOM_CHIPS, OOM_TYPES, oomCard, oomFilters } from './queries/oom';
 import { dailyOomActivation } from './jobs';
 
 const app = new Hono<AppEnv>().basePath('/api');
@@ -150,6 +150,25 @@ const card = (kind: CustomerKind) =>
   });
 card('company');
 card('person');
+
+// Zoznam OOM: q (EIC, názov, adresa, zákazník), stav (tlačidlo: stav, prepisane, zasekol), typ, pds, owner, org, page.
+app.get('/oom', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const chip = c.req.query('stav') ?? '';
+  const type = c.req.query('typ') ?? '';
+  const pds = c.req.query('pds') ?? '';
+  const owner = c.req.query('owner') ?? '';
+  const org = c.req.query('org') ?? '';
+  const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
+  if (!OOM_CHIPS.has(chip)) return c.json({ error: 'Neplatný stav.' }, 400);
+  if (type !== '' && !(OOM_TYPES as readonly string[]).includes(type)) return c.json({ error: 'Neplatný typ.' }, 400);
+  if (!/^[a-z0-9_]{0,63}$/.test(pds)) return c.json({ error: 'Neplatné PDS.' }, 400);
+  if (owner !== '' && !UUID.test(owner)) return c.json({ error: 'Neplatný vlastník.' }, 400);
+  if (org !== '' && !UUID.test(org)) return c.json({ error: 'Neplatná spoločnosť.' }, 400);
+  return c.json(await listOom(c.var.sql, { q, chip, type, pds, owner, org, page }));
+});
+
+app.get('/oom-filters', async (c) => c.json(await oomFilters(c.var.sql)));
 
 app.get('/oom/:id', async (c) => {
   const id = c.req.param('id');

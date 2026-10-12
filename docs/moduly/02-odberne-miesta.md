@@ -124,3 +124,26 @@ Zatiaľ sa nič nenahráva (rozhodnutie 12. 10. 2026). Plán nahrávania sa urč
 - Import z Excelu zakladá nové OOM aj hromadne aktualizuje existujúce podľa EIC, s náhľadom zmien.
 - Pripravované → Aktívne: stačí, keď servis označí „zmena dodávateľa potvrdená“ a nastane dátum začiatku dodávky.
 - Importovať smú Servis, Nákup a CEO.
+
+## 15. Dokončenie modulu: API a obrazovky (F1–F4)
+
+Schválené 12. 10. 2026. Postup ako pri Zákazníkoch: každá fáza má testovací scenár pre Petra, nasadenie na Test robí Peter, commit až po jeho vyskúšaní. Databáza je hotová (migrácie `0013`–`0015`, návrh `02-odberne-miesta-navrh-db.md`).
+
+- **F1 – Zoznam a karta OOM (čítanie):** zoznam (obrazovka 17) s tlačidlami stavov a počtami, „Prepísané“ a „Prechod sa zasekol“, filtre typ, PDS, vlastník, spoločnosť, hľadanie podľa EIC (aj s medzerami a malými písmenami), názvu, adresy a zákazníka; karta (obrazovka 18) so záložkami Prehľad, Zmluvy a ceny, Kontaktné osoby; história väzieb a „Komu patrilo k dátumu“, prechod k Greenlogy, zariadenia, časová os z auditu; sekcia OOM na karte zákazníka zo všetkých väzieb.
+- **F2 – Zápis:** nové OOM (kontrola EIC hneď pri písaní), úprava údajov (sadzby podľa PDS, práva podľa stavu), kroky prechodu, zmena stavu, prepis, návrat, zariadenia, kontaktné osoby, zmazanie (admin); v Nastaveniach lehoty „Prechod sa zasekol“ (obrazovka 11) a sadzby s PDS a IČO pri PDS (Číselníky).
+- **F3 – Vlastné polia a export:** vlastné polia OOM na karte a v zozname; **export zoznamu OOM do .xlsx** s právom „exportovať“ a záznamom exportu (EIC, IČO a PSČ ako text) – doplnené rovnako ako pri Zákazníkoch.
+- **F4 – Import z Excelu (obrazovka 19):** šablóna, nahratie, náhľad, uloženie platných riadkov v jednej transakcii, záznam importu, audit. **Na čítanie .xlsx sa použije overená knižnica** (nie vlastný parser); export môže ostať vlastný. Test importu na súboroch: dátum ako číslo, úvodné nuly v IČO a PSČ, vzorec v bunke, prázdne riadky, viac hárkov, EIC s medzerami a malými písmenami.
+
+Rozhodnuté:
+1. Poradie F1 → F2 → F3 → F4.
+2. Záložka „Dokumenty“ na karte OOM je zatiaľ skrytá (úložisko súborov príde neskôr).
+3. Export zoznamu OOM patrí do modulu (F3).
+4. Testovacie dáta na Test: skript `db/test-data/oom-test.sh dev vytvor|zmaz` (10 zákazníkov a 20 OOM so znakom „TEST“, iba vymyslené údaje); spúšťa Peter.
+
+Stav: F1 na Teste, Peter vyskúšal 12. 10. 2026.
+
+Rozhodnuté po F1 (12. 10. 2026):
+5. **Plánované zmeny:** prepis, odchod a zrušenie možno zadať k budúcemu dátumu; vykoná ich nočný beh v ten deň (ako aktiváciu Pripravovaných). Dovtedy sa stavy nemenia, karta OOM aj zákazníka ukáže „Plánovaný prepis / odchod / zrušenie k dátumu“; plán možno pred termínom zrušiť alebo zmeniť dátum. Audit: zadanie plánu (meno) aj vykonanie („Systém“). Rieši migrácia `0016` vo fáze F2.
+6. **História po prepise pre „iba svoje“:** obchodník starého zákazníka vidí v histórii aj EIC (funkcia v databáze, `0016`).
+7. **RLS na audite** je podmienkou odomknutia externého tímu (`docs/STAV.md`).
+

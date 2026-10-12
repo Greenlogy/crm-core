@@ -83,23 +83,27 @@ export const SOURCE_KIND: Record<string, string> = {
   fve: 'Fotovoltická elektráreň',
   voda: 'Vodná elektráreň',
   bioplyn: 'Bioplyn',
+  biomasa: 'Biomasa',
   plyn: 'Plyn',
   vietor: 'Veterná elektráreň',
   ostatne_oze: 'Ostatné OZE',
 };
-export const SOURCE_TYPE: Record<string, string> = {
-  virtualna_bateria: 'Virtuálna batéria',
+// Kategória zdroja podľa zákona (zadanie OOM čl. 7; 0013)
+export const SOURCE_CATEGORY: Record<string, string> = {
+  maly_zdroj: 'Malý zdroj',
   lokalny_zdroj: 'Lokálny zdroj',
   vyrobny_zdroj: 'Výrobný zdroj',
-  green_viwa: 'Green VIWA',
 };
-export const SUPPLIER_NOTICE: Record<string, string> = {
-  akceptacia: 'Akceptácia výpovede',
-  bez_akceptacie: 'Bez akceptácie',
-  nezasiela_sa: 'Výpoveď sa nezasiela',
-  odoslana: 'Výpoveď odoslaná',
-  potvrdena: 'Výpoveď potvrdená',
+export const VOLTAGE_LEVEL: Record<string, string> = { nn: 'NN', vn: 'VN', vvn: 'VVN' };
+export const DEVICE_TYPE: Record<string, string> = {
+  striedac: 'Striedač',
+  panely: 'Panely',
+  bateria: 'Batéria',
+  tepelne_cerpadlo: 'Tepelné čerpadlo',
+  wallbox: 'Wallbox',
 };
+// Stav väzby OOM – zákazník a dôvod jej ukončenia
+export const LINK_END_REASON: Record<string, string> = { odchod: 'odchod k inému dodávateľovi', zrusenie: 'zrušenie', prepis: 'prepis' };
 
 export function dealTone(d: { is_closed: boolean; is_won: boolean }): Tone {
   if (d.is_won) return 'positive';

@@ -190,17 +190,19 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
   if (!head) return null;
 
   const [kpi, contacts, companies, ooms, deals, contracts, history, timeline] = await Promise.all([
+    // Ukazovatele z otvorených väzieb OOM (Pripravované a Aktívne), modul OOM (0013)
     sql`
       SELECT count(*)::int AS oom_count,
-             count(*) FILTER (WHERE status = 'aktivne')::int AS oom_active,
-             sum(coalesce(planned_consumption_vt_mwh, 0) + coalesce(planned_consumption_nt_mwh, 0))
-               FILTER (WHERE type <> 'vyroba') AS planned_consumption_mwh,
-             count(*) FILTER (WHERE type <> 'vyroba' AND status = 'aktivne')::int AS consumption_active,
-             sum(planned_feed_in_mwh) AS planned_feed_in_mwh,
-             sum(source_power_kw) AS source_power_kw,
-             count(*) FILTER (WHERE type = 'vyroba')::int AS production_count,
+             count(*) FILTER (WHERE l.status = 'aktivne')::int AS oom_active,
+             sum(coalesce(o.planned_consumption_vt_mwh, 0) + coalesce(o.planned_consumption_nt_mwh, 0))
+               FILTER (WHERE o.type <> 'vyroba') AS planned_consumption_mwh,
+             count(*) FILTER (WHERE o.type <> 'vyroba' AND l.status = 'aktivne')::int AS consumption_active,
+             sum(o.planned_feed_in_mwh) AS planned_feed_in_mwh,
+             sum(o.source_power_kw) AS source_power_kw,
+             count(*) FILTER (WHERE o.type = 'vyroba')::int AS production_count,
              (SELECT count(*)::int FROM contract WHERE ${owner} AND status = 'aktivna') AS active_contracts
-        FROM oom WHERE ${owner}`,
+        FROM oom_customer l JOIN oom o ON o.id = l.oom_id
+       WHERE l.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id} AND l.valid_to IS NULL`,
     kind === 'company'
       ? sql`
           SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email, p.phone, p.mobile,
@@ -224,12 +226,18 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
            WHERE cc.contact_id = ${id}
            ORDER BY cc.is_main_contact DESC, c.name`
       : sql`SELECT NULL LIMIT 0`,
+    // OOM zákazníka zo všetkých väzieb (aj odídené a prepísané) so stavom podľa obdobia väzby.
+    // OOM, ktoré už patrí inému zákazníkovi a používateľ ho nevidí (RLS), má prázdne údaje okrem väzby.
     sql`
-      SELECT id, eic, type, status, address_street, address_city, address_zip,
-             planned_consumption_vt_mwh, planned_consumption_nt_mwh, planned_feed_in_mwh, source_power_kw,
-             supply_from, supply_to
-        FROM oom WHERE ${owner}
-       ORDER BY status, eic`,
+      SELECT l.oom_id AS id, l.id AS link_id, o.eic, o.name, o.type, l.status, l.valid_from, l.valid_to, l.end_reason,
+             o.address_street, o.address_city, o.address_zip,
+             o.planned_consumption_vt_mwh, o.planned_consumption_nt_mwh, o.planned_feed_in_mwh, o.source_power_kw,
+             o.supply_from, o.supply_to
+        FROM oom_customer l
+        LEFT JOIN oom o ON o.id = l.oom_id
+       WHERE l.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
+       ORDER BY l.valid_to IS NULL DESC, array_position(ARRAY['aktivne', 'pripravovane', 'odidene', 'prepisane', 'zrusene'], l.status::text),
+                o.eic, l.valid_from DESC`,
     sql`
       SELECT d.id, d.name, pl.name AS pipeline, st.name AS stage, st.is_closed, st.is_won,
              d.closed_at, d.created_at, d.hubspot_id, u.name AS owner_name,

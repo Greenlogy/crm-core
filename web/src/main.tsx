@@ -6,6 +6,7 @@ import { ContactsPage } from './pages/ContactsPage';
 import { ContractPage } from './pages/ContractPage';
 import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
+import { OomListPage } from './pages/OomListPage';
 import { OomPage } from './pages/OomPage';
 import { PersonPage } from './pages/PersonPage';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
       { path: 'firmy/:id', element: <CustomerPage /> },
       { path: 'osoby/:id', element: <PersonPage /> },
       { path: 'domacnosti/:id', element: <OldPersonRedirect /> },
+      { path: 'oom', element: <OomListPage /> },
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
       {

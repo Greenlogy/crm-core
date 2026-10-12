@@ -22,6 +22,7 @@ Aktualizované: 12. 10. 2026 (neskoro večer)
 
 ## Otvorené
 
+- **Podmienka odomknutia externého tímu** (`crm_external_ready`): okrem RLS na dealoch a zmluvách aj RLS na `audit_log` – dnes ho prihlásený používateľ vie čítať celý, vrátane zmien cudzích záznamov (Peter 12. 10.)
 - IČO PDS v číselníku (ZSD, SSD, VSD, SLOVNAFT, JAVYS) doplnené z pamäti – Peter overí vo FinState / ORSR; ostatné miestne DS bez IČO
 - C2-X3 pri miestnych DS (18 OOM) a X3-C2 pri miestnych DS (3 OOM): do číselníka nedané (pravidlo iba ZSD / iba VSD) – potvrdiť pri nahrávaní
 - **Pred Ostrým:** CRM pri pozvaní a deaktivácii externého používateľa samo pridá / odoberie e-mail v skupine Cloudflare Access „CRM externí“ (dovtedy ručne); treba API token s právom iba na skupiny a relácie Access
@@ -45,7 +46,7 @@ Aktualizované: 12. 10. 2026 (neskoro večer)
 
 ## Ďalší krok
 
-- Modul 2 Odberné miesta: obrazovka 13 (Tímy a práva) – stĺpce „Importovať“ a „Upravovať Aktívne OOM“ pri module Odberné miesta (API + web); potom API a obrazovky OOM (zoznam 17, karta 18, import 19) vo fázach ako pri Zákazníkoch; overiť v logu Workera nočné „Aktivácia OOM: 0“.
+- Modul 2 Odberné miesta: F1 (zoznam a karta OOM) na Teste, Peter vyskúšal. Ďalej F2 (zápis) s migráciou `0016`: plánované zmeny (prepis, odchod, zrušenie k budúcemu dátumu, vykoná nočný beh), EIC v histórii väzieb pre „iba svoje“; testovacie dáta `db/test-data/oom-test.sh dev vytvor|zmaz`.
 - Modul 0 Nastavenia: kroky A–C hotové na Teste (12. 10.): rola `crm_app` (migrácia 0009), Hyperdrive `crm-core-dev` → `crm_app` s vypnutou cache, Worker nasadený s prihlásením (overenie tokenu Access + používateľ CRM); `/api/me` overené (Peter: CEO, admin, 3 spoločnosti). Ďalej: v Access povoliť @greenlogy.com (Google), potom obrazovky Nastavení (11–16) a zápis v API.
 - Obrazovky Nastavení: fáza 1 na Teste (commit `70c2099`). Fázy 2–6 napísané a lokálne overené (API aj obrazovky): Používatelia (pozvanie s textom pozvánky, úprava, deaktivácia s odovzdaním), Tímy a práva (matica, nový tím, archív), Spoločnosť (údaje, logo, bankové účty, pracovný čas, firemné voľno), Číselníky, Vlastné polia (typy, hodnoty výberu, sekcie, tímy, archív), Pipelines a stage (poradie, pravdepodobnosť, typ, povinné polia), Audit (filtre, stránkovanie). Nová migrácia `0010_work_hours_delete`. Na Teste (12. 10.): migrácia 0010, práva roly, nasadenie; Peter overil, všetko funguje.
 - Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. Prototyp beží na https://crm-core.peter-700.workers.dev (Access, iba Peter). Ďalej krok 8: Peter prezrie vzorku a zapíše zistenia.

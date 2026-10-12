@@ -1464,3 +1464,45 @@ textarea.inp {
   color: var(--warning);
   padding-top: 8px;
 }
+
+/* --- Odberné miesta: záložky karty, „komu patrilo k dátumu“ --- */
+
+.tabs {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  margin: 4px 0 16px;
+}
+.tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--brand);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.at-date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--surface-muted);
+}
+.at-date .input {
+  width: auto;
+}

@@ -42,26 +42,37 @@ export function StatusHistoryCard(props: { history: StatusChange[] }) {
   );
 }
 
+// OOM zákazníka zo všetkých väzieb: stav platí pre obdobie väzby (po prepise u starého zákazníka „Prepísané“).
 export function OomsCard(props: { ooms: OomRow[] }) {
+  const open = props.ooms.filter((o) => !o.valid_to).length;
   return (
-    <Card title={`Odberné miesta (${props.ooms.length})`}>
+    <Card title={`Odberné miesta (${open})`} aside={props.ooms.length > open ? <span className="caption">a {props.ooms.length - open} v histórii</span> : undefined}>
       {props.ooms.length === 0 ? (
         <Empty>Zatiaľ žiadne OOM.</Empty>
       ) : (
         props.ooms.map((o) => (
           <Item
-            key={o.id}
+            key={o.link_id ?? o.id}
             title={
-              <Link to={`/oom/${o.id}`} className="mono" style={{ color: 'var(--brand-text)' }}>
-                {o.eic}
-              </Link>
+              o.eic ? (
+                <Link to={`/oom/${o.id}`} className="mono" style={{ color: 'var(--brand-text)' }}>
+                  {o.eic}
+                </Link>
+              ) : (
+                <span className="muted">OOM patrí inému zákazníkovi</span>
+              )
             }
             meta={[
-              label(OOM_TYPE, o.type),
+              o.name,
+              o.type && label(OOM_TYPE, o.type),
               [o.address_street, o.address_city].filter(Boolean).join(', '),
-              o.type === 'spotreba'
-                ? mwh(sumNum(o.planned_consumption_vt_mwh, o.planned_consumption_nt_mwh))
-                : `výkup ${mwh(o.planned_feed_in_mwh)}`,
+              o.valid_to
+                ? period(o.valid_from ?? null, o.valid_to)
+                : o.type === 'vyroba'
+                  ? `výkup ${mwh(o.planned_feed_in_mwh)}`
+                  : o.type
+                    ? mwh(sumNum(o.planned_consumption_vt_mwh, o.planned_consumption_nt_mwh))
+                    : null,
             ]
               .filter(Boolean)
               .join(' · ')}
