@@ -74,7 +74,8 @@ CREATE TYPE public.audit_action AS ENUM (
 CREATE TYPE public.audit_source AS ENUM (
     'aplikacia',
     'system',
-    'synchronizacia'
+    'synchronizacia',
+    'import'
 );
 
 
@@ -339,6 +340,16 @@ CREATE TYPE public.offer_status AS ENUM (
 CREATE TYPE public.oom_contact_source AS ENUM (
     'rucne',
     'zmluva'
+);
+
+
+--
+-- Name: oom_import_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_import_status AS ENUM (
+    'ulozeny',
+    'zlyhal'
 );
 
 
@@ -730,6 +741,7 @@ DECLARE
   v_diff    jsonb;
   v_id      uuid;
   v_user    uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  v_import  uuid := nullif(current_setting('app.import_id', true), '')::uuid;
   v_source  audit_source;
 BEGIN
   IF TG_OP = 'INSERT' THEN
@@ -767,12 +779,13 @@ BEGIN
 
   v_source := coalesce(
     nullif(current_setting('app.change_source', true), '')::audit_source,
-    CASE WHEN current_user = 'crm_sync' THEN 'synchronizacia'
+    CASE WHEN v_import IS NOT NULL THEN 'import'
+         WHEN current_user = 'crm_sync' THEN 'synchronizacia'
          WHEN v_user IS NOT NULL THEN 'aplikacia'
          ELSE 'system' END::audit_source);
 
-  INSERT INTO audit_log (table_name, record_id, action, changed_by, diff, source)
-  VALUES (TG_TABLE_NAME, v_id, lower(TG_OP)::audit_action, v_user, v_diff, v_source);
+  INSERT INTO audit_log (table_name, record_id, action, changed_by, diff, source, import_id)
+  VALUES (TG_TABLE_NAME, v_id, lower(TG_OP)::audit_action, v_user, v_diff, v_source, v_import);
 
   RETURN coalesce(NEW, OLD);
 END;
@@ -1105,6 +1118,20 @@ $$;
 
 
 --
+-- Name: crm_can_edit_active_oom(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_can_edit_active_oom() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service()
+      OR EXISTS (SELECT 1 FROM app_user u JOIN team_permission p ON p.team_id = u.team_id
+                  WHERE u.id = crm_active_user_id() AND p.module = 'odberne_miesta' AND p.can_edit_active_oom)
+$$;
+
+
+--
 -- Name: custom_field; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1185,6 +1212,20 @@ $$;
 
 
 --
+-- Name: crm_can_import(public.crm_module); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_can_import(p_module public.crm_module) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service()
+      OR EXISTS (SELECT 1 FROM app_user u JOIN team_permission p ON p.team_id = u.team_id
+                  WHERE u.id = crm_active_user_id() AND p.module = p_module AND p.can_import)
+$$;
+
+
+--
 -- Name: crm_company_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1246,6 +1287,19 @@ $$;
 
 
 --
+-- Name: crm_customer_owned(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_customer_owned(p_company_id uuid, p_person_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM company WHERE id = p_company_id AND owner_id = crm_active_user_id())
+      OR EXISTS (SELECT 1 FROM contact WHERE id = p_person_id AND owner_id = crm_active_user_id())
+$$;
+
+
+--
 -- Name: crm_entity_table(public.crm_entity); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1288,6 +1342,34 @@ CREATE FUNCTION public.crm_is_service() RETURNS boolean
     LANGUAGE sql STABLE
     AS $$
   SELECT crm_current_user_id() IS NULL AND NOT crm_require_user()
+$$;
+
+
+--
+-- Name: crm_oom_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_oom_access(p_oom_id uuid, p_action text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM oom o
+     WHERE o.id = p_oom_id
+       AND o.org_id = ANY (crm_user_orgs())
+       AND (crm_scope('odberne_miesta', p_action) = 'vsetko'
+            OR (crm_scope('odberne_miesta', p_action) = 'iba_svoje' AND crm_customer_owned(o.company_id, o.person_id))))
+$$;
+
+
+--
+-- Name: crm_oom_system_step(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_oom_system_step() RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT coalesce(current_setting('crm.oom_system', true), '') = 'on'
 $$;
 
 
@@ -2317,6 +2399,26 @@ $$;
 
 
 --
+-- Name: oom_active_edit_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_active_edit_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD.status = 'aktivne' AND pg_trigger_depth() < 2 AND NOT crm_oom_system_step()
+     AND NOT crm_can_edit_active_oom()
+     AND (to_jsonb(NEW) - ARRAY['company_id', 'person_id', 'status', 'updated_at'])
+         IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['company_id', 'person_id', 'status', 'updated_at']) THEN
+    RAISE EXCEPTION 'Aktívne odberné miesto môže upravovať iba tím s právom „upravovať Aktívne OOM“.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: oom_active_required_check(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2366,6 +2468,25 @@ $$;
 --
 
 COMMENT ON FUNCTION public.oom_active_required_missing(o public.oom) IS 'chýbajúce povinné údaje pre stav Aktívne (prázdne pole = OK)';
+
+
+--
+-- Name: oom_child_active_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_child_active_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF (SELECT status FROM oom WHERE id = coalesce(NEW.oom_id, OLD.oom_id)) = 'aktivne'
+     AND NOT crm_oom_system_step() AND NOT crm_can_edit_active_oom() THEN
+    RAISE EXCEPTION 'Aktívne odberné miesto môže upravovať iba tím s právom „upravovať Aktívne OOM“.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END;
+$$;
 
 
 --
@@ -2482,6 +2603,70 @@ BEGIN
   END IF;
   RETURN NULL;
 END;
+$$;
+
+
+--
+-- Name: oom_delete(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_delete(p_oom_id uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_eic   text;
+  v_links text[];
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Zmazať odberné miesto môže iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NOT crm_oom_access(p_oom_id, 'view') THEN
+    RAISE EXCEPTION 'Odberné miesto neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT eic INTO v_eic FROM oom WHERE id = p_oom_id;
+  v_links := array_remove(ARRAY[
+    CASE WHEN EXISTS (SELECT 1 FROM deal_oom WHERE oom_id = p_oom_id) THEN 'dealy' END,
+    CASE WHEN EXISTS (SELECT 1 FROM contract_price WHERE oom_id = p_oom_id) THEN 'ceny zo zmlúv' END,
+    CASE WHEN EXISTS (SELECT 1 FROM offer_item WHERE oom_id = p_oom_id) THEN 'položky ponúk' END,
+    CASE WHEN EXISTS (SELECT 1 FROM activity WHERE oom_id = p_oom_id) THEN 'aktivity' END,
+    CASE WHEN EXISTS (SELECT 1 FROM conversation WHERE oom_id = p_oom_id) THEN 'konverzácie' END,
+    CASE WHEN EXISTS (SELECT 1 FROM supplier_switch WHERE oom_id = p_oom_id) THEN 'správy OKTE / PDS' END
+  ], NULL);
+  IF cardinality(v_links) > 0 THEN
+    RAISE EXCEPTION 'Odberné miesto má väzby (%), nedá sa zmazať – iba zrušiť.', array_to_string(v_links, ', ')
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  PERFORM set_config('crm.oom_system', 'on', true);
+  DELETE FROM oom_contact WHERE oom_id = p_oom_id;
+  DELETE FROM oom_device WHERE oom_id = p_oom_id;
+  DELETE FROM oom_customer WHERE oom_id = p_oom_id;
+  DELETE FROM oom WHERE id = p_oom_id;
+  PERFORM set_config('crm.oom_system', '', true);
+  RETURN v_eic;
+END;
+$$;
+
+
+--
+-- Name: oom_eic_check(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_eic_check(p_eic text) RETURNS TABLE(oom_exists boolean, oom_id uuid, owner_name text, org_name text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT true,
+         CASE WHEN crm_oom_access(o.id, 'view') THEN o.id END,
+         u.name,
+         g.legal_name
+    FROM oom o
+    JOIN org g ON g.id = o.org_id
+    LEFT JOIN company c ON c.id = o.company_id
+    LEFT JOIN contact p ON p.id = o.person_id
+    LEFT JOIN app_user u ON u.id = coalesce(c.owner_id, p.owner_id)
+   WHERE o.eic = upper(regexp_replace(p_eic, '\s', '', 'g'))
 $$;
 
 
@@ -2696,7 +2881,9 @@ BEGIN
   END IF;
 
   UPDATE oom_customer SET valid_to = p_date - 1, end_reason = 'prepis', status = 'prepisane' WHERE id = v_link.id;
+  PERFORM set_config('crm.oom_system', 'on', true);
   DELETE FROM oom_contact WHERE oom_id = p_oom_id;
+  PERFORM set_config('crm.oom_system', '', true);
   INSERT INTO oom_customer (oom_id, company_id, person_id, org_id, valid_from, status)
   VALUES (p_oom_id, p_company_id, p_person_id, v_link.org_id, p_date, v_link.status)
   RETURNING id INTO v_id;
@@ -2998,7 +3185,8 @@ CREATE TABLE public.audit_log (
     changed_by uuid,
     changed_at timestamp with time zone DEFAULT now() NOT NULL,
     diff jsonb NOT NULL,
-    source public.audit_source DEFAULT 'system'::public.audit_source NOT NULL
+    source public.audit_source DEFAULT 'system'::public.audit_source NOT NULL,
+    import_id uuid
 );
 
 
@@ -3021,6 +3209,13 @@ COMMENT ON COLUMN public.audit_log.diff IS 'insert: nový riadok; update: {stĺp
 --
 
 COMMENT ON COLUMN public.audit_log.source IS 'aplikacia = prihlásený používateľ; system = údržba alebo výpočet CRM; synchronizacia = rola crm_sync. API môže prepísať cez SET LOCAL app.change_source';
+
+
+--
+-- Name: COLUMN audit_log.import_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.audit_log.import_id IS 'zmena urobená importom z Excelu (API nastaví SET LOCAL app.import_id); zdroj = import';
 
 
 --
@@ -4116,6 +4311,37 @@ CREATE TABLE public.oom_device (
 
 
 --
+-- Name: oom_import; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_import (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    file_name text NOT NULL,
+    row_count integer NOT NULL,
+    created_count integer NOT NULL,
+    updated_count integer NOT NULL,
+    error_count integer NOT NULL,
+    status public.oom_import_status NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oom_import_counts_check CHECK ((((created_count + updated_count) + error_count) <= row_count)),
+    CONSTRAINT oom_import_created_count_check CHECK ((created_count >= 0)),
+    CONSTRAINT oom_import_error_count_check CHECK ((error_count >= 0)),
+    CONSTRAINT oom_import_file_name_check CHECK ((btrim(file_name) <> ''::text)),
+    CONSTRAINT oom_import_row_count_check CHECK ((row_count >= 0)),
+    CONSTRAINT oom_import_updated_count_check CHECK ((updated_count >= 0))
+);
+
+
+--
+-- Name: TABLE oom_import; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_import IS 'import OOM z Excelu: kto, kedy, súbor a počty (súbor ani náhľad sa neukladajú); zmeny OOM sú v audite s import_id';
+
+
+--
 -- Name: org; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4623,6 +4849,9 @@ CREATE TABLE public.team_permission (
     can_export boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    can_import boolean DEFAULT false NOT NULL,
+    can_edit_active_oom boolean DEFAULT false NOT NULL,
+    CONSTRAINT team_permission_edit_active_oom_check CHECK (((NOT can_edit_active_oom) OR (module = 'odberne_miesta'::public.crm_module))),
     CONSTRAINT team_permission_edit_le_view_check CHECK ((edit_scope <= view_scope))
 );
 
@@ -4632,6 +4861,20 @@ CREATE TABLE public.team_permission (
 --
 
 COMMENT ON TABLE public.team_permission IS 'práva tímu po moduloch; „iba svoje“ = záznamy, kde je používateľ vlastníkom';
+
+
+--
+-- Name: COLUMN team_permission.can_import; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team_permission.can_import IS 'smie hromadne importovať záznamy modulu (dnes OOM z Excelu)';
+
+
+--
+-- Name: COLUMN team_permission.can_edit_active_oom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team_permission.can_edit_active_oom IS 'iba modul odberne_miesta: smie upravovať OOM v stave Aktívne, jeho zariadenia a kontaktné osoby';
 
 
 --
@@ -5174,6 +5417,14 @@ ALTER TABLE ONLY public.oom
 
 
 --
+-- Name: oom_import oom_import_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_import
+    ADD CONSTRAINT oom_import_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: oom oom_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5567,6 +5818,13 @@ CREATE INDEX audit_log_changed_at_idx ON public.audit_log USING btree (changed_a
 --
 
 CREATE INDEX audit_log_changed_by_idx ON public.audit_log USING btree (changed_by);
+
+
+--
+-- Name: audit_log_import_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_log_import_id_idx ON public.audit_log USING btree (import_id) WHERE (import_id IS NOT NULL);
 
 
 --
@@ -6018,6 +6276,13 @@ CREATE INDEX oom_device_oom_id_idx ON public.oom_device USING btree (oom_id);
 
 
 --
+-- Name: oom_import_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_import_created_at_idx ON public.oom_import USING btree (created_at);
+
+
+--
 -- Name: oom_org_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6141,6 +6406,20 @@ CREATE INDEX web_event_occurred_at_idx ON public.web_event USING btree (occurred
 --
 
 CREATE INDEX web_event_posthog_distinct_id_idx ON public.web_event USING btree (posthog_distinct_id);
+
+
+--
+-- Name: oom_contact trg_active_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_active_guard BEFORE INSERT OR DELETE OR UPDATE ON public.oom_contact FOR EACH ROW EXECUTE FUNCTION public.oom_child_active_guard();
+
+
+--
+-- Name: oom_device trg_active_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_active_guard BEFORE INSERT OR DELETE OR UPDATE ON public.oom_device FOR EACH ROW EXECUTE FUNCTION public.oom_child_active_guard();
 
 
 --
@@ -6365,6 +6644,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_customer
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_device FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: oom_import trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_import FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -6680,6 +6966,13 @@ CREATE TRIGGER trg_no_delete BEFORE DELETE ON public.pipeline_stage FOR EACH ROW
 --
 
 CREATE TRIGGER trg_normalize BEFORE INSERT OR UPDATE OF iban ON public.org_bank_account FOR EACH ROW EXECUTE FUNCTION public.org_bank_account_normalize();
+
+
+--
+-- Name: oom trg_oom_active_edit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_active_edit BEFORE UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_active_edit_guard();
 
 
 --
@@ -7245,6 +7538,14 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: audit_log audit_log_import_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_import_id_fkey FOREIGN KEY (import_id) REFERENCES public.oom_import(id);
+
+
+--
 -- Name: business_calendar business_calendar_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7717,6 +8018,22 @@ ALTER TABLE ONLY public.oom_device
 
 
 --
+-- Name: oom_import oom_import_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_import
+    ADD CONSTRAINT oom_import_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: oom_import oom_import_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_import
+    ADD CONSTRAINT oom_import_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
 -- Name: oom oom_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8009,6 +8326,155 @@ ALTER TABLE public.lookup_list ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.lookup_value ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_contact; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_contact ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_customer; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_customer ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_contact oom_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_delete ON public.oom_contact FOR DELETE USING (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_device oom_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_delete ON public.oom_device FOR DELETE USING (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_device; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_device ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_import; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_import ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_import oom_import_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_import_insert ON public.oom_import FOR INSERT WITH CHECK ((( SELECT public.crm_can_import('odberne_miesta'::public.crm_module) AS crm_can_import) AND ((user_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR ( SELECT public.crm_is_service() AS crm_is_service)) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: oom_import oom_import_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_import_select ON public.oom_import FOR SELECT USING ((( SELECT public.crm_is_service() AS crm_is_service) OR ( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_can_import('odberne_miesta'::public.crm_module) AS crm_can_import)));
+
+
+--
+-- Name: oom oom_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_insert ON public.oom FOR INSERT WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND public.crm_customer_owned(company_id, person_id)))));
+
+
+--
+-- Name: oom_contact oom_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_insert ON public.oom_contact FOR INSERT WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_customer oom_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_insert ON public.oom_customer FOR INSERT WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_device oom_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_insert ON public.oom_device FOR INSERT WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.oom FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'view'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'view'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND public.crm_customer_owned(company_id, person_id)))));
+
+
+--
+-- Name: oom_contact oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.oom_contact FOR SELECT USING (public.crm_oom_access(oom_id, 'view'::text));
+
+
+--
+-- Name: oom_customer oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.oom_customer FOR SELECT USING ((public.crm_oom_access(oom_id, 'view'::text) OR public.crm_company_access(company_id, 'view'::text) OR public.crm_contact_access(person_id, 'view'::text)));
+
+
+--
+-- Name: oom_device oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.oom_device FOR SELECT USING (public.crm_oom_access(oom_id, 'view'::text));
+
+
+--
+-- Name: supplier_switch oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.supplier_switch FOR SELECT USING (public.crm_oom_access(oom_id, 'view'::text));
+
+
+--
+-- Name: oom oom_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_update ON public.oom FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND public.crm_customer_owned(company_id, person_id))))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('odberne_miesta'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND public.crm_customer_owned(company_id, person_id)))));
+
+
+--
+-- Name: oom_contact oom_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_update ON public.oom_contact FOR UPDATE USING (public.crm_oom_access(oom_id, 'edit'::text)) WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_customer oom_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_update ON public.oom_customer FOR UPDATE USING (public.crm_oom_access(oom_id, 'edit'::text)) WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_device oom_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_update ON public.oom_device FOR UPDATE USING (public.crm_oom_access(oom_id, 'edit'::text)) WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
 
 --
 -- Name: org; Type: ROW SECURITY; Schema: public; Owner: -
@@ -8507,6 +8973,12 @@ CREATE POLICY settings_update ON public.team_permission FOR UPDATE USING (( SELE
 
 
 --
+-- Name: supplier_switch; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.supplier_switch ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: team; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -8543,4 +9015,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0011'),
     ('0012'),
     ('0013'),
-    ('0014');
+    ('0014'),
+    ('0015');

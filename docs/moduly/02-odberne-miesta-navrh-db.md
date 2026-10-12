@@ -1,7 +1,7 @@
 # Modul 2 – Odberné miesta: návrh databázy
 
-Verzia 0.3 · 12. 10. 2026 · **odpovede zapracované** (v0.1 = návrh; v0.2 = Petrove odpovede a uzavreté otázky, časť 11; v0.3 = plán `0014` schválený, časti 3.2, 3.3, 4.4).
-Implementácia: `0013_oom_jadro` na `dev` (12. 10.); `0014_oom_stav_zakaznika` napísaná a overená nanečisto; `0015` nasleduje.
+Verzia 0.4 · 12. 10. 2026 · **odpovede zapracované** (v0.1 = návrh; v0.2 = Petrove odpovede a uzavreté otázky, časť 11; v0.3 = plán `0014` schválený, časti 3.2, 3.3, 4.4; v0.4 = plán `0015` schválený so zmenou: právo „upravovať Aktívne OOM“ v databáze, časti 7–9).
+Implementácia: `0013_oom_jadro`, `0014_oom_stav_zakaznika` na `dev` (12. 10.); `0015_oom_rls_import` napísaná a overená nanečisto.
 Vychádza zo zadania `02-odberne-miesta.md` v0.2, zadania `01-zakaznici.md` v0.4 (časti 4 a 14),
 návrhu Nastavení `00-nastavenia-navrh-db.md` v0.2, migrácií `0001`–`0012` a obrazoviek 17–19.
 
@@ -308,7 +308,7 @@ Stĺpec `oom.org_id` a kontrola „rovnaká spoločnosť ako zákazník“ sú h
 
 ## 7. Obmedzenie „iba svoje“ v databáze (RLS)
 
-Dnes `oom` RLS **nemá** a rola `crm_app` ho číta celé. Preto je externý tím zamknutý (`crm_external_ready() = false`).
+Pred `0015` `oom` RLS nemalo a rola `crm_app` ho čítala celé. `0015` zapne RLS na `oom`, `oom_customer`, `oom_device`, `oom_contact` a `supplier_switch` (iba čítanie).
 
 ### 7.1 Pravidlo
 OOM preberá vlastníka zákazníka (zadanie čl. 10). Politika číta nastavenie tímu pre modul `odberne_miesta`:
@@ -327,29 +327,37 @@ CREATE POLICY oom_update … USING ( …'edit'… ) WITH CHECK ( …'edit'… );
 -- DELETE: bez politiky (pozri 7.3)
 ```
 
-- **`oom_customer`**: riadok vidí, kto vidí zákazníka tej väzby (`crm_company_access` / `crm_contact_access`).
-  Obchodník starého zákazníka tak na karte svojho zákazníka vidí „EIC, obdobie, Prepísané“, ale nie nového
-  odberateľa. Zápis iba cez funkcie z časti 2.
+- **`oom_customer`**: riadok vidí, kto vidí OOM **alebo** zákazníka tej väzby (`crm_company_access` /
+  `crm_contact_access`). Obchodník starého zákazníka tak na karte svojho zákazníka vidí „EIC, obdobie, Prepísané“,
+  ale nie kartu OOM ani nového odberateľa (Peter, odpoveď 1). Zapisuje, kto smie upravovať OOM.
+- **Prepis na cudzieho zákazníka** s rozsahom „iba svoje“ databáza odmietne (nové OOM by nebolo jeho).
 - **`oom_device`, `oom_contact`**: podľa `crm_oom_access(oom_id, …)`.
 - **`oom_v`, `contact_oom_v`, `customer_v`**: `security_invoker` – politiky platia automaticky.
-- **Hľadanie podľa EIC** (príklad 7): cudzie OOM databáza nevráti; `oom_eic_check` povie iba „existuje“.
-- Pravidlo „Aktívne OOM upravujú iba Servis a Nákup, interný obchodník iba Pripravované“ (odpoveď 2) kontroluje API,
-  ako stĺpcové práva pri Zákazníkoch (databáza pozná rozsah tímu, nie stav, ktorý tím smie meniť).
+- **Hľadanie podľa EIC** (príklad 7): cudzie OOM databáza nevráti; `oom_eic_check(eic)` povie iba „existuje“,
+  vlastníka a spoločnosť (id OOM iba tomu, kto ho vidí).
+- **Úprava Aktívneho OOM** (Peter 12. 10., zmena plánu): nové právo tímu `team_permission.can_edit_active_oom`
+  (iba modul Odberné miesta, stĺpec v matici práv na obrazovke 13). Bez neho databáza odmietne zmenu Aktívneho OOM
+  (okrem zákazníka a stavu), jeho zariadení a kontaktných osôb. Zmena stavu (`oom_set_status`) a prepis
+  (`oom_transfer`) ostávajú podľa práva upravovať. Systémové kroky (prepis, mazanie adminom) si to povolia lokálne
+  nastavením `crm.oom_system` v transakcii.
 
 ### 7.2 Východiskové práva modulu Odberné miesta (zmena matice z 0006)
 
-| Tím | Vidí | Upravuje | Import |
-| --- | --- | --- | --- |
-| CEO | všetko | všetko | áno |
-| Sales_internal | všetko | **všetko** (dnes nič) – zakladá OOM, upravuje **iba Pripravované** (API) | nie |
-| Sales_external | iba svoje | **iba svoje** (dnes nič) – zakladá a upravuje OOM svojich zákazníkov | nie |
-| Servis | všetko | **všetko** (dnes nič) | áno |
-| Nákup | všetko | všetko | áno |
-| Marketing | všetko | nič | nie |
+| Tím | Vidí | Upravuje | Upravovať Aktívne OOM | Import |
+| --- | --- | --- | --- | --- |
+| CEO | všetko | všetko | áno | áno |
+| Sales_internal | všetko | **všetko** (pred 0015 nič) – zakladá OOM, Aktívne neupraví | nie | nie |
+| Sales_external | iba svoje | **iba svoje** (pred 0015 nič) – zakladá a upravuje OOM svojich zákazníkov | nie | nie |
+| Servis | všetko | **všetko** (pred 0015 nič) | áno | áno |
+| Nákup | všetko | všetko | áno | áno |
+| Marketing | všetko | nič | nie | nie |
+
+Migrácia mení iba bunky s východiskovou hodnotou; ručné zmeny admina na Teste ostávajú (odpoveď 2).
 
 ### 7.3 Mazanie OOM
-Ako pri Zákazníkoch (0011): admin smie zmazať OOM **bez väzieb** (deal, zmluva, cena, aktivita, konverzácia)
-funkciou `oom_delete(id)`; audit zapíše celý obsah. Inak sa OOM nemaže (stav Zrušené).
+Ako pri Zákazníkoch (0011): admin smie zmazať OOM **bez väzieb** (deal, cena zo zmluvy, položka ponuky, aktivita,
+konverzácia, správa OKTE / PDS) funkciou `oom_delete(id)`; väzby na zákazníka, kontaktné osoby a zariadenia sa zmažú
+s ním; audit zapíše celý obsah. Inak sa OOM nemaže (stav Zrušené) – odpoveď 4.
 
 ### 7.4 Externý tím
 `crm_external_ready()` ostáva `false`, kým politiky nebudú mať aj dealy, zmluvy, ponuky a aktivity (moduly 3–4).

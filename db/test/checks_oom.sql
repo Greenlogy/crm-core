@@ -402,3 +402,228 @@ BEGIN
   RAISE NOTICE 'OK: customer_v z väzieb, contact_oom_v (deal + ručne, roly), prechod sa zasekol podľa lehoty spoločnosti';
 END;
 $$;
+
+-- ============================================================================
+-- 0015: „iba svoje“ (RLS), úprava Aktívnych OOM, import, mazanie
+-- Dočasná rola crm_rls_test (checks_zakaznici.sql) – bez práv vlastníka, ako aplikácia.
+-- Používatelia: 0011 Sales_internal (vlastní Alfu), 1002 / 1003 Sales_external A / B,
+-- nový Servis 3901 a Marketing 3902; admin = peter@greenlogy.com (0006).
+-- ============================================================================
+
+INSERT INTO app_user (id, email, name, team_id, status)
+SELECT v.id::uuid, v.email, v.name, t.id, 'aktivny'
+  FROM (VALUES
+    ('00000000-0000-4000-8000-000000003901', 'servis.oom@example.test', 'Servis OOM', 'servis'),
+    ('00000000-0000-4000-8000-000000003902', 'marketing.oom@example.test', 'Marketing OOM', 'marketing')
+  ) AS v (id, email, name, team_code)
+  JOIN team t ON t.code = v.team_code;
+INSERT INTO app_user_org (user_id, org_id) VALUES
+  ('00000000-0000-4000-8000-000000003901', crm_default_org()),
+  ('00000000-0000-4000-8000-000000003902', crm_default_org());
+
+-- Údaje externého A a B (ako vlastník): OOM firmy A (Aktívne), domácnosť B, OOM domácnosti A na prepis
+INSERT INTO contact (id, first_name, last_name, email, is_household, owner_id) VALUES
+  ('00000000-0000-4000-8000-000000003911', 'Domácnosť', 'Externého B', 'dom.ext.b@example.test', true,
+   '00000000-0000-4000-8000-000000001003');
+SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003921', '00000000-0000-4000-8000-000000001801', NULL,
+                     '24ZZS000TEST720M', 'spotreba', 'aktivne');
+SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003922', NULL, '00000000-0000-4000-8000-000000001802',
+                     '24ZZS000TEST721K', 'spotreba', 'aktivne');
+
+GRANT SELECT, INSERT, UPDATE ON oom, oom_customer, oom_device, oom_contact, oom_import TO crm_rls_test;
+GRANT DELETE ON oom_device, oom_contact TO crm_rls_test;
+GRANT SELECT ON supplier_switch, oom_v, contact_oom_v, org, lookup_value, lookup_list, team_permission,
+                deal_oom, contract_price, offer_item, conversation, deal, deal_contact TO crm_rls_test;
+SET LOCAL ROLE crm_rls_test;
+
+-- O12. Externý A: iba svoje OOM, cudzie EIC nenájde, založí iba svojmu zákazníkovi
+DO $$
+DECLARE
+  r record;
+  n integer;
+BEGIN
+  PERFORM set_config('app.require_user', 'on', true);
+  ASSERT (SELECT count(*) FROM oom) = 0, 'aplikácia bez používateľa vidí OOM';
+
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001002', true);
+  ASSERT (SELECT array_agg(eic ORDER BY eic) FROM oom) = '{24ZZS000TEST720M,24ZZS000TEST721K}',
+         format('externý A: OOM %s', (SELECT array_agg(eic ORDER BY eic) FROM oom));
+  ASSERT (SELECT count(*) FROM oom_v) = 2, 'externý A: oom_v iba svoje';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom WHERE eic = '24ZZS000TEST001H'), 'externý A: cudzie EIC nenájde';
+  SELECT * INTO r FROM oom_eic_check('24zzs000test001h');
+  ASSERT r.oom_exists AND r.oom_id IS NULL AND r.owner_name = 'Testovací Obchodník', 'duplicita EIC: iba existuje + vlastník';
+  SELECT * INTO r FROM oom_eic_check('24ZZS000TEST720M');
+  ASSERT r.oom_id = '00000000-0000-4000-8000-000000003921', 'duplicita EIC: svoje OOM s id';
+  ASSERT (SELECT count(*) FROM oom_device) = 0 AND (SELECT count(*) FROM oom_contact) = 0, 'externý A: cudzie zariadenia a osoby nie';
+
+  -- založí OOM svojmu zákazníkovi, cudziemu nie
+  PERFORM pg_temp.t_oom('00000000-0000-4000-8000-000000003923', '00000000-0000-4000-8000-000000001801', NULL,
+                        '24ZZS000TEST722I', 'spotreba', 'pripravovane');
+  BEGIN
+    PERFORM pg_temp.t_oom(NULL, '00000000-0000-4000-8000-000000000101', NULL, '24ZZS000TEST723G', 'spotreba', 'pripravovane');
+    RAISE EXCEPTION 'CHYBA: externý založil OOM cudziemu zákazníkovi';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- Pripravované svoje upraví; Aktívne nie (nemá právo upravovať Aktívne OOM)
+  UPDATE oom SET name = 'Hala 2' WHERE id = '00000000-0000-4000-8000-000000003923';
+  BEGIN
+    UPDATE oom SET breaker_a = 63 WHERE id = '00000000-0000-4000-8000-000000003921';
+    RAISE EXCEPTION 'CHYBA: externý upravil Aktívne OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO oom_device (oom_id, device_type) VALUES ('00000000-0000-4000-8000-000000003921', 'wallbox');
+    RAISE EXCEPTION 'CHYBA: externý pridal zariadenie Aktívnemu OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  INSERT INTO oom_device (oom_id, device_type) VALUES ('00000000-0000-4000-8000-000000003923', 'wallbox');
+
+  -- cudzie OOM nezmení (0 riadkov), na cudzieho zákazníka neprepíše
+  UPDATE oom SET name = 'Hack' WHERE id = '00000000-0000-4000-8000-000000000301';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 0, 'externý zmenil cudzie OOM';
+  BEGIN
+    PERFORM oom_transfer('00000000-0000-4000-8000-000000003921', '00000000-0000-4000-8000-000000000101', NULL, '2026-11-01');
+    RAISE EXCEPTION 'CHYBA: externý prepísal OOM na cudzieho zákazníka';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- import nesmie
+  ASSERT NOT crm_can_import('odberne_miesta'), 'externý nesmie importovať';
+  BEGIN
+    INSERT INTO oom_import (org_id, user_id, file_name, row_count, created_count, updated_count, error_count, status)
+    VALUES (crm_default_org(), '00000000-0000-4000-8000-000000001002', 'a.xlsx', 1, 1, 0, 0, 'ulozeny');
+    RAISE EXCEPTION 'CHYBA: externý zapísal import';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- externý B nevidí nič z A
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001003', true);
+  ASSERT (SELECT count(*) FROM oom) = 0, 'externý B vidí cudzie OOM';
+  RAISE NOTICE 'OK: RLS OOM: iba svoje, cudzie EIC iba „existuje“, založí iba svojmu, Aktívne neupraví, prepis na cudzieho nie, import nie';
+END;
+$$;
+
+-- O13. Interný obchodník, Servis, Marketing; história po prepise
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  -- interný: vidí všetko, Aktívne neupraví (ani zariadenie), Pripravované áno
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000000011', true);
+  ASSERT (SELECT count(*) FROM oom) = (SELECT count(*) FROM oom_v), 'interný: oom aj oom_v';
+  ASSERT EXISTS (SELECT 1 FROM oom WHERE id = '00000000-0000-4000-8000-000000003921'), 'interný vidí aj OOM externého';
+  BEGIN
+    UPDATE oom SET breaker_a = 40 WHERE id = '00000000-0000-4000-8000-000000000301';
+    RAISE EXCEPTION 'CHYBA: interný upravil Aktívne OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO oom_device (oom_id, device_type) VALUES ('00000000-0000-4000-8000-000000000301', 'bateria');
+    RAISE EXCEPTION 'CHYBA: interný pridal zariadenie Aktívnemu OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  UPDATE oom SET name = 'Alfa – zdieľanie 2' WHERE id = '00000000-0000-4000-8000-000000000303';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, 'interný upraví Pripravované';
+
+  -- Servis: Aktívne upraví, zariadenie pridá; prepíše domácnosť A na domácnosť B (príklad 4)
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003901', true);
+  UPDATE oom SET breaker_a = 40 WHERE id = '00000000-0000-4000-8000-000000000301';
+  INSERT INTO oom_device (oom_id, device_type) VALUES ('00000000-0000-4000-8000-000000000301', 'bateria');
+  PERFORM oom_transfer('00000000-0000-4000-8000-000000003922', NULL, '00000000-0000-4000-8000-000000003911', '2026-11-01');
+
+  -- Marketing: vidí, nemení (0 riadkov)
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003902', true);
+  ASSERT EXISTS (SELECT 1 FROM oom WHERE id = '00000000-0000-4000-8000-000000000301'), 'marketing vidí';
+  UPDATE oom SET name = 'Marketing' WHERE id = '00000000-0000-4000-8000-000000000303';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 0, 'marketing zmenil OOM';
+
+  -- externý A po prepise: OOM ani novú odberateľku nevidí, svoju väzbu (história) áno
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001002', true);
+  ASSERT NOT EXISTS (SELECT 1 FROM oom WHERE id = '00000000-0000-4000-8000-000000003922'), 'A nevidí prepísané OOM';
+  ASSERT (SELECT array_agg(status) FROM oom_customer WHERE oom_id = '00000000-0000-4000-8000-000000003922') = '{prepisane}',
+         'A vidí iba svoju väzbu (Prepísané), nie novú odberateľku';
+  -- externý B vidí OOM aj celú históriu (meno A mu RLS osôb neukáže)
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001003', true);
+  ASSERT (SELECT count(*) FROM oom_customer WHERE oom_id = '00000000-0000-4000-8000-000000003922') = 2, 'B vidí obe väzby';
+  ASSERT (SELECT transferred_from_name IS NULL AND customer_name = 'Domácnosť Externého B' FROM oom_v
+           WHERE id = '00000000-0000-4000-8000-000000003922'), 'B: meno predošlého zákazníka skryté';
+  PERFORM set_config('app.user_id', '', true);
+  RAISE NOTICE 'OK: interný (Aktívne nie, Pripravované áno), Servis (Aktívne áno, prepis), Marketing iba číta, história po prepise';
+END;
+$$;
+
+-- O14. Import (Servis) a mazanie OOM (admin, bez väzieb)
+DO $$
+DECLARE
+  v_import uuid;
+  v_admin  uuid;
+BEGIN
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003901', true);
+  v_admin := (SELECT id FROM app_user WHERE email = 'peter@greenlogy.com');   -- až s používateľom (RLS)
+  ASSERT crm_can_import('odberne_miesta'), 'Servis smie importovať';
+  INSERT INTO oom_import (org_id, user_id, file_name, row_count, created_count, updated_count, error_count, status)
+  VALUES (crm_default_org(), '00000000-0000-4000-8000-000000003901', 'obec-lietava.xlsx', 52, 46, 3, 3, 'ulozeny')
+  RETURNING id INTO v_import;
+  PERFORM set_config('app.import_id', v_import::text, true);
+  UPDATE oom SET breaker_a = 63 WHERE id = '00000000-0000-4000-8000-000000000301';
+  PERFORM set_config('app.import_id', '', true);
+  PERFORM set_config('test.import_id', v_import::text, true);
+  BEGIN
+    UPDATE oom_import SET row_count = 1 WHERE id = v_import;
+    IF FOUND THEN RAISE EXCEPTION 'CHYBA: záznam importu sa dal zmeniť'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003902', true);
+  ASSERT (SELECT count(*) FROM oom_import) = 0, 'marketing nevidí importy';
+  PERFORM set_config('app.user_id', v_admin::text, true);
+  ASSERT (SELECT count(*) FROM oom_import) = 1, 'admin vidí importy';
+
+  -- mazanie: Servis nie, admin iba bez väzieb
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003901', true);
+  BEGIN
+    PERFORM oom_delete('00000000-0000-4000-8000-000000003923');
+    RAISE EXCEPTION 'CHYBA: Servis zmazal OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM set_config('app.user_id', v_admin::text, true);
+  BEGIN
+    PERFORM oom_delete('00000000-0000-4000-8000-000000000301');
+    RAISE EXCEPTION 'CHYBA: zmazané OOM s dealom';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  ASSERT oom_delete('00000000-0000-4000-8000-000000003923') = '24ZZS000TEST722I', 'admin zmazal OOM bez väzieb (aj so zariadením)';
+  PERFORM set_config('app.user_id', '', true);
+  PERFORM set_config('app.require_user', '', true);
+  RAISE NOTICE 'OK: import (právo, záznam sa nemení, viditeľnosť), mazanie OOM iba admin a bez väzieb';
+END;
+$$;
+
+RESET ROLE;
+
+-- O15. Audit importu a mazania (ako vlastník)
+DO $$
+BEGIN
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'oom' AND source = 'import'
+                  AND import_id = current_setting('test.import_id')::uuid
+                  AND (diff -> 'breaker_a' ->> 'new')::numeric = 63), 'zmena z importu v audite so zdrojom import';
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'oom' AND action = 'delete'
+                  AND diff ->> 'eic' = '24ZZS000TEST722I'), 'zmazané OOM v audite s obsahom';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom WHERE id = '00000000-0000-4000-8000-000000003923'), 'OOM zmazané';
+  ASSERT (SELECT can_import AND can_edit_active_oom FROM team_permission p JOIN team t ON t.id = p.team_id
+           WHERE t.code = 'nakup' AND p.module = 'odberne_miesta'), 'Nákup: import a Aktívne';
+  ASSERT (SELECT NOT can_import AND NOT can_edit_active_oom AND edit_scope = 'vsetko' FROM team_permission p
+            JOIN team t ON t.id = p.team_id WHERE t.code = 'sales_internal' AND p.module = 'odberne_miesta'),
+         'Sales_internal: upravuje, bez importu a Aktívnych';
+  BEGIN
+    UPDATE team_permission SET can_edit_active_oom = true WHERE module = 'zakaznici';
+    RAISE EXCEPTION 'CHYBA: právo Aktívne OOM v inom module';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  RAISE NOTICE 'OK: audit importu a mazania, východiskové práva modulu Odberné miesta';
+END;
+$$;
