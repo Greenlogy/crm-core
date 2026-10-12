@@ -2,6 +2,7 @@
 
 ## 2026-10-12
 
+- Nastavenia, fázy 2–6 (lokálne overené, nenasadené): API `api/src/routes/settings*.ts` + `api/src/validate.ts` (používatelia, tímy a práva, spoločnosť, logo, bankové účty, pracovný čas, firemné voľno, číselníky, vlastné polia, sekcie, pipelines a stage, povinné polia, audit); obrazovky `web/src/pages/settings/*` podľa dizajnu 11–16, prvky formulárov `web/src/components/form.tsx`; migrácia `0010_work_hours_delete` a právo DELETE v `api/db/app-role.sql`
 - Nastavenia, fáza 1: API prijíma zápis (POST, PATCH, DELETE) iba ako JSON z vlastnej stránky; chyby databázy → slovenské správy bez údajov záznamov; `GET /api/settings` (iba admin); `/api/me` vracia prostredie (`ENVIRONMENT` vo `wrangler.toml`); frontend: prihlásený používateľ pre celú aplikáciu, stránka „Nemáte prístup do CRM“, v menu Nastavenia (iba admin), prostredie a meno používateľa, kostra Nastavení s vnútorným menu (dizajn 11–16)
 - Test: cache Hyperdrive vypnutá, Worker nasadený s prihlásením (Peter); `/api/me` vracia Petra (CEO, admin, 3 spoločnosti, plné práva)
 - Krok C (lokálne overené, nenasadené): API overí token Cloudflare Access (`api/src/auth.ts`, `jose` 6.2.12), pustí iba aktívneho používateľa CRM (`app_user_login`, inak 403), každá požiadavka v transakcii s `app.user_id` (`asUser`); nový `GET /api/me` (tím, admin, spoločnosti, práva); `wrangler.toml` s tímom a AUD Access; `dev.sh` s `CRM_DEV_EMAIL`; `smoke.sh` volá `/api/me`; `update-hyperdrive.sh` vypína cache

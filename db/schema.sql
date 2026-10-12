@@ -6718,6 +6718,13 @@ CREATE POLICY settings_delete ON public.org_logo FOR DELETE USING (( SELECT publ
 
 
 --
+-- Name: org_work_hours settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.org_work_hours FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
 -- Name: pipeline_stage_required_field settings_delete; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -7127,4 +7134,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0006'),
     ('0007'),
     ('0008'),
-    ('0009');
+    ('0009'),
+    ('0010');

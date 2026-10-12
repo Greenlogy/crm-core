@@ -9,6 +9,7 @@ import { asUser, connect } from './db';
 import { dbErrorResponse } from './errors';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
+import { BadRequest } from './validate';
 import { listContacts, ROLE_FILTERS } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
@@ -159,6 +160,7 @@ app.route('/settings', settings);
 app.notFound((c) => c.json({ error: 'Neznáma cesta.' }, 404));
 
 app.onError((err, c) => {
+  if (err instanceof BadRequest) return c.json({ error: err.message }, 400);
   const known = dbErrorResponse(err);
   if (known) return c.json(known.body, known.status);
   // Bez správy chyby: môže obsahovať hodnoty z databázy.

@@ -49,15 +49,3 @@ export function SettingsHead(props: { title: string; sub?: string; actions?: Rea
     </section>
   );
 }
-
-/** Sekcia, ktorá ešte nie je hotová (fázy 2–6). */
-export function SettingsPending(props: { title: string }) {
-  return (
-    <>
-      <SettingsHead title={props.title} />
-      <div className="card">
-        <div className="empty">Pripravuje sa.</div>
-      </div>
-    </>
-  );
-}

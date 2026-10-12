@@ -72,3 +72,19 @@ export function initials(name: string): string {
   const words = name.replace(/[,.]/g, ' ').split(/\s+/).filter(Boolean);
   return ((words[0]?.[0] ?? '') + (words[1]?.[0] ?? '')).toUpperCase() || '?';
 }
+
+// Čas poslednej aktivity: „dnes 11:42“, „včera“, inak dátum (Europe/Bratislava).
+export function lastSeen(v: string | null | undefined): string {
+  if (!v) return EMPTY;
+  const dt = new Date(v);
+  if (Number.isNaN(dt.getTime())) return EMPTY;
+  const day = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(d);
+  const today = day(new Date());
+  const yesterday = day(new Date(Date.now() - 86_400_000));
+  if (day(dt) === today) {
+    const hm = new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', hour: 'numeric', minute: '2-digit' }).format(dt);
+    return `dnes ${hm}`;
+  }
+  if (day(dt) === yesterday) return 'včera';
+  return date(v);
+}

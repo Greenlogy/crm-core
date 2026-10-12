@@ -8,8 +8,15 @@ import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { OomPage } from './pages/OomPage';
 import { PersonPage } from './pages/PersonPage';
-import { SETTINGS_SECTIONS, SettingsLayout, SettingsPending } from './pages/settings/SettingsLayout';
+import { SettingsLayout } from './pages/settings/SettingsLayout';
 import { MeProvider } from './lib/me';
+import { AuditPage } from './pages/settings/AuditPage';
+import { CompanyPage } from './pages/settings/CompanyPage';
+import { CustomFieldsPage } from './pages/settings/CustomFieldsPage';
+import { LookupsPage } from './pages/settings/LookupsPage';
+import { PipelinesPage } from './pages/settings/PipelinesPage';
+import { TeamsPage } from './pages/settings/TeamsPage';
+import { UsersPage } from './pages/settings/UsersPage';
 import './styles/tokens.css';
 import './styles/app.css';
 
@@ -37,7 +44,13 @@ const router = createBrowserRouter([
         element: <SettingsLayout />,
         children: [
           { index: true, element: <Navigate to="pouzivatelia" replace /> },
-          ...SETTINGS_SECTIONS.map((s) => ({ path: s.path, element: <SettingsPending title={s.label} /> })),
+          { path: 'spolocnost', element: <CompanyPage /> },
+          { path: 'pouzivatelia', element: <UsersPage /> },
+          { path: 'timy', element: <TeamsPage /> },
+          { path: 'ciselniky', element: <LookupsPage /> },
+          { path: 'vlastne-polia', element: <CustomFieldsPage /> },
+          { path: 'pipelines', element: <PipelinesPage /> },
+          { path: 'audit', element: <AuditPage /> },
         ],
       },
       { path: '*', element: <Navigate to="/zakaznici" replace /> },

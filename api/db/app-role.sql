@@ -37,9 +37,9 @@ REVOKE INSERT, UPDATE ON lookup_list FROM crm_app;
 
 -- Mazať: väzby (osoba vo firme, na deale, OOM na deale, položka ponuky, zariadenie OOM)
 -- a nastavenia, ktoré sa dajú odobrať (prístup k spoločnosti, voľný deň, logo, tímy poľa,
--- povinné pole pri prechode, prázdna sekcia). Ostatné sa nemaže, iba archivuje.
+-- povinné pole pri prechode, prázdna sekcia, pracovný deň – 0010). Ostatné sa nemaže, iba archivuje.
 GRANT DELETE ON company_contact, deal_contact, deal_oom, offer_item, oom_device,
-  app_user_org, org_day_off, org_logo, custom_field_team, pipeline_stage_required_field,
+  app_user_org, org_day_off, org_logo, org_work_hours, custom_field_team, pipeline_stage_required_field,
   custom_field_section TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
