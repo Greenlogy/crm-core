@@ -1,6 +1,7 @@
 // Zoznam zákazníkov, karta firmy a karta osoby – modul Zákazníci (migrácia 0004, dizajn 01, 08, 10).
 // Zoznam ide z customer_v: firmy s označením zákazník + osoby-domácnosti (zadanie čl. 3, 9).
 
+import { customCondition, parseCustomFilter } from '../custom';
 import type { Sql } from '../db';
 
 export const PAGE_SIZE = 50;
@@ -13,14 +14,20 @@ export const STATUSES = [
 export const STATUS_FILTERS = new Set<string>(['', 'leady', 'vsetky', ...STATUSES]);
 export const SEGMENT_FILTERS = new Set(['', 'domacnost', 'firma', 'vyrobca']);
 
-export type CustomerFilter = { q: string; status: string; segment: string; owner: string; page: number };
+export type CustomerFilter = { q: string; status: string; segment: string; owner: string; org: string; cf?: string; page: number };
 
 // Mesto z adresy „ulica, PSČ mesto“ (posledná časť bez PSČ).
 const CITY = (address: string) =>
   `nullif(btrim(regexp_replace(split_part(${address}, ',', array_length(string_to_array(${address}, ','), 1)), '^[0-9 ]+', '')), '')`;
 
-export async function listCustomers(sql: Sql, f: CustomerFilter) {
+// Vlastné polia zákazníka (firma alebo domácnosť) v zozname
+const CUSTOM = (sql: Sql) => sql`coalesce((SELECT c2.custom FROM company c2 WHERE c2.id = cu.company_id),
+                                       (SELECT p2.custom FROM contact p2 WHERE p2.id = cu.person_id), '{}'::jsonb)`;
+
+export async function listCustomers(sql: Sql, f: CustomerFilter, pageSize = PAGE_SIZE) {
   const like = `%${f.q}%`;
+  const digits = f.q.replace(/[^0-9]/g, '');
+  const { cond: customCond } = await customCondition(sql, ['firma', 'osoba'], parseCustomFilter(f.cf), CUSTOM(sql));
   const statusCond =
     f.status === ''
       ? sql`cu.status IS DISTINCT FROM 'marketingovy_kontakt' AND NOT cu.archived`
@@ -31,7 +38,18 @@ export async function listCustomers(sql: Sql, f: CustomerFilter) {
           : sql`cu.status = ${f.status}`;
   // Hľadanie, segment a obchodník platia aj pre počty v tlačidlách stavov; stav iba pre riadky.
   const base = sql`
-    (${f.q} = '' OR cu.name ILIKE ${like} OR cu.ico LIKE ${f.q.replace(/\s/g, '') + '%'} OR cu.email ILIKE ${like})
+    (${f.q} = '' OR cu.name ILIKE ${like} OR cu.ico LIKE ${f.q.replace(/\s/g, '') + '%'} OR cu.email ILIKE ${like}
+      -- IČO/OIB aj bez úvodných núl (12345 nájde 00012345)
+      OR (${digits.length >= 4} AND cu.ico LIKE ${'%' + digits + '%'})
+      -- telefón domácnosti; pri firme e-mail alebo telefón jej osôb (F4)
+      OR (${digits.length >= 6} AND EXISTS (SELECT 1 FROM contact p3 WHERE p3.id = cu.person_id
+            AND (p3.phone_norm LIKE normalize_phone(${f.q}) || '%' OR p3.mobile_norm LIKE normalize_phone(${f.q}) || '%')))
+      OR (cu.company_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM company_contact cc3 JOIN contact p3 ON p3.id = cc3.contact_id
+             WHERE cc3.company_id = cu.company_id
+               AND (p3.email ILIKE ${like}
+                    OR (${digits.length >= 6} AND (p3.phone_norm LIKE normalize_phone(${f.q}) || '%'
+                                                   OR p3.mobile_norm LIKE normalize_phone(${f.q}) || '%'))))))
     AND ${
       f.segment === 'domacnost'
         ? sql`cu.customer_type = 'B2C'`
@@ -41,20 +59,25 @@ export async function listCustomers(sql: Sql, f: CustomerFilter) {
             ? sql`cu.is_producer`
             : sql`TRUE`
     }
-    AND (${f.owner} = '' OR cu.owner_id::text = ${f.owner})`;
+    AND (${f.owner} = '' OR cu.owner_id::text = ${f.owner})
+    AND (${f.org} = '' OR cu.org_id::text = ${f.org})
+    AND ${customCond}`;
 
   const [rows, counts] = await Promise.all([
     sql`
       SELECT CASE cu.customer_type WHEN 'B2B' THEN 'company' ELSE 'person' END AS kind,
-             cu.id, cu.name, cu.ico, cu.customer_type, cu.status, cu.status_source, cu.is_former_customer, cu.is_producer,
+             cu.id, cu.name, cu.ico, cu.email, cu.customer_type, cu.status, cu.status_source, cu.is_former_customer, cu.is_producer,
              cu.segment_label, cu.owner_id, u.name AS owner_name, cu.active_oom_count, cu.annual_mwh, cu.last_activity_at,
-             cu.archived, x.city, x.company_count, x.is_statutory,
+             cu.archived, x.city, x.company_count, x.is_statutory, cu.org_id, o.legal_name AS org_name,
+             ${CUSTOM(sql)} AS custom,
+             (SELECT coalesce(p4.mobile, p4.phone) FROM contact p4 WHERE p4.id = cu.person_id) AS phone,
              (SELECT min(k.valid_from) FROM contract k
                WHERE (k.company_id = cu.id OR k.person_id = cu.id) AND k.valid_from > current_date
                  AND k.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')) AS future_from,
              count(*) OVER ()::int AS total
         FROM customer_v cu
         LEFT JOIN app_user u ON u.id = cu.owner_id
+        LEFT JOIN org o ON o.id = cu.org_id
         CROSS JOIN LATERAL (
           SELECT ${sql.unsafe(CITY('a.address'))} AS city,
                  (SELECT count(*)::int FROM company_contact cc WHERE cc.contact_id = cu.person_id) AS company_count,
@@ -65,7 +88,7 @@ export async function listCustomers(sql: Sql, f: CustomerFilter) {
         ) x
        WHERE ${base} AND ${statusCond}
        ORDER BY cu.name, cu.id
-       LIMIT ${PAGE_SIZE} OFFSET ${(f.page - 1) * PAGE_SIZE}`,
+       LIMIT ${pageSize} OFFSET ${(f.page - 1) * pageSize}`,
     sql`
       SELECT cu.status, cu.archived, count(*)::int AS n
         FROM customer_v cu
@@ -85,7 +108,7 @@ export async function listCustomers(sql: Sql, f: CustomerFilter) {
   const total = rows[0]?.total ?? 0;
   return {
     page: f.page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     total,
     counts: { visible, archived, all: counts.reduce((n, c) => n + c.n, 0), byStatus },
     items: rows.map(({ total: _t, ...r }) => r),
@@ -166,7 +189,7 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
            WHERE p.id = ${id}`;
   if (!head) return null;
 
-  const [kpi, contacts, companies, ooms, deals, contracts, history] = await Promise.all([
+  const [kpi, contacts, companies, ooms, deals, contracts, history, timeline] = await Promise.all([
     sql`
       SELECT count(*)::int AS oom_count,
              count(*) FILTER (WHERE status = 'aktivne')::int AS oom_active,
@@ -181,7 +204,9 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
     kind === 'company'
       ? sql`
           SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email, p.phone, p.mobile,
-                 p.position, cc.is_main_contact, to_jsonb(cc.roles) AS roles, p.is_household, p.marketing_opt_out_at,
+                 p.position, cc.is_main_contact, to_jsonb(cc.roles) AS roles, coalesce((SELECT jsonb_agg(v.label ORDER BY v.sort_order) FROM lookup_value v
+                          WHERE v.list_code = 'rola_kontaktu' AND v.code = ANY (cc.roles)), '[]') AS role_labels,
+                 p.is_household, p.marketing_opt_out_at,
                  (SELECT count(*)::int FROM company_contact o WHERE o.contact_id = p.id AND o.company_id <> ${id})
                    AS other_companies
             FROM company_contact cc JOIN contact p ON p.id = cc.contact_id
@@ -190,7 +215,9 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
       : sql`SELECT NULL LIMIT 0`,
     kind === 'person'
       ? sql`
-          SELECT c.id, c.name, c.ico, cc.is_main_contact, to_jsonb(cc.roles) AS roles, c.is_customer, c.status,
+          SELECT c.id, c.name, c.ico, cc.is_main_contact, to_jsonb(cc.roles) AS roles, coalesce((SELECT jsonb_agg(v.label ORDER BY v.sort_order) FROM lookup_value v
+                          WHERE v.list_code = 'rola_kontaktu' AND v.code = ANY (cc.roles)), '[]') AS role_labels,
+                 c.is_customer, c.status, crm_company_access(c.id, 'edit') AS can_edit_company,
                  CASE WHEN c.is_producer THEN 'Firma · výrobca' ELSE 'Firma' END AS segment_label,
                  company_is_archived(c) AS archived
             FROM company_contact cc JOIN company c ON c.id = cc.company_id
@@ -225,7 +252,35 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
        WHERE k.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY k.valid_to DESC NULLS FIRST, k.valid_from DESC`,
     statusHistory(sql, kind === 'company' ? 'company' : 'contact', id),
+    // Časová os: poznámky a ďalšie aktivity (najnovšie hore); pri firme aj meno osoby, ak sa aktivita týka aj jej.
+    sql`
+      SELECT a.id, a.type, a.subject, coalesce(a.body, a.body_preview) AS body, a.occurred_at, a.source,
+             u.name AS user_name,
+             CASE WHEN a.contact_id IS NOT NULL AND ${kind === 'company'}
+                  THEN (SELECT concat_ws(' ', p.first_name, p.last_name) FROM contact p WHERE p.id = a.contact_id) END AS person_name
+        FROM activity a
+        LEFT JOIN app_user u ON u.id = a.user_id
+       WHERE ${kind === 'company'
+         ? sql`a.company_id = ${id}`
+         : sql`a.contact_id = ${id}`}
+       ORDER BY a.occurred_at DESC
+       LIMIT 100`,
   ]);
 
-  return { kind, ...head, kpi: kpi[0], contacts, companies, ooms, deals, contracts, history };
+  // Vlastné polia typu odkaz: názvy odkazovaných záznamov
+  const refs = await sql`
+    SELECT r.id, coalesce(c.name, concat_ws(' ', p.first_name, p.last_name), o.eic, d.name, k.number) AS label,
+           CASE WHEN c.id IS NOT NULL THEN 'firma' WHEN p.id IS NOT NULL THEN 'osoba' END AS entity
+      FROM (SELECT DISTINCT (e.value #>> '{}')::uuid AS id
+              FROM jsonb_each(${sql.json((head.custom ?? {}) as Record<string, never>)}::jsonb) e
+              JOIN custom_field f ON f.key = e.key AND f.entity = ${kind === 'company' ? 'firma' : 'osoba'}::crm_entity
+                                 AND f.field_type = 'odkaz'
+             WHERE jsonb_typeof(e.value) = 'string') r
+      LEFT JOIN company c ON c.id = r.id
+      LEFT JOIN contact p ON p.id = r.id
+      LEFT JOIN oom o ON o.id = r.id
+      LEFT JOIN deal d ON d.id = r.id
+      LEFT JOIN contract k ON k.id = r.id`;
+
+  return { kind, ...head, kpi: kpi[0], contacts, companies, ooms, deals, contracts, history, timeline, custom_refs: refs };
 }

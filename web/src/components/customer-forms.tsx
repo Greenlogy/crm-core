@@ -227,6 +227,8 @@ type CompanyHit = { id: string; name: string; ico: string | null };
 export function PersonFormPanel(props: {
   person?: PersonCard;
   household?: boolean; // nová osoba: predvolene domácnosť
+  company?: CompanyHit; // nová osoba rovno do tejto firmy (karta firmy → Pridať → Nová osoba)
+  stay?: boolean; // po založení neotvárať kartu osoby, iba onSaved
   onClose: () => void;
   onSaved?: () => void;
 }) {
@@ -246,7 +248,7 @@ export function PersonFormPanel(props: {
   const [address, setAddress] = useState(p?.address ?? '');
   const [source, setSource] = useState(p?.source ?? '');
   const [owner, setOwner] = useState(p ? (p.owner_id ?? '') : me.id);
-  const [company, setCompany] = useState<CompanyHit | null>(null);
+  const [company, setCompany] = useState<CompanyHit | null>(props.company ?? null);
   const [companyQ, setCompanyQ] = useState('');
   const [hits, setHits] = useState<CompanyHit[]>([]);
   const [dups, setDups] = useState<PersonDup[]>([]);
@@ -295,7 +297,7 @@ export function PersonFormPanel(props: {
     }
     const r = await save.run(() => (p ? send('PATCH', `/api/persons/${p.id}`, body) : send<{ id: string }>('POST', '/api/persons', body)));
     if (!r) return;
-    if (p) props.onSaved?.();
+    if (p || props.stay) props.onSaved?.();
     else navigate(`/osoby/${(r as { id: string }).id}`);
     props.onClose();
   };
@@ -341,9 +343,11 @@ export function PersonFormPanel(props: {
             {company ? (
               <span className="picked">
                 {company.name} {company.ico && <span className="mono caption">{company.ico}</span>}{' '}
-                <button type="button" className="btn btn-ghost" onClick={() => setCompany(null)}>
-                  Zmeniť
-                </button>
+                {!props.company && (
+                  <button type="button" className="btn btn-ghost" onClick={() => setCompany(null)}>
+                    Zmeniť
+                  </button>
+                )}
               </span>
             ) : (
               <>

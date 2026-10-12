@@ -8,10 +8,11 @@ import { accessEmail } from './auth';
 import { asUser, connect } from './db';
 import { dbErrorResponse } from './errors';
 import { customersWrite } from './routes/customers-write';
+import { exportRoutes } from './routes/export';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
-import { listContacts, ROLE_FILTERS } from './queries/contacts';
+import { listContacts, ROLE_FILTER } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
   customerCard,
@@ -108,6 +109,7 @@ app.get('/me', async (c) => {
 
 // Zákazníci – zakladanie, úpravy, duplicity (pred kartami: /companies/search nie je id)
 app.route('/', customersWrite);
+app.route('/', exportRoutes);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
@@ -119,8 +121,10 @@ app.get('/customers', async (c) => {
   const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
   if (!STATUS_FILTERS.has(status)) return c.json({ error: 'Neplatný stav.' }, 400);
   if (!SEGMENT_FILTERS.has(segment)) return c.json({ error: 'Neplatný segment.' }, 400);
+  const org = c.req.query('org') ?? '';
   if (owner !== '' && !UUID.test(owner)) return c.json({ error: 'Neplatný obchodník.' }, 400);
-  return c.json(await listCustomers(c.var.sql, { q, status, segment, owner, page }));
+  if (org !== '' && !UUID.test(org)) return c.json({ error: 'Neplatná spoločnosť.' }, 400);
+  return c.json(await listCustomers(c.var.sql, { q, status, segment, owner, org, cf: c.req.query('cf'), page }));
 });
 
 app.get('/owners', async (c) => c.json(await listOwners(c.var.sql)));
@@ -131,8 +135,8 @@ app.get('/contacts', async (c) => {
   const q = (c.req.query('q') ?? '').trim().slice(0, 100);
   const role = c.req.query('role') ?? '';
   const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
-  if (!ROLE_FILTERS.has(role)) return c.json({ error: 'Neplatná rola.' }, 400);
-  return c.json(await listContacts(c.var.sql, { q, role, page }));
+  if (!ROLE_FILTER.test(role)) return c.json({ error: 'Neplatná rola.' }, 400);
+  return c.json(await listContacts(c.var.sql, { q, role, cf: c.req.query('cf'), page }));
 });
 
 const card = (kind: CustomerKind) =>

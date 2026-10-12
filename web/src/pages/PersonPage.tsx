@@ -3,7 +3,9 @@
 
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { MarketingPanel, OPT_OUT_SOURCE_LABEL, TimelineCard } from '../components/customer-f2';
 import { PersonFormPanel } from '../components/customer-forms';
+import { CustomFieldsCard } from '../components/custom-fields';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -28,6 +30,7 @@ export function PersonPage() {
   const { id = '' } = useParams();
   const { data: p, error, reload } = useApi<PersonCard>(`/api/persons/${id}`);
   const [editing, setEditing] = useState(false);
+  const [marketing, setMarketing] = useState(false);
 
   if (error) return <ErrorState error={error} />;
   if (!p || p.id !== id) return <PageSkeleton />;
@@ -78,6 +81,16 @@ export function PersonPage() {
         )}
       </header>
       {editing && <PersonFormPanel person={p} onClose={() => setEditing(false)} onSaved={reload} />}
+      {marketing && (
+        <MarketingPanel
+          person={p}
+          onClose={() => setMarketing(false)}
+          onSaved={() => {
+            setMarketing(false);
+            reload();
+          }}
+        />
+      )}
 
       {p.is_household && (
         <section className="kpis" aria-label="Kľúčové čísla">
@@ -111,18 +124,26 @@ export function PersonPage() {
                 ['Zdroj', text(p.source)],
                 [
                   'Marketing',
-                  p.marketing_opt_out_at ? (
-                    <>
-                      <Pill tone="negative">Nechce marketing</Pill>{' '}
-                      <span className="caption">
-                        od {date(p.marketing_opt_out_at)} · {p.marketing_opt_out_source}
-                      </span>
-                    </>
-                  ) : p.marketing_allowed ? (
-                    <Pill tone="positive">Áno</Pill>
-                  ) : (
-                    <Pill>Nie – archív</Pill>
-                  ),
+                  <>
+                    {p.marketing_opt_out_at ? (
+                      <>
+                        <Pill tone="negative">Nechce marketing</Pill>{' '}
+                        <span className="caption">
+                          od {date(p.marketing_opt_out_at)} ·{' '}
+                          {OPT_OUT_SOURCE_LABEL[p.marketing_opt_out_source ?? ''] ?? p.marketing_opt_out_source}
+                        </span>
+                      </>
+                    ) : p.marketing_allowed ? (
+                      <Pill tone="positive">Áno</Pill>
+                    ) : (
+                      <Pill>Nie – archív</Pill>
+                    )}{' '}
+                    {p.can_edit && (
+                      <button type="button" className="link-button name-link" onClick={() => setMarketing(true)}>
+                        Zmeniť
+                      </button>
+                    )}
+                  </>,
                 ],
               ]}
             />
@@ -136,7 +157,7 @@ export function PersonPage() {
                 <Item
                   key={f.id}
                   title={<Link to={`/firmy/${f.id}`}>{f.name}</Link>}
-                  meta={[rolesText(f.roles), f.is_main_contact ? 'hlavný kontakt' : null, f.is_customer ? f.segment_label : null]
+                  meta={[f.role_labels.join(', ').toLowerCase() || null, f.is_main_contact ? 'hlavný kontakt' : null, f.is_customer ? f.segment_label : null]
                     .filter(Boolean)
                     .join(' · ') || undefined}
                   side={
@@ -150,13 +171,21 @@ export function PersonPage() {
             )}
           </Card>
 
+          <CustomFieldsCard
+            entity="osoba"
+            recordId={p.id}
+            orgId={p.org_id}
+            custom={p.custom}
+            refs={p.custom_refs}
+            canEditRecord={p.can_edit}
+            onSaved={reload}
+          />
+
           {p.is_household && <StatusHistoryCard history={p.history} />}
         </div>
 
         <div className="col-mid">
-          <Card title="Časová os" aside={<Source />}>
-            <NotInPrototype what="aktivity, e-maily, hovory a tickety sa do vzorky nenahrávali." />
-          </Card>
+          <TimelineCard kind="person" id={p.id} items={p.timeline} canAdd={p.can_edit} onAdded={reload} />
         </div>
 
         <div className="col-right">

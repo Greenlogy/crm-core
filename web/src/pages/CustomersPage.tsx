@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CustomerStatus } from '../components/customer';
 import { CompanyFormPanel, PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
+import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-fields';
+import { permission, useMe } from '../lib/me';
 import { Avatar, Card, ErrorState, Skeleton, Source } from '../components/ui';
 import { useApi, type CustomerList, type CustomerListItem, type Owner } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
@@ -45,13 +47,39 @@ export function CustomersPage(props: { leads?: boolean }) {
   const segment = params.get('segment') ?? '';
   const owner = params.get('obchodnik') ?? '';
   const showAll = params.get('vsetko') === '1';
+  const org = params.get('spolocnost') ?? '';
+  const cfRaw = params.get('cf') ?? '';
+  const cf: Record<string, string> = (() => {
+    try {
+      return cfRaw ? JSON.parse(cfRaw) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const me = useMe();
+  const multiOrg = me.orgs.length > 1;
+  const canExport = permission(me, 'zakaznici').export;
+  const defs = useFieldDefs('firma,osoba');
+  const listDefs = defs.filter((d) => d.show_in_list && !d.archived_at);
+  // filtre: rovnaký kľúč vo firme aj osobe len raz
+  const filterDefs = defs.filter((d, i) => defs.findIndex((x) => x.key === d.key) === i);
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
   const canCreate = useCanCreateCustomers();
   const [creating, setCreating] = useState<'company' | 'person' | null>(null);
 
   const update = (next: Record<string, string>) => {
-    const merged = { q, stav: props.leads ? '' : chip, segment, obchodnik: owner, vsetko: showAll ? '1' : '', page: String(page), ...next };
+    const merged = {
+      q,
+      stav: props.leads ? '' : chip,
+      segment,
+      obchodnik: owner,
+      spolocnost: org,
+      cf: cfRaw,
+      vsetko: showAll ? '1' : '',
+      page: String(page),
+      ...next,
+    };
     const clean = Object.fromEntries(Object.entries(merged).filter(([k, v]) => v && !(k === 'page' && v === '1')));
     setParams(clean, { replace: true });
   };
@@ -64,7 +92,7 @@ export function CustomersPage(props: { leads?: boolean }) {
   }, [input]);
 
   const status = chip === '' ? (showAll ? 'vsetky' : '') : chip;
-  const query = new URLSearchParams({ q, status, segment, owner, page: String(page) });
+  const query = new URLSearchParams({ q, status, segment, owner, org, cf: cfRaw, page: String(page) });
   const { data, error, loading } = useApi<CustomerList>(`/api/customers?${query}`);
   const { data: owners } = useApi<Owner[]>('/api/owners');
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -91,9 +119,11 @@ export function CustomersPage(props: { leads?: boolean }) {
           </div>
         </div>
         <div className="head-actions">
-          <button className="btn" type="button" disabled title="Pripravuje sa (F4)">
-            Export
-          </button>
+          {canExport && (
+            <a className="btn" href={`/api/customers/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+              Export
+            </a>
+          )}
           {canCreate && (
             <>
               <button className="btn" type="button" onClick={() => setCreating('person')}>
@@ -112,7 +142,7 @@ export function CustomersPage(props: { leads?: boolean }) {
           <input
             className="input grow"
             type="search"
-            placeholder="Názov, IČO alebo e-mail…"
+            placeholder="Názov, IČO/OIB, e-mail alebo telefón…"
             aria-label="Hľadať zákazníka"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -132,6 +162,21 @@ export function CustomersPage(props: { leads?: boolean }) {
               </option>
             ))}
           </select>
+          {multiOrg && (
+            <select className="input select" aria-label="Spoločnosť" value={org} onChange={(e) => update({ spolocnost: e.target.value, page: '1' })}>
+              <option value="">Spoločnosť: všetky</option>
+              {me.orgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <CustomFilters
+            defs={filterDefs}
+            value={cf}
+            onChange={(v) => update({ cf: Object.keys(v).length ? JSON.stringify(v) : '', page: '1' })}
+          />
         </div>
 
         {!props.leads && (
@@ -182,13 +227,19 @@ export function CustomersPage(props: { leads?: boolean }) {
                     Ročný objem
                   </th>
                   <th scope="col">Vlastník</th>
+                  {multiOrg && <th scope="col">Spoločnosť</th>}
+                  {listDefs.map((d) => (
+                    <th key={d.id} scope="col">
+                      {d.label}
+                    </th>
+                  ))}
                   <th scope="col">Posledná aktivita</th>
                 </tr>
               </thead>
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted">
+                    <td colSpan={9 + listDefs.length} className="muted">
                       Žiadny zákazník nezodpovedá filtru.
                     </td>
                   </tr>
@@ -224,6 +275,12 @@ export function CustomersPage(props: { leads?: boolean }) {
                     <td className="num">{num(c.active_oom_count, 0)}</td>
                     <td className={`num${Number(c.annual_mwh) ? '' : ' muted'}`}>{Number(c.annual_mwh) ? mwh(c.annual_mwh) : '–'}</td>
                     <td>{text(c.owner_name)}</td>
+                    {multiOrg && <td>{c.org_name}</td>}
+                    {listDefs.map((d) => (
+                      <td key={d.id}>
+                        {(d.entity === 'firma') === (c.kind === 'company') ? formatCustom(d, c.custom[d.key]) : <span className="muted">–</span>}
+                      </td>
+                    ))}
                     <td className="muted">{c.last_activity_at ? date(c.last_activity_at) : '–'}</td>
                   </tr>
                 ))}

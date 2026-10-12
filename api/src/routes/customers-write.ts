@@ -36,7 +36,7 @@ function normalizeIco(country: string, raw: string): string {
 
 customersWrite.get('/customers/options', async (c) => {
   const sql = c.var.sql;
-  const [orgs, owners, sources] = await Promise.all([
+  const [orgs, owners, sources, contactRoles] = await Promise.all([
     sql`SELECT o.id, o.legal_name AS name, o.country, o.is_default
           FROM org o WHERE o.id = ANY (crm_user_orgs()) AND o.status = 'aktivna'
          ORDER BY o.is_default DESC, o.legal_name`,
@@ -44,8 +44,10 @@ customersWrite.get('/customers/options', async (c) => {
          WHERE u.status = 'aktivny' ORDER BY lower(u.name)`,
     sql`SELECT code, label, org_id FROM lookup_value
          WHERE list_code = 'zdroj_kontaktu' AND hidden_at IS NULL ORDER BY sort_order, lower(label)`,
+    sql`SELECT code, label, org_id, is_system, hidden_at FROM lookup_value
+         WHERE list_code = 'rola_kontaktu' ORDER BY sort_order, lower(label)`,
   ]);
-  return c.json({ orgs, owners, sources });
+  return c.json({ orgs, owners, sources, roles: contactRoles, opt_out_sources: OPT_OUT_SOURCES });
 });
 
 // Firma je v CRM raz (krajina + IČO/OIB). Kto ju nevidí, dostane iba „existuje“, vlastníka a spoločnosť.
@@ -243,3 +245,184 @@ customersWrite.delete('/persons/:id', async (c) => {
   const [r] = await c.var.sql<{ name: string }[]>`SELECT customer_delete(NULL, ${personId}) AS name`;
   return c.json({ ok: true, name: r.name });
 });
+
+// ============================================================================
+// F2: osoba vo firme (roly, hlavný kontakt), „nechce marketing“, poznámky
+// ============================================================================
+
+// Hľadanie osoby (pridanie existujúcej osoby do firmy) – iba v spoločnosti firmy.
+customersWrite.get('/persons/search', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const org = c.req.query('org') ?? '';
+  if (org !== '' && !UUID.test(org)) throw new BadRequest('Neplatná spoločnosť.');
+  if (q.length < 2) return c.json({ items: [] });
+  const like = '%' + q + '%';
+  const rows = await c.var.sql`
+    SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.email, coalesce(p.mobile, p.phone) AS phone,
+           p.is_household
+      FROM contact p
+     WHERE (${org} = '' OR p.org_id::text = ${org})
+       AND (concat_ws(' ', p.first_name, p.last_name) ILIKE ${like} OR p.email ILIKE ${like}
+            OR (normalize_phone(${q}) IS NOT NULL AND normalize_phone(${q}) IN (p.phone_norm, p.mobile_norm)))
+     ORDER BY p.last_name, p.first_name LIMIT 20`;
+  return c.json({ items: rows });
+});
+
+function roles(b: Body): string[] | undefined {
+  const v = b.roles;
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !/^[a-z0-9_]{1,63}$/.test(x))) {
+    throw new BadRequest('Roly: neplatný zoznam.');
+  }
+  return [...new Set(v as string[])];
+}
+
+// Hlavný kontakt firmy je najviac jeden: nový hlavný zruší predchádzajúceho.
+async function setMain(sql: Sql, companyId: string, contactId: string) {
+  await sql`UPDATE company_contact SET is_main_contact = false
+             WHERE company_id = ${companyId} AND is_main_contact AND contact_id <> ${contactId}`;
+  await sql`UPDATE company_contact SET is_main_contact = true WHERE company_id = ${companyId} AND contact_id = ${contactId}`;
+}
+
+customersWrite.post('/companies/:id/contacts', async (c) => {
+  const companyId = id(c.req.param('id'));
+  const sql = c.var.sql;
+  const b = await readBody(c.req);
+  const contactId = uuid(b, 'contact_id', 'Osoba')!;
+  const main = bool(b, 'is_main_contact', 'Hlavný kontakt') ?? false;
+  if (main && (await team(sql, c.var.userId)) === 'servis') throw new Forbidden('Hlavný kontakt firmy Servis nemení.');
+  await sql`INSERT INTO company_contact (company_id, contact_id, roles)
+            VALUES (${companyId}, ${contactId}, ARRAY(SELECT jsonb_array_elements_text(${sql.json(roles(b) ?? [])}::jsonb)))`;
+  if (main) await setMain(sql, companyId, contactId);
+  return c.json({ ok: true }, 201);
+});
+
+customersWrite.patch('/companies/:id/contacts/:contactId', async (c) => {
+  const companyId = id(c.req.param('id'));
+  const contactId = id(c.req.param('contactId'));
+  const sql = c.var.sql;
+  const b = await readBody(c.req);
+  const r = roles(b);
+  const main = bool(b, 'is_main_contact', 'Hlavný kontakt');
+  if (main !== undefined && (await team(sql, c.var.userId)) === 'servis') throw new Forbidden('Hlavný kontakt firmy Servis nemení.');
+  if (r !== undefined) {
+    const rows = await sql`
+      UPDATE company_contact SET roles = ARRAY(SELECT jsonb_array_elements_text(${sql.json(r)}::jsonb))
+       WHERE company_id = ${companyId} AND contact_id = ${contactId} RETURNING id`;
+    if (rows.length === 0) return c.json({ error: 'Osoba nie je vo firme alebo ju nemôžete upravovať.' }, 403);
+  }
+  if (main === true) await setMain(sql, companyId, contactId);
+  if (main === false) {
+    await sql`UPDATE company_contact SET is_main_contact = false WHERE company_id = ${companyId} AND contact_id = ${contactId}`;
+  }
+  return c.json({ ok: true });
+});
+
+customersWrite.delete('/companies/:id/contacts/:contactId', async (c) => {
+  const companyId = id(c.req.param('id'));
+  const contactId = id(c.req.param('contactId'));
+  const rows = await c.var.sql`
+    DELETE FROM company_contact WHERE company_id = ${companyId} AND contact_id = ${contactId} RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Osoba nie je vo firme alebo ju nemôžete odobrať.' }, 403);
+  return c.json({ ok: true });
+});
+
+// „Nechce marketing“ (čl. 8): dátum a zdroj; zrušenie oboje vymaže.
+const OPT_OUT_SOURCES = ['telefon', 'email', 'osobne', 'web', 'brevo', 'hubspot', 'ine'];
+
+customersWrite.patch('/persons/:id/marketing', async (c) => {
+  const personId = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  const optOut = bool(b, 'opt_out', 'Nechce marketing');
+  if (optOut === undefined) throw new BadRequest('Chýba: Nechce marketing.');
+  const source = optOut ? str(b, 'source', 'Zdroj', { max: 20 })! : null;
+  if (source && !OPT_OUT_SOURCES.includes(source)) throw new BadRequest('Zdroj: neplatná hodnota.');
+  const rows = await c.var.sql`
+    UPDATE contact
+       SET marketing_opt_out_at = CASE WHEN ${optOut} THEN coalesce(marketing_opt_out_at, now()) END,
+           marketing_opt_out_source = ${source}
+     WHERE id = ${personId} RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Osobu nemôžete upravovať alebo neexistuje.' }, 403);
+  return c.json({ ok: true });
+});
+
+// Poznámka na časovej osi (autor = prihlásený). Pridá ten, kto smie zákazníka upravovať.
+async function addNote(sql: Sql, userId: string, kind: 'company' | 'person', recordId: string, text: string) {
+  const [ok] = await sql<{ ok: boolean }[]>`
+    SELECT ${kind === 'company'} AND crm_company_access(${recordId}, 'edit')
+        OR ${kind === 'person'} AND crm_contact_access(${recordId}, 'edit') AS ok`;
+  if (!ok?.ok) throw new Forbidden('Poznámku môže pridať iba ten, kto smie zákazníka upravovať.');
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO activity (type, company_id, contact_id, user_id, occurred_at, body, source)
+    VALUES ('poznamka', ${kind === 'company' ? recordId : null}, ${kind === 'person' ? recordId : null},
+            ${userId}, now(), ${text}, 'crm')
+    RETURNING id`;
+  return row.id;
+}
+
+for (const [path, kind] of [['companies', 'company'], ['persons', 'person']] as const) {
+  customersWrite.post(`/${path}/:id/notes`, async (c) => {
+    const recordId = id(c.req.param('id'));
+    const b = await readBody(c.req);
+    const text = str(b, 'text', 'Text poznámky', { max: 5000 })!;
+    return c.json({ id: await addNote(c.var.sql, c.var.userId, kind, recordId, text) }, 201);
+  });
+}
+
+// ============================================================================
+// F3: vlastné polia na kartách
+// ============================================================================
+
+// Definície polí pre karty a zoznamy (nie Nastavenia): aj archivované – ich hodnoty sa zobrazujú.
+// can_edit = smie prihlásený pole meniť (tímy poľa); platí aj v databáze.
+customersWrite.get('/custom-fields', async (c) => {
+  const entities = (c.req.query('entity') ?? 'firma').split(',');
+  if (entities.some((e) => !['firma', 'osoba', 'oom', 'deal', 'zmluva', 'ponuka'].includes(e))) {
+    throw new BadRequest('Neznámy záznam.');
+  }
+  const sql = c.var.sql;
+  const fields = await sql`
+    SELECT f.id, f.entity, f.key, f.label, f.field_type, f.ref_entity, f.section_id, s.name AS section_name,
+           s.sort_order AS section_order, f.sort_order, f.is_required, f.show_in_list, f.filterable, f.org_id,
+           f.archived_at, crm_can_edit_field(f) AS can_edit,
+           coalesce((SELECT json_agg(json_build_object('id', o.id, 'label', o.label, 'hidden_at', o.hidden_at)
+                                     ORDER BY o.sort_order, lower(o.label))
+                       FROM custom_field_option o WHERE o.field_id = f.id), '[]') AS options
+      FROM custom_field f
+      LEFT JOIN custom_field_section s ON s.id = f.section_id
+     WHERE f.entity::text IN (SELECT jsonb_array_elements_text(${sql.json(entities)}::jsonb))
+     ORDER BY s.sort_order NULLS FIRST, f.sort_order, lower(f.label)`;
+  return c.json({ items: fields });
+});
+
+// Hodnoty: { values: { kľúč: hodnota | null } } – null pole vymaže; ostatné kľúče sa nemenia.
+function customPatch(b: Body): { set: Record<string, unknown>; remove: string[] } {
+  const v = b.values;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new BadRequest('Chýbajú hodnoty polí.');
+  const set: Record<string, unknown> = {};
+  const remove: string[] = [];
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (!/^[a-z][a-z0-9_]{1,62}$/.test(k)) throw new BadRequest('Neznáme pole.');
+    if (x === null || x === '' || (Array.isArray(x) && x.length === 0)) remove.push(k);
+    else set[k] = x;
+  }
+  return { set, remove };
+}
+
+for (const [path, table] of [['companies', 'company'], ['persons', 'contact']] as const) {
+  customersWrite.patch(`/${path}/:id/custom`, async (c) => {
+    const recordId = id(c.req.param('id'));
+    const sql = c.var.sql;
+    if (table === 'company' && (await team(sql, c.var.userId)) === 'servis') {
+      throw new Forbidden('Servis nemení údaje firmy.');
+    }
+    const { set, remove } = customPatch(await readBody(c.req));
+    const rows = await sql`
+      UPDATE ${sql(table)}
+         SET custom = (custom || ${sql.json(set as Record<string, never>)}::jsonb)
+                      - ARRAY(SELECT jsonb_array_elements_text(${sql.json(remove)}::jsonb))
+       WHERE id = ${recordId} RETURNING id`;
+    if (rows.length === 0) return c.json({ error: 'Záznam nemôžete upravovať alebo neexistuje.' }, 403);
+    return c.json({ ok: true });
+  });
+}

@@ -2007,8 +2007,17 @@ CREATE TABLE public.activity (
     source text,
     source_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    body text,
+    CONSTRAINT activity_note_check CHECK (((type <> 'poznamka'::public.activity_type) OR (source IS DISTINCT FROM 'crm'::text) OR ((btrim(body) <> ''::text) AND (user_id IS NOT NULL) AND (num_nonnulls(company_id, contact_id) >= 1))))
 );
+
+
+--
+-- Name: COLUMN activity.body; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.activity.body IS 'celý text (poznámka z CRM); body_preview je náhľad z HubSpotu';
 
 
 --
@@ -7203,4 +7212,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0008'),
     ('0009'),
     ('0010'),
-    ('0011');
+    ('0011'),
+    ('0012');

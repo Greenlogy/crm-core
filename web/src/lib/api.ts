@@ -25,6 +25,9 @@ export type CustomerListItem = {
   company_count: number;
   is_statutory: boolean;
   future_from: string | null;
+  org_id: string;
+  org_name: string;
+  custom: Record<string, unknown>;
 };
 
 export type CustomerList = {
@@ -51,7 +54,8 @@ export type ContactListItem = {
   segment_label: string;
   marketing_allowed: boolean;
   marketing_opt_out_at: string | null;
-  companies: { id: string; name: string; roles: string[]; is_main_contact: boolean }[];
+  custom: Record<string, unknown>;
+  companies: { id: string; name: string; roles: string[]; role_labels: string[]; is_main_contact: boolean }[];
 };
 
 export type ContactList = { page: number; pageSize: number; total: number; items: ContactListItem[] };
@@ -161,6 +165,8 @@ type CardBase = {
   org_name: string;
   can_edit: boolean;
   custom: Record<string, unknown>;
+  timeline: import('../components/customer-f2').TimelineItem[];
+  custom_refs: import('../components/custom-fields').RefLabel[];
 };
 
 export type CompanyCard = CardBase & {
@@ -191,6 +197,7 @@ export type CompanyCard = CardBase & {
     position: string | null;
     is_main_contact: boolean;
     roles: string[];
+    role_labels: string[];
     is_household: boolean;
     marketing_opt_out_at: string | null;
     other_companies: number;
@@ -217,6 +224,8 @@ export type PersonCard = CardBase & {
     ico: string | null;
     is_main_contact: boolean;
     roles: string[];
+    role_labels: string[];
+    can_edit_company: boolean;
     is_customer: boolean;
     status: string | null;
     segment_label: string;

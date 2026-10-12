@@ -147,4 +147,4 @@ Rozhodnuté:
 3. **Mazanie:** admin smie zmazať firmu alebo osobu bez väzieb (deal, odberné miesto, zmluva, osoba vo firme, aktivita); audit zapíše kto, kedy a celý obsah záznamu. Inak iba archív.
 4. **Export:** súbor .xlsx; IČO/OIB, telefóny a EIC ako text (bez straty úvodných núl).
 
-Stav: F1 na Teste, Peter vyskúšal 12. 10. 2026 (scenár 10 krokov vrátane práv Marketing a Servis).
+Stav: F1 na Teste, Peter vyskúšal 12. 10. 2026 (scenár 10 krokov vrátane práv Marketing a Servis). F2–F4 na Teste, Peter vyskúšal 12. 10. 2026.

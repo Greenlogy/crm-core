@@ -3,7 +3,9 @@
 
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CompanyContactsCard, TimelineCard } from '../components/customer-f2';
 import { CompanyFormPanel } from '../components/customer-forms';
+import { CustomFieldsCard } from '../components/custom-fields';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -114,50 +116,25 @@ export function CustomerPage() {
             <NotInPrototype what="platobné hodnotenie a dáta z FinStatu sa nenačítavajú." />
           </Card>
 
+          <CustomFieldsCard
+            entity="firma"
+            recordId={c.id}
+            orgId={c.org_id}
+            custom={c.custom}
+            refs={c.custom_refs}
+            canEditRecord={c.can_edit && me.team_code !== 'servis'}
+            onSaved={reload}
+          />
+
           {c.is_customer && <StatusHistoryCard history={c.history} />}
         </div>
 
         <div className="col-mid">
-          <Card title="Časová os" aside={<Source />}>
-            <NotInPrototype what="aktivity, e-maily, hovory a tickety sa do vzorky nenahrávali." />
-          </Card>
+          <TimelineCard kind="company" id={c.id} items={c.timeline} canAdd={c.can_edit} onAdded={reload} />
         </div>
 
         <div className="col-right">
-          <Card title={`Kontakty (${c.contacts.length})`} aside={<span className="caption" title="V prototype nie je">+ Pridať</span>}>
-            {c.contacts.length === 0 ? (
-              <Empty>Zatiaľ žiadne kontakty. Hlavný kontakt vyberie kontrolór.</Empty>
-            ) : (
-              c.contacts.map((p) => (
-                <Item
-                  key={p.id}
-                  title={
-                    <>
-                      <Link to={`/osoby/${p.id}`}>{[p.title, p.name].filter(Boolean).join(' ')}</Link>
-                      {rolesText(p.roles) && <span className="muted"> {rolesText(p.roles)}</span>}
-                    </>
-                  }
-                  meta={[p.position, p.email, p.mobile ?? p.phone].filter(Boolean).join(' · ') || undefined}
-                  side={
-                    <>
-                      {p.is_main_contact && <Pill>Hlavný</Pill>}
-                      {p.other_companies > 0 && (
-                        <span title="Kontakt je priradený aj k inej firme">
-                          <Pill>+{p.other_companies} {p.other_companies === 1 ? 'firma' : p.other_companies < 5 ? 'firmy' : 'firiem'}</Pill>
-                        </span>
-                      )}
-                      {p.marketing_opt_out_at && <Pill tone="negative">Nechce marketing</Pill>}
-                    </>
-                  }
-                />
-              ))
-            )}
-            {c.contacts.length > 1 && !c.contacts.some((p) => p.is_main_contact) && (
-              <div className="caption" style={{ padding: '8px 0 0' }}>
-                Firma nemá hlavný kontakt – vyberie ho kontrolór.
-              </div>
-            )}
-          </Card>
+          <CompanyContactsCard company={c} onChanged={reload} />
 
           <OomsCard ooms={c.ooms} />
           <DealsCard deals={c.deals} />

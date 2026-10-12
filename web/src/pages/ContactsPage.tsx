@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
+import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-fields';
+import { permission, useMe } from '../lib/me';
 import { Avatar, Card, ErrorState, Pill, Skeleton, Source } from '../components/ui';
 import { useApi, type ContactList } from '../lib/api';
 import { date, num } from '../lib/format';
@@ -15,13 +17,25 @@ export function ContactsPage() {
   const navigate = useNavigate();
   const q = params.get('q') ?? '';
   const role = params.get('rola') ?? '';
+  const cfRaw = params.get('cf') ?? '';
+  const cf: Record<string, string> = (() => {
+    try {
+      return cfRaw ? JSON.parse(cfRaw) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const defs = useFieldDefs('osoba');
+  const canExport = permission(useMe(), 'zakaznici').export;
+  const listDefs = defs.filter((d) => d.show_in_list && !d.archived_at);
+  const roleOptions = useApi<{ roles: { code: string; label: string; hidden_at: string | null }[] }>('/api/customers/options').data?.roles ?? [];
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
   const canCreate = useCanCreateCustomers();
   const [creating, setCreating] = useState(false);
 
   const update = (next: Record<string, string>) => {
-    const merged = { q, rola: role, page: String(page), ...next };
+    const merged = { q, rola: role, cf: cfRaw, page: String(page), ...next };
     const clean = Object.fromEntries(Object.entries(merged).filter(([k, v]) => v && !(k === 'page' && v === '1')));
     setParams(clean, { replace: true });
   };
@@ -32,7 +46,7 @@ export function ContactsPage() {
     return () => clearTimeout(t);
   }, [input]);
 
-  const query = new URLSearchParams({ q, role, page: String(page) });
+  const query = new URLSearchParams({ q, role, cf: cfRaw, page: String(page) });
   const { data, error, loading } = useApi<ContactList>(`/api/contacts?${query}`);
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
@@ -46,13 +60,18 @@ export function ContactsPage() {
             <Source />
           </div>
         </div>
-        {canCreate && (
-          <div className="head-actions">
+        <div className="head-actions">
+          {canExport && (
+            <a className="btn" href={`/api/contacts/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+              Export
+            </a>
+          )}
+          {canCreate && (
             <button className="btn primary" type="button" onClick={() => setCreating(true)}>
               Nová osoba
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       <Card flush label="Zoznam osôb">
@@ -67,12 +86,13 @@ export function ContactsPage() {
           />
           <select className="input select" aria-label="Rola" value={role} onChange={(e) => update({ rola: e.target.value, page: '1' })}>
             <option value="">Rola: všetky</option>
-            {Object.entries(COMPANY_ROLE).map(([value, name]) => (
-              <option key={value} value={value}>
-                {name}
+            {roleOptions.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.label.toLowerCase()}
               </option>
             ))}
           </select>
+          <CustomFilters defs={defs} value={cf} onChange={(v) => update({ cf: Object.keys(v).length ? JSON.stringify(v) : '', page: '1' })} />
         </div>
 
         {error ? (
@@ -93,12 +113,17 @@ export function ContactsPage() {
                   <th scope="col">Firmy a role</th>
                   <th scope="col">Ako zákazník</th>
                   <th scope="col">Marketing</th>
+                  {listDefs.map((d) => (
+                    <th key={d.id} scope="col">
+                      {d.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted">
+                    <td colSpan={5 + listDefs.length} className="muted">
                       Žiadna osoba nezodpovedá hľadaniu.
                     </td>
                   </tr>
@@ -129,7 +154,8 @@ export function ContactsPage() {
                               <Link to={`/firmy/${f.id}`} onClick={(e) => e.stopPropagation()}>
                                 {f.name}
                               </Link>
-                              {rolesText(f.roles) && ` · ${rolesText(f.roles)}`} {f.is_main_contact && <Pill>Hlavný</Pill>}
+                              {f.role_labels.length > 0 && ` · ${f.role_labels.join(', ').toLowerCase()}`}{' '}
+                              {f.is_main_contact && <Pill>Hlavný</Pill>}
                             </div>
                           ))
                         )}
@@ -152,6 +178,9 @@ export function ContactsPage() {
                           <span className="muted">áno</span>
                         )}
                       </td>
+                      {listDefs.map((d) => (
+                        <td key={d.id}>{formatCustom(d, p.custom[d.key])}</td>
+                      ))}
                     </tr>
                   );
                 })}
