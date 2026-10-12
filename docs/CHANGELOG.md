@@ -2,6 +2,14 @@
 
 ## 2026-10-12
 
+- Test (`dev`): vyprázdnený skriptom `db/empty-test.sh`, rola `crm_prototype_ro` zrušená, migrácie 0006–0008 spustené (Peter), testy prešli (88 kontrol), `db/schema.sql` aktualizovaný
+- Modul 0 Nastavenia: návrh databázy schválený, odpovede a odchýlky zapísané (`00-nastavenia-navrh-db.md` v0.2, `rozhodnutia.md`)
+- Migrácie (nespustené na Neone): `0006_nastavenia_jadro` (spoločnosti, logo, bankové účty, tímy a práva, používatelia so stavom a adminom, prístup k spoločnostiam, funkcie práv, prihlásenie a deaktivácia s odovzdaním, pracovný čas a voľné dni podľa spoločnosti s prepočtom kalendára, audit so zdrojom a vlastnými poliami po kľúčoch, nemenný audit, záznam exportov, RLS Nastavení, východiskové údaje), `0007_nastavenia_obsah` (číselníky so systémovými hodnotami, vlastné polia s kontrolou hodnôt, pipelines a stage s výsledkom a povinnými poliami), `0008_zakaznici_spolocnost` (spoločnosť na záznamoch, krajina a IČO/OIB, roly a zdroj z číselníka, RLS podľa tímu a spoločnosti namiesto 0005, kontrola duplicít)
+- Testy: `seed.sql`, `checks_zakaznici.sql` upravené na tímy; nové `db/test/checks_nastavenia.sql` (52 kontrol vrátane: Sales_external nevidí cudzí záznam, deaktivovaný nevidí nič, CZ obchodník nevidí SK zákazníkov); `run.sh` ich spúšťa. Lokálne overené: 88 kontrol, návrat 0008–0006 a opätovné spustenie
+- Východiskové práva Provízie: CEO všetko, Sales_internal iba svoje, Servis/Nákup/Marketing nič (Peter); odchýlky v časti 8 návrhu schválené
+- Druhý admin vo východiskových údajoch `0006`: Eva Kalmanová (eva@greenlogy.com), tím Marketing, Greenlogy a.s.
+- `db/empty-test.sh` + `db/empty-test.sql`: vyprázdnenie Testu so skúškou (ROLLBACK), ponechá migrácie, kalendár a Nastavenia; voliteľne zruší rolu `crm_prototype_ro`; výpis bez prehliadača (pager), aby sa nezasekol
+- Modul 0 Nastavenia: 5 rozhodnutí z 12. 10. v `docs/rozhodnutia.md` (funkčné moduly a prostredia Test/Ostré, Nastavenia pred Zákazníkmi, tím = skupina práv, viac spoločností, DNS); návrh databázy `docs/moduly/00-nastavenia-navrh-db.md` v0.1 na schválenie (nič nespustené)
 - Výpadok prototypu: Neon vetva `dev` zmizla (pravdepodobne automatické zmazanie nastavené pri jej vytvorení; príčinu treba potvrdiť v Neon Operations). `main` nedotknutá (prázdna). Server Neonu pri neexistujúcej vetve hlásil „password authentication failed“.
 - Obnova: nová vetva `dev` z `main` (Peter), migrácie 0001–0005 a testy (36 kontrol) prešli, rola `crm_prototype_ro` znova, Hyperdrive `crm-core-dev` prepojený na novú vetvu, vzorka (1 340 riadkov) nahratá; Worker sa nemenil
 - `api/db/update-hyperdrive.sh` (prepojenie existujúceho Hyperdrive na aktuálne `DATABASE_URL_DEV_RO`); `api/db/create-prototype-role.sh --nove-heslo` (nové heslo existujúcej role, riadok v `.dev.vars` sa nahrádza, nie pripisuje)

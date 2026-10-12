@@ -2,12 +2,11 @@
 -- Spúšťa sa iba na vetve dev cez db/test/run.sh (v transakcii, ktorá sa na konci vráti).
 -- Pevné uuid (prefix 00000000-0000-4000-8000-) uľahčujú odkazy v checks.sql.
 
--- Používateľ a tím
-INSERT INTO team (id, name) VALUES
-  ('00000000-0000-4000-8000-000000000001', 'Sales_internal');
-INSERT INTO app_user (id, email, name, role, team_id) VALUES
-  ('00000000-0000-4000-8000-000000000011', 'obchodnik@example.test', 'Testovací Obchodník', 'obchodnik',
-   '00000000-0000-4000-8000-000000000001');
+-- Používateľ: tím Sales_internal z východiskových údajov (0006)
+INSERT INTO app_user (id, email, name, team_id, status)
+SELECT '00000000-0000-4000-8000-000000000011', 'obchodnik@example.test', 'Testovací Obchodník', t.id, 'aktivny'
+  FROM team t WHERE t.code = 'sales_internal';
+INSERT INTO app_user_org (user_id, org_id) VALUES ('00000000-0000-4000-8000-000000000011', crm_default_org());
 
 -- Firmy (B2B): firma, obec (zákazník) a dodávateľ (iba dodávateľ, nie je zákazník)
 INSERT INTO company (id, name, ico, is_customer, is_supplier, owner_id) VALUES
@@ -45,13 +44,13 @@ INSERT INTO product (id, code, name, kind, pricing_model, unit, list_price) VALU
   ('00000000-0000-4000-8000-000000000402', 'TEST_E_OM', 'Test poplatok za OM', 'poplatok', NULL, 'eur_mesiac', 3.0000);
 
 -- Pipelines a štádiá
-INSERT INTO pipeline (id, name) VALUES
-  ('00000000-0000-4000-8000-000000000501', 'Test B2B elektrina'),
-  ('00000000-0000-4000-8000-000000000502', 'Test B2C elektrina');
-INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, is_closed, is_won) VALUES
-  ('00000000-0000-4000-8000-000000000511', '00000000-0000-4000-8000-000000000501', 'Príležitosť', 1, 0.10, false, false),
-  ('00000000-0000-4000-8000-000000000512', '00000000-0000-4000-8000-000000000501', 'Vyhraté',     6, 1.00, true,  true),
-  ('00000000-0000-4000-8000-000000000521', '00000000-0000-4000-8000-000000000502', 'Vyhraté',     6, 1.00, true,  true);
+INSERT INTO pipeline (id, name, kind) VALUES
+  ('00000000-0000-4000-8000-000000000501', 'Test B2B elektrina', 'b2b_dodavka'),
+  ('00000000-0000-4000-8000-000000000502', 'Test B2C elektrina', 'b2c_dodavka');
+INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, outcome) VALUES
+  ('00000000-0000-4000-8000-000000000511', '00000000-0000-4000-8000-000000000501', 'Príležitosť', 1, 0.10, 'otvoreny'),
+  ('00000000-0000-4000-8000-000000000512', '00000000-0000-4000-8000-000000000501', 'Vyhraté',     6, 1.00, 'vyhrany'),
+  ('00000000-0000-4000-8000-000000000521', '00000000-0000-4000-8000-000000000502', 'Vyhraté',     6, 1.00, 'vyhrany');
 
 -- Dealy bez zadaného segmentu (prevezmú ho od zákazníka)
 INSERT INTO deal (id, company_id, person_id, pipeline_id, stage_id, name, closed_at, owner_id) VALUES

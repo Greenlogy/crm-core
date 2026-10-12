@@ -13,6 +13,7 @@ Aktualizované: 12. 10. 2026
 
 ## Prebieha
 
+- Modul 0 Nastavenia: návrh databázy schválený (v0.2). Test (`dev`) vyprázdnený, rola `crm_prototype_ro` zrušená, migrácie `0006_nastavenia_jadro`, `0007_nastavenia_obsah`, `0008_zakaznici_spolocnost` spustené na `dev` (Peter, 12. 10.), testy `db/test/run.sh` prešli (88 kontrol). Na Teste: 3 spoločnosti, 6 tímov, admini Peter a Eva, kalendár SK 2026–2028, žiadne dáta zákazníkov. Na `main` zatiaľ nie. Prototyp (Worker `crm-core`) po zrušení roly nefunguje – nahradí ho nové API.
 - Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nová vzorka (1 340 riadkov) na `dev`; API a frontend podľa dizajnu 01, 08–10 nasadené na https://crm-core.peter-700.workers.dev (11. 10.). 12. 10.: vetva `dev` zmizla a bola obnovená (nová vetva z `main`, migrácie 0001–0005, rola prototypu, Hyperdrive, vzorka); prototyp znova funguje. Ďalej: Peter prezrie obrazovky a zapíše pripomienky.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
@@ -20,6 +21,9 @@ Aktualizované: 12. 10. 2026
 
 ## Otvorené
 
+- **Pred Ostrým:** CRM pri pozvaní a deaktivácii externého používateľa samo pridá / odoberie e-mail v skupine Cloudflare Access „CRM externí“ (dovtedy ručne); treba API token s právom iba na skupiny a relácie Access
+- Prototyp (Worker `crm-core`) nefunguje od zrušenia roly `crm_prototype_ro` (12. 10.); Hyperdrive `crm-core-dev` ešte ukazuje na zrušenú rolu – prepojí sa na rolu `crm_app`
+- `db/dbmate.sh`: dbmate vypíše „Applied“ aj pri migrácii, ktorá potom zlyhá a vráti sa – zvážiť kontrolu stavu po migrácii (pred Ostrým)
 - Zistiť v Neon (Monitoring / Operations), kto alebo čo 12. 10. zmazalo vetvu `dev`; ak nie automatická expirácia, preveriť prístupy k projektu
 - Neon free plán: Hyperdrive drží spojenie na `dev` a výpočet sa neuspáva (limit 100 CU-hodín/mesiac) – sledovať Billing / Usage
 - Opakované čísla zmlúv na dealoch (18 vo vzorke) vs. `contract.number` unikátne a 1 deal = 1 zmluva – rozhodnúť pred migráciou
@@ -38,5 +42,6 @@ Aktualizované: 12. 10. 2026
 
 ## Ďalší krok
 
+- Modul 0 Nastavenia: commit migrácií 0006–0008 (po súhlase); potom rola aplikácie `crm_app`, overenie prihlásenia (Access) v API a obrazovky Nastavení.
 - Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. Prototyp beží na https://crm-core.peter-700.workers.dev (Access, iba Peter). Ďalej krok 8: Peter prezrie vzorku a zapíše zistenia.
 - Nasadenie modulu 1 na `main` po Petrovom pokyne.

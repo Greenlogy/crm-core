@@ -2,16 +2,27 @@
 -- Všetko je vymyslené. Pevné uuid s prefixom 00000000-0000-4000-8000-00000001….
 -- Spúšťa sa iba cez db/test/run.sh (transakcia sa na konci vráti, aj dočasná rola crm_rls_test).
 
--- Používatelia: vedenie, dvaja externí obchodníci
-INSERT INTO app_user (id, email, name, role) VALUES
-  ('00000000-0000-4000-8000-000000001001', 'vedenie@example.test', 'Testovacie Vedenie', 'vedenie'),
-  ('00000000-0000-4000-8000-000000001002', 'externy.a@example.test', 'Externý A', 'externy_obchodnik'),
-  ('00000000-0000-4000-8000-000000001003', 'externy.b@example.test', 'Externý B', 'externy_obchodnik');
+-- Externý tím je v databáze zatiaľ zamknutý (crm_external_ready = false, 0006). Test ho odomkne
+-- iba vo svojej transakcii, ktorá sa na konci vráti.
+CREATE OR REPLACE FUNCTION crm_external_ready() RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
+
+-- Používatelia: vedenie (tím CEO), dvaja externí obchodníci (tím Sales_external)
+INSERT INTO app_user (id, email, name, team_id, status)
+SELECT v.id::uuid, v.email, v.name, t.id, 'aktivny'
+  FROM (VALUES
+    ('00000000-0000-4000-8000-000000001001', 'vedenie@example.test', 'Testovacie Vedenie', 'ceo'),
+    ('00000000-0000-4000-8000-000000001002', 'externy.a@example.test', 'Externý A', 'sales_external'),
+    ('00000000-0000-4000-8000-000000001003', 'externy.b@example.test', 'Externý B', 'sales_external')
+  ) AS v (id, email, name, team_code)
+  JOIN team t ON t.code = v.team_code;
+INSERT INTO app_user_org (user_id, org_id)
+SELECT u.id, crm_default_org() FROM app_user u
+ WHERE u.id IN ('00000000-0000-4000-8000-000000001002', '00000000-0000-4000-8000-000000001003');
 
 -- Štádiá B2C pipeline: otvorené a prehraté
-INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, is_closed, is_won) VALUES
-  ('00000000-0000-4000-8000-000000001021', '00000000-0000-4000-8000-000000000502', 'Ponuka',    2, 0.50, false, false),
-  ('00000000-0000-4000-8000-000000001022', '00000000-0000-4000-8000-000000000502', 'Prehraté',  7, 0.00, true,  false);
+INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, outcome) VALUES
+  ('00000000-0000-4000-8000-000000001021', '00000000-0000-4000-8000-000000000502', 'Ponuka',    2, 0.50, 'otvoreny'),
+  ('00000000-0000-4000-8000-000000001022', '00000000-0000-4000-8000-000000000502', 'Prehraté',  7, 0.00, 'prehrany');
 
 -- Z1. Firma: povinný názov, aspoň jedno označenie, viac označení naraz
 DO $$
@@ -109,9 +120,9 @@ BEGIN
 
   ASSERT NOT EXISTS (SELECT 1 FROM contact_duplicate_check('nikto@example.test', '0911 000 000')), 'falošná duplicita';
 
-  SELECT * INTO r FROM company_ico_check('123456');
+  SELECT * INTO r FROM company_ico_check('SK', '123456');
   ASSERT r.company_exists AND r.company_id = '00000000-0000-4000-8000-000000000101', 'IČO 123456 = 00123456';
-  ASSERT NOT EXISTS (SELECT 1 FROM company_ico_check('99999999')), 'neexistujúce IČO';
+  ASSERT NOT EXISTS (SELECT 1 FROM company_ico_check('SK', '99999999')), 'neexistujúce IČO';
 
   -- rovnaký e-mail sa dá uložiť (iba upozornenie)
   INSERT INTO contact (first_name, last_name, email, is_household)
@@ -131,8 +142,8 @@ BEGIN
     UPDATE company_contact SET roles = '{riaditel}'
      WHERE company_id = '00000000-0000-4000-8000-000000000101';
     RAISE EXCEPTION 'CHYBA: neznáma rola prešla';
-  EXCEPTION WHEN invalid_text_representation THEN
-    RAISE NOTICE 'OK: osoba má vo firme viac rolí, neznáma rola odmietnutá';
+  EXCEPTION WHEN foreign_key_violation THEN
+    RAISE NOTICE 'OK: osoba má vo firme viac rolí, rola mimo číselníka odmietnutá';
   END;
 END;
 $$;
@@ -320,7 +331,7 @@ BEGIN
 END;
 $$;
 
--- Z12. Vlastníka mení iba vedenie
+-- Z12. Vlastníka mení iba vedenie (tím CEO) a admin
 DO $$
 BEGIN
   PERFORM set_config('app.user_id', '', true);
@@ -341,7 +352,7 @@ BEGIN
   END;
   UPDATE contact SET phone = '0905 999 888' WHERE id = '00000000-0000-4000-8000-000000000201';
 
-  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001001', true);  -- vedenie
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001001', true);  -- tím CEO
   UPDATE company SET owner_id = '00000000-0000-4000-8000-000000001001'
    WHERE id = '00000000-0000-4000-8000-000000000101';
   ASSERT (SELECT owner_id FROM company WHERE id = '00000000-0000-4000-8000-000000000101')
@@ -353,7 +364,7 @@ BEGIN
 END;
 $$;
 
--- Z13. RLS: externý obchodník (čl. 6, 12) – dočasná rola bez práv vlastníka
+-- Z13. RLS: externý obchodník = tím Sales_external s „iba svoje“ (čl. 6, 12) – dočasná rola bez práv vlastníka
 INSERT INTO company (id, name, ico, owner_id) VALUES
   ('00000000-0000-4000-8000-000000001801', 'Firma Externého A', '44444444', '00000000-0000-4000-8000-000000001002');
 INSERT INTO contact (id, first_name, last_name, email, is_household, owner_id) VALUES
@@ -376,7 +387,7 @@ CREATE ROLE crm_rls_test NOLOGIN;
 -- PostgreSQL 16+: tvorca roly do nej môže prepnúť, iba ak si ju pridelí s voľbou SET (Neon nie je superuser).
 GRANT crm_rls_test TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
 GRANT SELECT, INSERT, UPDATE ON company, contact, company_contact TO crm_rls_test;
-GRANT SELECT ON oom, activity, app_user, customer_v, contact_v TO crm_rls_test;
+GRANT SELECT ON oom, activity, app_user, customer_v, contact_v, custom_field TO crm_rls_test;
 GRANT INSERT ON audit_log TO crm_rls_test;
 SET LOCAL ROLE crm_rls_test;
 
@@ -408,9 +419,9 @@ BEGIN
          format('externý A: zoznam Zákazníci %s (Eva je domácnosť, ale nie jeho)', (SELECT array_agg(name ORDER BY name) FROM customer_v));
 
   -- duplicita: „firma/osoba už existuje“ + vlastník, bez údajov
-  SELECT * INTO r FROM company_ico_check('00123456');
+  SELECT * INTO r FROM company_ico_check('SK', '00123456');
   ASSERT r.company_exists AND r.company_id IS NULL AND r.owner_name = 'Testovací Obchodník', 'externý: cudzie IČO';
-  SELECT * INTO r FROM company_ico_check('44444444');
+  SELECT * INTO r FROM company_ico_check('SK', '44444444');
   ASSERT r.company_id = '00000000-0000-4000-8000-000000001801', 'externý: svoje IČO s id';
   -- e-mail majú 2 osoby (Z4), externý nedostane id ani jednej
   ASSERT (SELECT count(*) FILTER (WHERE contact_id IS NULL) || '/' || count(*)

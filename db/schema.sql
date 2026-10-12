@@ -16,6 +16,17 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: access_scope; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.access_scope AS ENUM (
+    'nic',
+    'iba_svoje',
+    'vsetko'
+);
+
+
+--
 -- Name: activity_type; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -32,20 +43,6 @@ CREATE TYPE public.activity_type AS ENUM (
 
 
 --
--- Name: app_user_role; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.app_user_role AS ENUM (
-    'admin',
-    'vedenie',
-    'obchodnik',
-    'servis',
-    'marketing',
-    'externy_obchodnik'
-);
-
-
---
 -- Name: audit_action; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -53,6 +50,28 @@ CREATE TYPE public.audit_action AS ENUM (
     'insert',
     'update',
     'delete'
+);
+
+
+--
+-- Name: audit_source; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.audit_source AS ENUM (
+    'aplikacia',
+    'system',
+    'synchronizacia'
+);
+
+
+--
+-- Name: bank_account_purpose; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.bank_account_purpose AS ENUM (
+    'faktury',
+    'zalohy',
+    'vykup'
 );
 
 
@@ -67,19 +86,6 @@ CREATE TYPE public.commission_status AS ENUM (
     'schvalena',
     'vyplatena',
     'zrusena'
-);
-
-
---
--- Name: company_role; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.company_role AS ENUM (
-    'statutar',
-    'decision_maker',
-    'kontaktna_osoba',
-    'fakturacia',
-    'technik'
 );
 
 
@@ -145,6 +151,63 @@ CREATE TYPE public.conversation_channel AS ENUM (
 
 
 --
+-- Name: country_code; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.country_code AS ENUM (
+    'SK',
+    'CZ',
+    'HR'
+);
+
+
+--
+-- Name: crm_entity; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.crm_entity AS ENUM (
+    'firma',
+    'osoba',
+    'oom',
+    'deal',
+    'zmluva',
+    'ponuka'
+);
+
+
+--
+-- Name: crm_module; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.crm_module AS ENUM (
+    'zakaznici',
+    'odberne_miesta',
+    'obchod',
+    'zmluvy',
+    'provizie',
+    'servis',
+    'marketing'
+);
+
+
+--
+-- Name: custom_field_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.custom_field_type AS ENUM (
+    'text',
+    'dlhy_text',
+    'cislo',
+    'suma',
+    'datum',
+    'vyber',
+    'vyber_viac',
+    'ano_nie',
+    'odkaz'
+);
+
+
+--
 -- Name: customer_segment; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -171,6 +234,30 @@ CREATE TYPE public.customer_status AS ENUM (
 
 
 --
+-- Name: day_off_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.day_off_kind AS ENUM (
+    'statny_sviatok',
+    'firemne_volno'
+);
+
+
+--
+-- Name: deal_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.deal_kind AS ENUM (
+    'b2c_dodavka',
+    'b2b_dodavka',
+    'b2b_vykup',
+    'green_solar',
+    'green_viwa',
+    'efet'
+);
+
+
+--
 -- Name: device_type; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -180,6 +267,17 @@ CREATE TYPE public.device_type AS ENUM (
     'bateria',
     'tepelne_cerpadlo',
     'wallbox'
+);
+
+
+--
+-- Name: field_edit_access; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.field_edit_access AS ENUM (
+    'vsetky_timy',
+    'vybrane_timy',
+    'iba_admin'
 );
 
 
@@ -242,6 +340,16 @@ CREATE TYPE public.oom_type AS ENUM (
     'vyroba',
     'sharing',
     'velkoobchod'
+);
+
+
+--
+-- Name: org_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.org_status AS ENUM (
+    'aktivna',
+    'pripravuje_sa'
 );
 
 
@@ -342,6 +450,17 @@ CREATE TYPE public.source_type AS ENUM (
 
 
 --
+-- Name: stage_outcome; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.stage_outcome AS ENUM (
+    'otvoreny',
+    'vyhrany',
+    'prehrany'
+);
+
+
+--
 -- Name: status_source; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -372,14 +491,27 @@ CREATE TYPE public.switch_segment AS ENUM (
 
 
 --
--- Name: add_business_minutes(timestamp with time zone, integer); Type: FUNCTION; Schema: public; Owner: -
+-- Name: user_status; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.add_business_minutes(start timestamp with time zone, minutes integer) RETURNS timestamp with time zone
+CREATE TYPE public.user_status AS ENUM (
+    'pozvany',
+    'aktivny',
+    'deaktivovany'
+);
+
+
+--
+-- Name: add_business_minutes(timestamp with time zone, integer, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.add_business_minutes(start timestamp with time zone, minutes integer, p_org_id uuid DEFAULT NULL::uuid) RETURNS timestamp with time zone
     LANGUAGE plpgsql STABLE
     AS $$
 DECLARE
-  v_local      timestamp := start AT TIME ZONE 'Europe/Bratislava';
+  v_org        uuid := coalesce(p_org_id, crm_default_org());
+  v_tz         text := (SELECT o.timezone FROM org o WHERE o.id = coalesce(p_org_id, crm_default_org()));
+  v_local      timestamp;
   v_remaining  numeric := minutes;
   v_from       timestamp;
   v_to         timestamp;
@@ -389,11 +521,13 @@ BEGIN
   IF minutes IS NULL OR minutes < 0 THEN
     RAISE EXCEPTION 'add_business_minutes: počet minút musí byť 0 alebo viac (zadané %)', minutes;
   END IF;
+  v_local := start AT TIME ZONE v_tz;
 
   FOR r IN
     SELECT bc.date, bc.work_from, bc.work_to
       FROM business_calendar bc
-     WHERE bc.date >= v_local::date
+     WHERE bc.org_id = v_org
+       AND bc.date >= v_local::date
        AND bc.is_working_day
      ORDER BY bc.date
   LOOP
@@ -403,12 +537,150 @@ BEGIN
 
     v_available := extract(epoch FROM v_to - v_from) / 60;
     IF v_remaining <= v_available THEN
-      RETURN (v_from + make_interval(mins => v_remaining::integer)) AT TIME ZONE 'Europe/Bratislava';
+      RETURN (v_from + make_interval(mins => v_remaining::integer)) AT TIME ZONE v_tz;
     END IF;
     v_remaining := v_remaining - v_available;
   END LOOP;
 
   RAISE EXCEPTION 'add_business_minutes: business_calendar nepokrýva termín od % (+% min)', start, minutes;
+END;
+$$;
+
+
+--
+-- Name: app_user_deactivate(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.app_user_deactivate(p_user_id uuid, p_new_owner_id uuid) RETURNS TABLE(companies integer, contacts integer, open_deals integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_companies  integer;
+  v_contacts   integer;
+  v_deals      integer;
+BEGIN
+  IF NOT crm_settings_writer() THEN
+    RAISE EXCEPTION 'Deaktivovať používateľa môže iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_user_id = crm_current_user_id() THEN
+    RAISE EXCEPTION 'Sám seba deaktivovať nemožno.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM app_user WHERE id = p_user_id AND status <> 'deaktivovany') THEN
+    RAISE EXCEPTION 'Používateľ neexistuje alebo už je deaktivovaný.' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT count(*) INTO v_companies FROM company WHERE owner_id = p_user_id;
+  SELECT count(*) INTO v_contacts FROM contact WHERE owner_id = p_user_id;
+  SELECT count(*) INTO v_deals FROM deal d JOIN pipeline_stage s ON s.id = d.stage_id
+   WHERE d.owner_id = p_user_id AND NOT s.is_closed;
+
+  IF v_companies + v_contacts + v_deals > 0 THEN
+    IF p_new_owner_id IS NULL THEN
+      RAISE EXCEPTION 'Používateľ vlastní % firiem, % osôb a % otvorených dealov. Vyber nového vlastníka.',
+        v_companies, v_contacts, v_deals USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_new_owner_id = p_user_id
+       OR NOT EXISTS (SELECT 1 FROM app_user WHERE id = p_new_owner_id AND status = 'aktivny') THEN
+      RAISE EXCEPTION 'Nový vlastník musí byť iný aktívny používateľ.' USING ERRCODE = 'check_violation';
+    END IF;
+    UPDATE company SET owner_id = p_new_owner_id WHERE owner_id = p_user_id;
+    UPDATE contact SET owner_id = p_new_owner_id WHERE owner_id = p_user_id;
+    UPDATE deal d SET owner_id = p_new_owner_id
+      FROM pipeline_stage s
+     WHERE s.id = d.stage_id AND d.owner_id = p_user_id AND NOT s.is_closed;
+  END IF;
+
+  UPDATE app_user SET status = 'deaktivovany', deactivated_at = now() WHERE id = p_user_id;
+  RETURN QUERY SELECT v_companies, v_contacts, v_deals;
+END;
+$$;
+
+
+--
+-- Name: app_user_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.app_user_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_external boolean;
+BEGIN
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN
+    SELECT t.is_external INTO v_external FROM team t WHERE t.id = NEW.team_id;
+    IF v_external AND NEW.is_admin THEN
+      RAISE EXCEPTION 'Člen externého tímu nemôže byť admin.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_external AND NOT crm_external_ready()
+       AND (TG_OP = 'INSERT' OR NEW.team_id IS DISTINCT FROM OLD.team_id) THEN
+      RAISE EXCEPTION 'Do externého tímu zatiaľ nemožno priradiť používateľa: OOM, dealy, zmluvy a ponuky ešte nemajú obmedzenie „iba svoje“ v databáze.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.status = 'deaktivovany' AND (TG_OP = 'INSERT' OR OLD.status <> 'deaktivovany')
+       AND (EXISTS (SELECT 1 FROM company WHERE owner_id = NEW.id)
+         OR EXISTS (SELECT 1 FROM contact WHERE owner_id = NEW.id)
+         OR EXISTS (SELECT 1 FROM deal d JOIN pipeline_stage s ON s.id = d.stage_id
+                     WHERE d.owner_id = NEW.id AND NOT s.is_closed)) THEN
+      RAISE EXCEPTION 'Používateľ ešte vlastní zákazníkov alebo otvorené dealy. Deaktivuj ho cez odovzdanie novému vlastníkovi.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  -- posledný aktívny admin
+  IF TG_OP = 'DELETE' OR NOT (NEW.is_admin AND NEW.status = 'aktivny') THEN
+    IF TG_OP <> 'INSERT' AND OLD.is_admin AND OLD.status = 'aktivny'
+       AND NOT EXISTS (SELECT 1 FROM app_user u
+                        WHERE u.id <> OLD.id AND u.is_admin AND u.status = 'aktivny') THEN
+      RAISE EXCEPTION 'CRM musí mať aspoň jedného aktívneho admina.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END;
+$$;
+
+
+--
+-- Name: app_user_login(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.app_user_login(p_email text) RETURNS TABLE(user_id uuid, status public.user_status)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_user app_user;
+BEGIN
+  SELECT * INTO v_user FROM app_user u WHERE lower(u.email) = lower(btrim(p_email));
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  IF v_user.status = 'deaktivovany' THEN
+    RETURN QUERY SELECT NULL::uuid, v_user.status;
+    RETURN;
+  END IF;
+  UPDATE app_user u
+     SET status = 'aktivny', last_login_at = now()
+   WHERE u.id = v_user.id;
+  RETURN QUERY SELECT v_user.id, 'aktivny'::user_status;
+END;
+$$;
+
+
+--
+-- Name: audit_log_protect(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.audit_log_protect() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF current_user <> (SELECT r.rolname FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner
+                       WHERE c.oid = 'audit_log'::regclass) THEN
+    RAISE EXCEPTION 'Audit sa nedá upraviť ani zmazať.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN coalesce(OLD, NEW);
 END;
 $$;
 
@@ -421,10 +693,12 @@ CREATE FUNCTION public.audit_row() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
-  v_old   jsonb;
-  v_new   jsonb;
-  v_diff  jsonb;
-  v_id    uuid;
+  v_old     jsonb;
+  v_new     jsonb;
+  v_diff    jsonb;
+  v_id      uuid;
+  v_user    uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  v_source  audit_source;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     v_new  := to_jsonb(NEW);
@@ -438,19 +712,35 @@ BEGIN
     v_old := to_jsonb(OLD);
     v_new := to_jsonb(NEW);
     v_id  := NEW.id;
-    SELECT jsonb_object_agg(n.key, jsonb_build_object('old', v_old -> n.key, 'new', n.value))
+    -- bežné stĺpce (bez updated_at a last_login_at) + vlastné polia po kľúčoch
+    SELECT jsonb_object_agg(d.k, jsonb_build_object('old', d.o, 'new', d.n))
       INTO v_diff
-      FROM jsonb_each(v_new) AS n
-     WHERE n.key <> 'updated_at'
-       AND n.value IS DISTINCT FROM v_old -> n.key;
+      FROM (
+        SELECT n.key AS k, v_old -> n.key AS o, n.value AS n
+          FROM jsonb_each(v_new) AS n
+         WHERE n.key NOT IN ('updated_at', 'last_login_at', 'custom')
+           AND n.value IS DISTINCT FROM v_old -> n.key
+        UNION ALL
+        SELECT 'custom.' || ks.key, v_old -> 'custom' -> ks.key, v_new -> 'custom' -> ks.key
+          FROM (SELECT jsonb_object_keys(CASE jsonb_typeof(v_new -> 'custom') WHEN 'object' THEN v_new -> 'custom' ELSE '{}' END)
+                UNION
+                SELECT jsonb_object_keys(CASE jsonb_typeof(v_old -> 'custom') WHEN 'object' THEN v_old -> 'custom' ELSE '{}' END)
+               ) AS ks (key)
+         WHERE v_new -> 'custom' -> ks.key IS DISTINCT FROM v_old -> 'custom' -> ks.key
+      ) d;
     IF v_diff IS NULL THEN
-      RETURN NEW;  -- nič sa nezmenilo
+      RETURN NEW;  -- nič sa nezmenilo (alebo iba čas prihlásenia)
     END IF;
   END IF;
 
-  INSERT INTO audit_log (table_name, record_id, action, changed_by, diff)
-  VALUES (TG_TABLE_NAME, v_id, lower(TG_OP)::audit_action,
-          nullif(current_setting('app.user_id', true), '')::uuid, v_diff);
+  v_source := coalesce(
+    nullif(current_setting('app.change_source', true), '')::audit_source,
+    CASE WHEN current_user = 'crm_sync' THEN 'synchronizacia'
+         WHEN v_user IS NOT NULL THEN 'aplikacia'
+         ELSE 'system' END::audit_source);
+
+  INSERT INTO audit_log (table_name, record_id, action, changed_by, diff, source)
+  VALUES (TG_TABLE_NAME, v_id, lower(TG_OP)::audit_action, v_user, v_diff, v_source);
 
   RETURN coalesce(NEW, OLD);
 END;
@@ -458,19 +748,103 @@ $$;
 
 
 --
--- Name: company_ico_check(text); Type: FUNCTION; Schema: public; Owner: -
+-- Name: business_calendar_rebuild(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.company_ico_check(p_ico text) RETURNS TABLE(company_exists boolean, company_id uuid, owner_name text)
+CREATE FUNCTION public.business_calendar_rebuild() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  DELETE FROM business_calendar;
+  INSERT INTO business_calendar (org_id, date, is_working_day, work_from, work_to, note)
+  SELECT r.org_id, d.date,
+         h.org_id IS NOT NULL AND o.org_id IS NULL,
+         CASE WHEN o.org_id IS NULL THEN h.work_from END,
+         CASE WHEN o.org_id IS NULL THEN h.work_to END,
+         o.name
+    FROM (SELECT org_id,
+                 make_date(extract(year FROM min(date))::int, 1, 1) AS date_from,
+                 make_date(extract(year FROM max(date))::int, 12, 31) AS date_to
+            FROM org_day_off WHERE kind = 'statny_sviatok'
+           GROUP BY org_id) r
+   CROSS JOIN LATERAL (SELECT g::date AS date FROM generate_series(r.date_from, r.date_to, interval '1 day') g) d
+    LEFT JOIN org_work_hours h ON h.org_id = r.org_id AND h.weekday = extract(isodow FROM d.date)
+    LEFT JOIN org_day_off o ON o.org_id = r.org_id AND o.date = d.date;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: company_contact_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_contact_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_org uuid := (SELECT org_id FROM company WHERE id = NEW.company_id);
+BEGIN
+  IF v_org <> (SELECT org_id FROM contact WHERE id = NEW.contact_id) THEN
+    RAISE EXCEPTION 'Osoba a firma patria rôznym spoločnostiam (osoba v inej spoločnosti = nový záznam).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM lookup_codes_check('rola_kontaktu', v_org, NEW.roles,
+                             CASE WHEN TG_OP = 'UPDATE' THEN OLD.roles END);
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: company_country_default(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_country_default() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.country IS NULL THEN
+    SELECT o.country INTO NEW.country FROM org o WHERE o.id = NEW.org_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: company_ico_check(public.country_code, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_ico_check(p_country public.country_code, p_ico text) RETURNS TABLE(company_exists boolean, company_id uuid, owner_name text, org_name text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT true,
-         CASE WHEN crm_sees_all() OR c.owner_id = crm_external_user_id() THEN c.id END,
-         u.name
+         CASE WHEN crm_company_access(c.id, 'view') THEN c.id END,
+         u.name,
+         o.legal_name
     FROM company c
+    JOIN org o ON o.id = c.org_id
     LEFT JOIN app_user u ON u.id = c.owner_id
-   WHERE c.ico = lpad(regexp_replace(p_ico, '[^0-9]', '', 'g'), 8, '0')
+   WHERE c.country = p_country
+     AND c.ico = CASE WHEN p_country = 'HR' THEN regexp_replace(p_ico, '[^0-9]', '', 'g')
+                      ELSE lpad(regexp_replace(p_ico, '[^0-9]', '', 'g'), 8, '0') END
+$$;
+
+
+--
+-- Name: crm_default_org(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_default_org() RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT id FROM org WHERE is_default
 $$;
 
 
@@ -512,7 +886,10 @@ CREATE TABLE public.company (
     status_changed_at timestamp with time zone,
     is_former_customer boolean DEFAULT false NOT NULL,
     is_producer boolean DEFAULT false NOT NULL,
-    CONSTRAINT company_ico_format_check CHECK ((ico ~ '^[0-9]{8}$'::text)),
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid DEFAULT public.crm_default_org() NOT NULL,
+    country public.country_code NOT NULL,
+    CONSTRAINT company_ico_format_check CHECK ((((country = ANY (ARRAY['SK'::public.country_code, 'CZ'::public.country_code])) AND (ico ~ '^[0-9]{8}$'::text)) OR ((country = 'HR'::public.country_code) AND (ico ~ '^[0-9]{11}$'::text)))),
     CONSTRAINT company_kind_check CHECK ((is_customer OR is_partner OR is_supplier)),
     CONSTRAINT company_name_check CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT company_status_source_check CHECK (((status IS NULL) = (status_source IS NULL)))
@@ -523,7 +900,7 @@ CREATE TABLE public.company (
 -- Name: COLUMN company.ico; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.company.ico IS 'IČO, 8 číslic vrátane úvodných núl';
+COMMENT ON COLUMN public.company.ico IS 'identifikátor podľa krajiny: SK, CZ = IČO 8 číslic vrátane úvodných núl; HR = OIB 11 číslic';
 
 
 --
@@ -576,6 +953,27 @@ COMMENT ON COLUMN public.company.is_producer IS 'segment „+ výrobca“';
 
 
 --
+-- Name: COLUMN company.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN company.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.org_id IS 'spoločnosť skupiny, ktorej firma patrí (zákazník patrí práve jednej)';
+
+
+--
+-- Name: COLUMN company.country; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.country IS 'krajina firmy (predvolene krajina spoločnosti); určuje identifikátor v stĺpci ico';
+
+
+--
 -- Name: company_is_archived(public.company); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -587,16 +985,15 @@ $$;
 
 
 --
--- Name: contact_duplicate_check(text, text); Type: FUNCTION; Schema: public; Owner: -
+-- Name: contact_duplicate_check(text, text, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.contact_duplicate_check(p_email text, p_phone text) RETURNS TABLE(match_on text, contact_id uuid, owner_name text)
+CREATE FUNCTION public.contact_duplicate_check(p_email text, p_phone text, p_org_id uuid DEFAULT NULL::uuid) RETURNS TABLE(match_on text, contact_id uuid, owner_name text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT m.match_on,
-         CASE WHEN crm_sees_all() OR p.owner_id = crm_external_user_id() OR crm_external_sees_contact(p.id)
-              THEN p.id END,
+         CASE WHEN crm_contact_access(p.id, 'view') THEN p.id END,
          u.name
     FROM (
       SELECT 'email'::text AS match_on, p.id
@@ -611,7 +1008,181 @@ CREATE FUNCTION public.contact_duplicate_check(p_email text, p_phone text) RETUR
     ) m
     JOIN contact p ON p.id = m.id
     LEFT JOIN app_user u ON u.id = p.owner_id
+   WHERE p.org_id = coalesce(p_org_id, crm_default_org())
    ORDER BY m.match_on, p.created_at
+$$;
+
+
+--
+-- Name: contact_source_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contact_source_check() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.source IS NOT NULL THEN
+    PERFORM lookup_codes_check('zdroj_kontaktu', NEW.org_id, ARRAY[NEW.source],
+                               CASE WHEN TG_OP = 'UPDATE' THEN ARRAY[OLD.source] END);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: crm_active_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_active_user_id() RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT u.id FROM app_user u JOIN team t ON t.id = u.team_id
+   WHERE u.id = crm_current_user_id() AND u.status = 'aktivny' AND t.archived_at IS NULL
+$$;
+
+
+--
+-- Name: crm_can_change_owner(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_can_change_owner() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id
+                  WHERE u.id = crm_active_user_id() AND (u.is_admin OR t.can_change_owner))
+$$;
+
+
+--
+-- Name: custom_field; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.custom_field (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity public.crm_entity NOT NULL,
+    key text NOT NULL,
+    label text NOT NULL,
+    field_type public.custom_field_type NOT NULL,
+    ref_entity public.crm_entity,
+    section_id uuid,
+    sort_order integer DEFAULT 0 NOT NULL,
+    is_required boolean DEFAULT false NOT NULL,
+    show_in_list boolean DEFAULT false NOT NULL,
+    filterable boolean DEFAULT false NOT NULL,
+    edit_access public.field_edit_access DEFAULT 'vsetky_timy'::public.field_edit_access NOT NULL,
+    org_id uuid,
+    archived_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT custom_field_key_check CHECK ((key ~ '^[a-z][a-z0-9_]{1,62}$'::text)),
+    CONSTRAINT custom_field_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT custom_field_ref_check CHECK (((field_type = 'odkaz'::public.custom_field_type) = (ref_entity IS NOT NULL)))
+);
+
+
+--
+-- Name: COLUMN custom_field.key; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.custom_field.key IS 'kľúč v stĺpci custom; vznikne z názvu, nikdy sa nemení';
+
+
+--
+-- Name: COLUMN custom_field.field_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.custom_field.field_type IS 'po prvej uloženej hodnote sa nemení';
+
+
+--
+-- Name: COLUMN custom_field.is_required; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.custom_field.is_required IS 'kontroluje API pri uložení formulára (nie databáza – staršie záznamy pole nemajú)';
+
+
+--
+-- Name: COLUMN custom_field.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.custom_field.org_id IS 'NULL = celá skupina';
+
+
+--
+-- Name: COLUMN custom_field.archived_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.custom_field.archived_at IS 'archivované pole: údaje ostávajú, nedajú sa meniť, pole sa dá obnoviť';
+
+
+--
+-- Name: crm_can_edit_field(public.custom_field); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_can_edit_field(p_field public.custom_field) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service()
+      OR (crm_active_user_id() IS NOT NULL AND CASE p_field.edit_access
+            WHEN 'vsetky_timy' THEN true
+            WHEN 'iba_admin'   THEN crm_is_admin()
+            ELSE EXISTS (SELECT 1 FROM custom_field_team ft JOIN app_user u ON u.team_id = ft.team_id
+                          WHERE ft.field_id = p_field.id AND u.id = crm_active_user_id())
+          END)
+$$;
+
+
+--
+-- Name: crm_company_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_company_access(p_company_id uuid, p_action text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM company c
+     WHERE c.id = p_company_id
+       AND c.org_id = ANY (crm_user_orgs())
+       AND (crm_scope('zakaznici', p_action) = 'vsetko'
+            OR (crm_scope('zakaznici', p_action) = 'iba_svoje' AND c.owner_id = crm_active_user_id())))
+$$;
+
+
+--
+-- Name: crm_contact_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_contact_access(p_contact_id uuid, p_action text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM contact p
+     WHERE p.id = p_contact_id
+       AND p.org_id = ANY (crm_user_orgs())
+       AND (crm_scope('zakaznici', p_action) = 'vsetko'
+            OR (crm_scope('zakaznici', p_action) = 'iba_svoje'
+                AND (p.owner_id = crm_active_user_id() OR crm_contact_on_own_company(p.id)))))
+$$;
+
+
+--
+-- Name: crm_contact_on_own_company(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_contact_on_own_company(p_contact_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM company_contact cc JOIN company c ON c.id = cc.company_id
+                  WHERE cc.contact_id = p_contact_id
+                    AND c.owner_id = crm_active_user_id()
+                    AND c.org_id = ANY (crm_user_orgs()))
 $$;
 
 
@@ -627,63 +1198,305 @@ $$;
 
 
 --
--- Name: crm_external_owns_company(uuid); Type: FUNCTION; Schema: public; Owner: -
+-- Name: crm_entity_table(public.crm_entity); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.crm_external_owns_company(p_company_id uuid) RETURNS boolean
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
+CREATE FUNCTION public.crm_entity_table(p public.crm_entity) RETURNS text
+    LANGUAGE sql IMMUTABLE
     AS $$
-  SELECT EXISTS (SELECT 1 FROM company c
-                  WHERE c.id = p_company_id AND c.owner_id = crm_external_user_id())
+  SELECT CASE p WHEN 'firma' THEN 'company' WHEN 'osoba' THEN 'contact' WHEN 'oom' THEN 'oom'
+                WHEN 'deal' THEN 'deal' WHEN 'zmluva' THEN 'contract' WHEN 'ponuka' THEN 'offer' END
 $$;
 
 
 --
--- Name: crm_external_sees_contact(uuid); Type: FUNCTION; Schema: public; Owner: -
+-- Name: crm_external_ready(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.crm_external_sees_contact(p_contact_id uuid) RETURNS boolean
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
+CREATE FUNCTION public.crm_external_ready() RETURNS boolean
+    LANGUAGE sql IMMUTABLE
     AS $$
-  SELECT EXISTS (SELECT 1 FROM company_contact cc JOIN company c ON c.id = cc.company_id
-                  WHERE cc.contact_id = p_contact_id AND c.owner_id = crm_external_user_id())
+  SELECT false
 $$;
 
 
 --
--- Name: crm_external_user_id(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: crm_is_admin(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.crm_external_user_id() RETURNS uuid
+CREATE FUNCTION public.crm_is_admin() RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
-  SELECT u.id FROM app_user u
-   WHERE u.id = crm_current_user_id()
-     AND u.active
-     AND u.role::text = 'externy_obchodnik'
+  SELECT EXISTS (SELECT 1 FROM app_user u WHERE u.id = crm_active_user_id() AND u.is_admin)
 $$;
 
 
 --
--- Name: crm_sees_all(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: crm_is_service(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.crm_sees_all() RETURNS boolean
+CREATE FUNCTION public.crm_is_service() RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT crm_current_user_id() IS NULL AND NOT crm_require_user()
+$$;
+
+
+--
+-- Name: crm_require_user(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_require_user() RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT coalesce(current_setting('app.require_user', true), '') = 'on'
+$$;
+
+
+--
+-- Name: crm_scope(public.crm_module, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_scope(p_module public.crm_module, p_action text) RETURNS public.access_scope
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_scope access_scope;
+BEGIN
+  IF p_action NOT IN ('view', 'edit') THEN
+    RAISE EXCEPTION 'crm_scope: akcia musí byť view alebo edit (zadané %)', p_action;
+  END IF;
+  IF crm_is_service() THEN
+    RETURN 'vsetko';
+  END IF;
+  SELECT CASE p_action WHEN 'view' THEN p.view_scope ELSE p.edit_scope END
+    INTO v_scope
+    FROM app_user u
+    JOIN team_permission p ON p.team_id = u.team_id AND p.module = p_module
+   WHERE u.id = crm_active_user_id();
+  RETURN coalesce(v_scope, 'nic');
+END;
+$$;
+
+
+--
+-- Name: crm_session_ok(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_session_ok() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_active_user_id() IS NOT NULL
+$$;
+
+
+--
+-- Name: crm_settings_writer(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_settings_writer() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_is_admin()
+$$;
+
+
+--
+-- Name: crm_slug(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_slug(p text) RETURNS text
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $$
+  SELECT nullif(btrim(regexp_replace(lower(translate(p,
+           'áäčďéěíĺľňóôöŕřšťúůüýžÁÄČĎÉĚÍĹĽŇÓÔÖŔŘŠŤÚŮÜÝŽ',
+           'aacdeeillnooorrstuuuyzAACDEEILLNOOORRSTUUUYZ')), '[^a-z0-9]+', '_', 'g'), '_'), '')
+$$;
+
+
+--
+-- Name: crm_user_orgs(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_user_orgs() RETURNS uuid[]
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT CASE
-           WHEN crm_current_user_id() IS NULL
-             THEN coalesce(current_setting('app.require_user', true), '') <> 'on'
-           ELSE EXISTS (SELECT 1 FROM app_user u
-                         WHERE u.id = crm_current_user_id()
-                           AND u.active
-                           AND u.role::text <> 'externy_obchodnik')
+           WHEN crm_is_service() THEN (SELECT coalesce(array_agg(o.id), '{}') FROM org o)
+           WHEN EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id
+                         WHERE u.id = crm_active_user_id() AND t.all_orgs)
+             THEN (SELECT coalesce(array_agg(o.id), '{}') FROM org o)
+           ELSE (SELECT coalesce(array_agg(uo.org_id), '{}') FROM app_user_org uo
+                  WHERE uo.user_id = crm_active_user_id())
          END
 $$;
+
+
+--
+-- Name: custom_field_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.custom_field_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  v_used boolean;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Vlastné pole sa nemaže, iba archivuje.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    NEW.key := coalesce(NEW.key, crm_slug(NEW.label));
+    RETURN NEW;
+  END IF;
+  IF NEW.key <> OLD.key OR NEW.entity <> OLD.entity THEN
+    RAISE EXCEPTION 'Kľúč a záznam vlastného poľa sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.field_type <> OLD.field_type OR NEW.ref_entity IS DISTINCT FROM OLD.ref_entity THEN
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I WHERE custom ? $1)', crm_entity_table(OLD.entity))
+      INTO v_used USING OLD.key;
+    IF v_used THEN
+      RAISE EXCEPTION 'Typ poľa „%“ sa nedá zmeniť, pole už má uložené hodnoty.', OLD.label
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$_$;
+
+
+--
+-- Name: custom_field_option_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.custom_field_option_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Hodnota výberu sa nemaže, iba skryje.' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+--
+-- Name: custom_values_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.custom_values_check() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $_$
+DECLARE
+  v_entity   crm_entity := TG_ARGV[0]::crm_entity;
+  v_new      jsonb := coalesce(NEW.custom, '{}');
+  v_old      jsonb := CASE WHEN TG_OP = 'UPDATE' THEN coalesce(OLD.custom, '{}') ELSE '{}' END;
+  v_org      uuid := (to_jsonb(NEW) ->> 'org_id')::uuid;
+  v_org_old  uuid := CASE WHEN TG_OP = 'UPDATE' THEN (to_jsonb(OLD) ->> 'org_id')::uuid END;
+  v_key      text;
+  v_val      jsonb;
+  v_f        custom_field;
+  v_item     jsonb;
+  v_ref_org  text;
+  v_found    boolean;
+BEGIN
+  IF jsonb_typeof(v_new) <> 'object' THEN
+    RAISE EXCEPTION 'Vlastné polia musia byť objekt JSON.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'UPDATE' AND v_new = v_old AND v_org IS NOT DISTINCT FROM v_org_old THEN
+    RETURN NEW;
+  END IF;
+
+  FOR v_key IN
+    SELECT k FROM jsonb_object_keys(v_new) k
+    UNION
+    SELECT k FROM jsonb_object_keys(v_old) k
+  LOOP
+    v_val := v_new -> v_key;   -- NULL = kľúč odstránený
+    CONTINUE WHEN v_val IS NOT DISTINCT FROM v_old -> v_key AND v_org IS NOT DISTINCT FROM v_org_old;
+
+    SELECT * INTO v_f FROM custom_field WHERE entity = v_entity AND key = v_key;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Neznáme vlastné pole „%“ (%).', v_key, v_entity USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_f.org_id IS NOT NULL AND v_org IS NOT NULL AND v_f.org_id <> v_org AND v_val IS NOT NULL
+       AND v_val <> 'null' THEN
+      RAISE EXCEPTION 'Pole „%“ platí pre inú spoločnosť.', v_f.label USING ERRCODE = 'check_violation';
+    END IF;
+    CONTINUE WHEN v_val IS NOT DISTINCT FROM v_old -> v_key;   -- zmenila sa iba spoločnosť
+    IF v_f.archived_at IS NOT NULL THEN
+      RAISE EXCEPTION 'Pole „%“ je archivované, nedá sa meniť.', v_f.label USING ERRCODE = 'check_violation';
+    END IF;
+    IF NOT crm_can_edit_field(v_f) THEN
+      RAISE EXCEPTION 'Pole „%“ nemôžeš meniť (nastavenie tímov poľa).', v_f.label
+        USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    CONTINUE WHEN v_val IS NULL OR v_val = 'null';   -- vymazanie hodnoty
+
+    CASE v_f.field_type
+      WHEN 'text', 'dlhy_text' THEN
+        IF jsonb_typeof(v_val) <> 'string' THEN
+          RAISE EXCEPTION 'Pole „%“: očakávaný text.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+      WHEN 'cislo', 'suma' THEN
+        IF jsonb_typeof(v_val) <> 'number' THEN
+          RAISE EXCEPTION 'Pole „%“: očakávané číslo.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+      WHEN 'ano_nie' THEN
+        IF jsonb_typeof(v_val) <> 'boolean' THEN
+          RAISE EXCEPTION 'Pole „%“: očakávané áno/nie.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+      WHEN 'datum' THEN
+        IF jsonb_typeof(v_val) <> 'string' OR (v_val #>> '{}') !~ '^\d{4}-\d{2}-\d{2}$'
+           OR pg_input_is_valid(v_val #>> '{}', 'date') IS NOT TRUE THEN
+          RAISE EXCEPTION 'Pole „%“: očakávaný dátum RRRR-MM-DD.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+      WHEN 'vyber', 'vyber_viac' THEN
+        IF v_f.field_type = 'vyber' AND jsonb_typeof(v_val) <> 'string'
+           OR v_f.field_type = 'vyber_viac' AND jsonb_typeof(v_val) <> 'array' THEN
+          RAISE EXCEPTION 'Pole „%“: očakávaná hodnota výberu.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+        FOR v_item IN
+          SELECT x FROM jsonb_array_elements(CASE jsonb_typeof(v_val) WHEN 'array' THEN v_val
+                                                                       ELSE jsonb_build_array(v_val) END) x
+        LOOP
+          IF jsonb_typeof(v_item) <> 'string' OR pg_input_is_valid(v_item #>> '{}', 'uuid') IS NOT TRUE
+             OR NOT EXISTS (SELECT 1 FROM custom_field_option o
+                             WHERE o.field_id = v_f.id AND o.id = (v_item #>> '{}')::uuid) THEN
+            RAISE EXCEPTION 'Pole „%“: neznáma hodnota výberu.', v_f.label USING ERRCODE = 'check_violation';
+          END IF;
+          -- skrytú hodnotu možno ponechať, nie nanovo vybrať
+          IF EXISTS (SELECT 1 FROM custom_field_option o
+                      WHERE o.id = (v_item #>> '{}')::uuid AND o.hidden_at IS NOT NULL)
+             AND NOT (coalesce(v_old -> v_key, 'null') = v_item
+                      OR (jsonb_typeof(v_old -> v_key) = 'array' AND (v_old -> v_key) @> jsonb_build_array(v_item))) THEN
+            RAISE EXCEPTION 'Pole „%“: hodnota je skrytá, nedá sa vybrať.', v_f.label USING ERRCODE = 'check_violation';
+          END IF;
+        END LOOP;
+      WHEN 'odkaz' THEN
+        IF jsonb_typeof(v_val) <> 'string' OR pg_input_is_valid(v_val #>> '{}', 'uuid') IS NOT TRUE THEN
+          RAISE EXCEPTION 'Pole „%“: očakávaný odkaz na záznam.', v_f.label USING ERRCODE = 'check_violation';
+        END IF;
+        -- cieľ existuje (a prihlásený ho vidí) a patrí tej istej spoločnosti (Peter 12. 10.)
+        EXECUTE format('SELECT true, to_jsonb(t) ->> ''org_id'' FROM %I t WHERE t.id = $1',
+                       crm_entity_table(v_f.ref_entity))
+          INTO v_found, v_ref_org USING (v_val #>> '{}')::uuid;
+        IF v_found IS NOT TRUE THEN
+          RAISE EXCEPTION 'Pole „%“: odkazovaný záznam neexistuje.', v_f.label USING ERRCODE = 'foreign_key_violation';
+        END IF;
+        IF v_org IS NOT NULL AND v_ref_org IS NOT NULL AND v_ref_org::uuid <> v_org THEN
+          RAISE EXCEPTION 'Pole „%“: odkazovaný záznam patrí inej spoločnosti.', v_f.label
+            USING ERRCODE = 'check_violation';
+        END IF;
+    END CASE;
+  END LOOP;
+  RETURN NEW;
+END;
+$_$;
 
 
 --
@@ -697,6 +1510,35 @@ CREATE FUNCTION public.customer_is_former_calc(p_company_id uuid, p_person_id uu
                   WHERE o.company_id IS NOT DISTINCT FROM p_company_id
                     AND o.person_id IS NOT DISTINCT FROM p_person_id
                     AND o.status = 'odidene')
+$$;
+
+
+--
+-- Name: customer_org_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_org_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.org_id IS DISTINCT FROM OLD.org_id AND (
+       (TG_TABLE_NAME = 'company' AND (
+          EXISTS (SELECT 1 FROM company_contact WHERE company_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM oom WHERE company_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM deal WHERE company_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM contract WHERE company_id = OLD.id)))
+    OR (TG_TABLE_NAME = 'contact' AND (
+          EXISTS (SELECT 1 FROM company_contact WHERE contact_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM deal_contact WHERE contact_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM oom WHERE person_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM deal WHERE person_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM contract WHERE person_id = OLD.id)))) THEN
+    RAISE EXCEPTION 'Spoločnosť sa nedá zmeniť, záznam má väzby (osoby, OOM, dealy, zmluvy).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
 $$;
 
 
@@ -803,6 +1645,23 @@ $$;
 
 
 --
+-- Name: deal_contact_org_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_contact_org_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF (SELECT org_id FROM deal WHERE id = NEW.deal_id) <> (SELECT org_id FROM contact WHERE id = NEW.contact_id) THEN
+    RAISE EXCEPTION 'Osoba a deal patria rôznym spoločnostiam.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: inherit_customer_segment(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -817,6 +1676,59 @@ BEGIN
     ELSE
       NEW.segment := 'domacnost';
     END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: lookup_codes_check(text, uuid, text[], text[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.lookup_codes_check(p_list text, p_org_id uuid, p_new text[], p_old text[] DEFAULT '{}'::text[]) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_code  text;
+  v_val   lookup_value;
+BEGIN
+  FOREACH v_code IN ARRAY coalesce(p_new, '{}') LOOP
+    SELECT * INTO v_val FROM lookup_value
+     WHERE list_code = p_list AND code = v_code AND (org_id IS NULL OR org_id = p_org_id);
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Hodnota „%“ nie je v číselníku %.', v_code, p_list USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    IF v_val.hidden_at IS NOT NULL AND NOT v_code = ANY (coalesce(p_old, '{}')) THEN
+      RAISE EXCEPTION 'Hodnota „%“ je skrytá, nedá sa vybrať.', v_val.label USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
+END;
+$$;
+
+
+--
+-- Name: lookup_value_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.lookup_value_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Hodnota číselníka sa nemaže, iba skryje.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    NEW.code := coalesce(NEW.code, crm_slug(NEW.label));
+    RETURN NEW;
+  END IF;
+  IF NEW.code <> OLD.code OR NEW.list_code <> OLD.list_code OR NEW.is_system <> OLD.is_system THEN
+    RAISE EXCEPTION 'Kód, zoznam a systémový príznak hodnoty číselníka sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.is_system AND (NEW.label <> OLD.label OR NEW.hidden_at IS NOT NULL
+                        OR NEW.org_id IS DISTINCT FROM OLD.org_id) THEN
+    RAISE EXCEPTION 'Systémová hodnota „%“ sa nedá premenovať ani skryť.', OLD.label USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;
@@ -860,23 +1772,86 @@ $$;
 
 
 --
+-- Name: org_bank_account_normalize(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.org_bank_account_normalize() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.iban := upper(regexp_replace(NEW.iban, '\s', '', 'g'));
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: owner_change_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION public.owner_change_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
-DECLARE
-  v_role text;
 BEGIN
-  IF NEW.owner_id IS DISTINCT FROM OLD.owner_id AND current_user <> 'crm_sync' THEN
-    SELECT u.role::text INTO v_role
-      FROM app_user u
-     WHERE u.id = nullif(current_setting('app.user_id', true), '')::uuid
-       AND u.active;
-    IF v_role IS NULL OR v_role NOT IN ('vedenie', 'admin') THEN
-      RAISE EXCEPTION 'Vlastníka (obchodníka) môže zmeniť iba vedenie.'
-        USING ERRCODE = 'insufficient_privilege';
+  IF NEW.owner_id IS DISTINCT FROM OLD.owner_id AND current_user <> 'crm_sync'
+     AND NOT crm_can_change_owner() THEN
+    RAISE EXCEPTION 'Vlastníka (obchodníka) môže zmeniť iba vedenie (tím CEO) alebo admin.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: pipeline_no_delete(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pipeline_no_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Pipeline ani stage sa nemažú, iba archivujú.' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+--
+-- Name: record_org_fill(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.record_org_fill() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_org  uuid;
+  v_ref  uuid;
+BEGIN
+  IF TG_TABLE_NAME = 'offer' THEN
+    SELECT org_id INTO v_org FROM deal WHERE id = NEW.deal_id;
+  ELSIF NEW.company_id IS NOT NULL THEN
+    SELECT org_id INTO v_org FROM company WHERE id = NEW.company_id;
+  ELSIF NEW.person_id IS NOT NULL THEN
+    SELECT org_id INTO v_org FROM contact WHERE id = NEW.person_id;
+  END IF;
+
+  -- bez zákazníka predvolená spoločnosť, aby zlyhala kontrola zákazníka (CHECK), nie NOT NULL
+  NEW.org_id := coalesce(NEW.org_id, v_org, crm_default_org());
+  IF v_org IS NOT NULL AND NEW.org_id <> v_org THEN
+    RAISE EXCEPTION 'Záznam musí patriť tej istej spoločnosti ako jeho zákazník.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF TG_TABLE_NAME = 'deal' THEN
+    SELECT org_id INTO v_ref FROM pipeline WHERE id = NEW.pipeline_id;
+    IF v_ref IS NOT NULL AND v_ref <> NEW.org_id THEN
+      RAISE EXCEPTION 'Pipeline patrí inej spoločnosti ako deal.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'contract' THEN
+    -- (NEW.deal_id iba vo vetve zmluvy: OOM stĺpec deal_id nemá)
+    SELECT org_id INTO v_ref FROM deal WHERE id = NEW.deal_id;
+    IF v_ref <> NEW.org_id THEN
+      RAISE EXCEPTION 'Deal zmluvy patrí inej spoločnosti.' USING ERRCODE = 'check_violation';
     END IF;
   END IF;
   RETURN NEW;
@@ -894,6 +1869,45 @@ CREATE FUNCTION public.set_updated_at() RETURNS trigger
 BEGIN
   NEW.updated_at := now();
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: team_external_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.team_external_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'team_permission' THEN
+    IF (NEW.view_scope = 'vsetko' OR NEW.edit_scope = 'vsetko')
+       AND EXISTS (SELECT 1 FROM team t WHERE t.id = NEW.team_id AND t.is_external) THEN
+      RAISE EXCEPTION 'Externý tím nemôže vidieť ani upravovať „všetko“ (modul %).', NEW.module
+        USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF NEW.is_external AND EXISTS (SELECT 1 FROM team_permission p
+                                     WHERE p.team_id = NEW.id
+                                       AND (p.view_scope = 'vsetko' OR p.edit_scope = 'vsetko')) THEN
+    RAISE EXCEPTION 'Tím s právom „všetko“ nemôže byť externý.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: team_permission_init(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.team_permission_init() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  INSERT INTO team_permission (team_id, module)
+  SELECT NEW.id, m FROM unnest(enum_range(NULL::crm_module)) AS m;
+  RETURN NULL;
 END;
 $$;
 
@@ -930,13 +1944,60 @@ CREATE TABLE public.app_user (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     email text NOT NULL,
     name text NOT NULL,
-    role public.app_user_role NOT NULL,
-    team_id uuid,
-    active boolean DEFAULT true NOT NULL,
+    team_id uuid NOT NULL,
     hubspot_owner_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    status public.user_status DEFAULT 'pozvany'::public.user_status NOT NULL,
+    is_admin boolean DEFAULT false NOT NULL,
+    invited_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_login_at timestamp with time zone,
+    deactivated_at timestamp with time zone,
+    CONSTRAINT app_user_deactivated_check CHECK (((status = 'deaktivovany'::public.user_status) = (deactivated_at IS NOT NULL))),
+    CONSTRAINT app_user_email_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
+    CONSTRAINT app_user_name_check CHECK ((btrim(name) <> ''::text))
+);
+
+
+--
+-- Name: COLUMN app_user.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.status IS 'pozvany → aktivny pri prvom prihlásení (app_user_login); deaktivovany iba cez app_user_deactivate';
+
+
+--
+-- Name: COLUMN app_user.is_admin; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.is_admin IS 'smie meniť Nastavenia; prihlásenie vyplýva z e-mailu (@greenlogy.com = Google, inak kód e-mailom)';
+
+
+--
+-- Name: COLUMN app_user.last_login_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.last_login_at IS 'posledné prihlásenie; nezapisuje sa do auditu';
+
+
+--
+-- Name: app_user_org; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_user_org (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    org_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: TABLE app_user_org; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.app_user_org IS 'prístup používateľa k spoločnostiam; tím s all_orgs vidí všetky bez ohľadu na túto tabuľku';
 
 
 --
@@ -950,7 +2011,8 @@ CREATE TABLE public.audit_log (
     action public.audit_action NOT NULL,
     changed_by uuid,
     changed_at timestamp with time zone DEFAULT now() NOT NULL,
-    diff jsonb NOT NULL
+    diff jsonb NOT NULL,
+    source public.audit_source DEFAULT 'system'::public.audit_source NOT NULL
 );
 
 
@@ -965,7 +2027,14 @@ COMMENT ON COLUMN public.audit_log.changed_by IS 'app_user.id z current_setting(
 -- Name: COLUMN audit_log.diff; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.audit_log.diff IS 'insert: nový riadok; update: {stĺpec: {old, new}} iba zmenené stĺpce; delete: pôvodný riadok';
+COMMENT ON COLUMN public.audit_log.diff IS 'insert: nový riadok; update: {stĺpec: {old, new}} iba zmenené stĺpce, vlastné polia ako custom.<kľúč>; delete: pôvodný riadok';
+
+
+--
+-- Name: COLUMN audit_log.source; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.audit_log.source IS 'aplikacia = prihlásený používateľ; system = údržba alebo výpočet CRM; synchronizacia = rola crm_sync. API môže prepísať cez SET LOCAL app.change_source';
 
 
 --
@@ -994,6 +2063,7 @@ CREATE TABLE public.business_calendar (
     note text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    org_id uuid NOT NULL,
     CONSTRAINT business_calendar_hours_check CHECK (((is_working_day AND (work_from IS NOT NULL) AND (work_to IS NOT NULL) AND (work_to > work_from)) OR ((NOT is_working_day) AND (work_from IS NULL) AND (work_to IS NULL))))
 );
 
@@ -1002,7 +2072,7 @@ CREATE TABLE public.business_calendar (
 -- Name: TABLE business_calendar; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.business_calendar IS 'pracovné dni a pracovný čas (Europe/Bratislava) pre výpočet SLA';
+COMMENT ON TABLE public.business_calendar IS 'pracovné dni a čas pre výpočet SLA, podľa spoločnosti; prepočítava sa z org_work_hours a org_day_off';
 
 
 --
@@ -1092,7 +2162,7 @@ CREATE TABLE public.company_contact (
     contact_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    roles public.company_role[] DEFAULT '{}'::public.company_role[] NOT NULL,
+    roles text[] DEFAULT '{}'::text[] NOT NULL,
     is_main_contact boolean DEFAULT false NOT NULL
 );
 
@@ -1101,7 +2171,7 @@ CREATE TABLE public.company_contact (
 -- Name: COLUMN company_contact.roles; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.company_contact.roles IS 'roly osoby vo firme, aj viac naraz';
+COMMENT ON COLUMN public.company_contact.roles IS 'roly osoby vo firme, kódy z číselníka rola_kontaktu (aj viac naraz)';
 
 
 --
@@ -1153,12 +2223,21 @@ CREATE TABLE public.contact (
     is_producer boolean DEFAULT false NOT NULL,
     marketing_opt_out_at timestamp with time zone,
     marketing_opt_out_source text,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid DEFAULT public.crm_default_org() NOT NULL,
     CONSTRAINT contact_email_format_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
     CONSTRAINT contact_marketing_opt_out_check CHECK (((marketing_opt_out_at IS NULL) = (marketing_opt_out_source IS NULL))),
     CONSTRAINT contact_name_check CHECK (((btrim(first_name) <> ''::text) AND (btrim(last_name) <> ''::text))),
     CONSTRAINT contact_reachable_check CHECK ((num_nonnulls(NULLIF(btrim(email), ''::text), NULLIF(btrim(phone), ''::text), NULLIF(btrim(mobile), ''::text)) >= 1)),
     CONSTRAINT contact_status_source_check CHECK (((status IS NULL) = (status_source IS NULL)))
 );
+
+
+--
+-- Name: COLUMN contact.source; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.source IS 'zdroj kontaktu, kód z číselníka zdroj_kontaktu';
 
 
 --
@@ -1187,6 +2266,20 @@ COMMENT ON COLUMN public.contact.marketing_opt_out_at IS '„nechce marketing“
 --
 
 COMMENT ON COLUMN public.contact.marketing_opt_out_source IS 'zdroj „nechce marketing“, napr. hubspot, brevo, telefon, email';
+
+
+--
+-- Name: COLUMN contact.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN contact.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.org_id IS 'spoločnosť skupiny; osoba vo dvoch spoločnostiach = dva záznamy (Peter 12. 10.)';
 
 
 --
@@ -1265,6 +2358,8 @@ CREATE TABLE public.oom (
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
     CONSTRAINT oom_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
     CONSTRAINT oom_supply_period_check CHECK (((supply_to IS NULL) OR (supply_from IS NULL) OR (supply_to >= supply_from)))
 );
@@ -1275,6 +2370,20 @@ CREATE TABLE public.oom (
 --
 
 COMMENT ON COLUMN public.oom.supply_to IS 'NULL = na neurčito';
+
+
+--
+-- Name: COLUMN oom.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN oom.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.org_id IS 'preberá sa od zákazníka';
 
 
 --
@@ -1324,6 +2433,8 @@ CREATE VIEW public.contact_v WITH (security_invoker='true') AS
     p.is_producer,
     p.marketing_opt_out_at,
     p.marketing_opt_out_source,
+    p.custom,
+    p.org_id,
     x.archived,
     ((NOT x.archived) AND (p.marketing_opt_out_at IS NULL)) AS marketing_allowed
    FROM (public.contact p
@@ -1365,6 +2476,8 @@ CREATE TABLE public.contract (
     hubspot_deal_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
     CONSTRAINT contract_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
     CONSTRAINT contract_payment_terms_days_check CHECK ((payment_terms_days >= 0)),
     CONSTRAINT contract_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from)))
@@ -1390,6 +2503,20 @@ COMMENT ON COLUMN public.contract.valid_to IS 'NULL = na neurčito';
 --
 
 COMMENT ON COLUMN public.contract.consumption_tolerance IS 'tolerancia odberu v %';
+
+
+--
+-- Name: COLUMN contract.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN contract.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.org_id IS 'preberá sa od zákazníka';
 
 
 --
@@ -1515,6 +2642,64 @@ COMMENT ON COLUMN public.conversation.quality_standard IS 'regulačný štandard
 
 
 --
+-- Name: custom_field_option; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.custom_field_option (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    field_id uuid NOT NULL,
+    label text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    hidden_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT custom_field_option_label_check CHECK ((btrim(label) <> ''::text))
+);
+
+
+--
+-- Name: TABLE custom_field_option; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.custom_field_option IS 'hodnoty výberu; v custom sa ukladá id (premenovanie nič nerozbije); nemaže sa, iba skryje';
+
+
+--
+-- Name: custom_field_section; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.custom_field_section (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity public.crm_entity NOT NULL,
+    name text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT custom_field_section_name_check CHECK ((btrim(name) <> ''::text))
+);
+
+
+--
+-- Name: custom_field_team; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.custom_field_team (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    field_id uuid NOT NULL,
+    team_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE custom_field_team; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.custom_field_team IS 'tímy, ktoré smú pole meniť (pri edit_access = vybrane_timy)';
+
+
+--
 -- Name: customer_v; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -1554,7 +2739,9 @@ CREATE VIEW public.customer_v WITH (security_invoker='true') AS
     ( SELECT max(la.last_activity_at) AS max
            FROM last_activity la
           WHERE (la.company_id = c.id)) AS last_activity_at,
-    public.company_is_archived(c.*) AS archived
+    public.company_is_archived(c.*) AS archived,
+    c.org_id,
+    c.country
    FROM (public.company c
      LEFT JOIN oom_sum s ON ((s.company_id = c.id)))
   WHERE c.is_customer
@@ -1580,10 +2767,12 @@ UNION ALL
     ( SELECT max(la.last_activity_at) AS max
            FROM last_activity la
           WHERE (la.contact_id = p.id)) AS last_activity_at,
-    (NOT (p.status IS DISTINCT FROM 'zruseny_zakaznik'::public.customer_status)) AS archived
+    (NOT (p.status IS DISTINCT FROM 'zruseny_zakaznik'::public.customer_status)) AS archived,
+    p.org_id,
+    NULL::public.country_code AS country
    FROM (public.contact p
      LEFT JOIN oom_sum s ON ((s.person_id = p.id)))
-  WHERE (p.is_household AND (( SELECT public.crm_sees_all() AS crm_sees_all) OR (p.owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id))));
+  WHERE (p.is_household AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'view'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR (p.owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id))));
 
 
 --
@@ -1614,6 +2803,8 @@ CREATE TABLE public.deal (
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
     CONSTRAINT deal_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1))
 );
 
@@ -1630,6 +2821,56 @@ COMMENT ON COLUMN public.deal.segment IS 'preberá sa od zákazníka pri vzniku,
 --
 
 COMMENT ON COLUMN public.deal.closed_at IS 'skutočné uzavretie dealu (nie dátum nákupu)';
+
+
+--
+-- Name: COLUMN deal.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN deal.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.org_id IS 'preberá sa od zákazníka';
+
+
+--
+-- Name: export_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.export_log (
+    id bigint NOT NULL,
+    user_id uuid,
+    module public.crm_module NOT NULL,
+    filter jsonb DEFAULT '{}'::jsonb NOT NULL,
+    row_count integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT export_log_row_count_check CHECK ((row_count >= 0))
+);
+
+
+--
+-- Name: TABLE export_log; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.export_log IS 'kto, kedy a čo exportoval (bez samotných údajov)';
+
+
+--
+-- Name: export_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.export_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.export_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
 
 
 --
@@ -1689,6 +2930,77 @@ COMMENT ON COLUMN public.fve_project.nep_settlement_eur IS 'doúčtovanie z NEPu
 
 
 --
+-- Name: lookup_list; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.lookup_list (
+    code text NOT NULL,
+    name text NOT NULL,
+    used_on text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT lookup_list_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,62}$'::text))
+);
+
+
+--
+-- Name: TABLE lookup_list; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.lookup_list IS 'zoznamy číselníkov; zakladá ich iba migrácia (jadro)';
+
+
+--
+-- Name: lookup_value; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.lookup_value (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    list_code text NOT NULL,
+    code text NOT NULL,
+    label text NOT NULL,
+    org_id uuid,
+    sort_order integer DEFAULT 0 NOT NULL,
+    is_system boolean DEFAULT false NOT NULL,
+    hidden_at timestamp with time zone,
+    hubspot_value text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT lookup_value_code_check CHECK ((code ~ '^[a-z0-9][a-z0-9_]{0,62}$'::text)),
+    CONSTRAINT lookup_value_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT lookup_value_system_visible_check CHECK ((NOT (is_system AND (hidden_at IS NOT NULL))))
+);
+
+
+--
+-- Name: COLUMN lookup_value.code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.code IS 'kľúč, ktorým odkazujú záznamy; vznikne z názvu, nikdy sa nemení';
+
+
+--
+-- Name: COLUMN lookup_value.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.org_id IS 'NULL = celá skupina';
+
+
+--
+-- Name: COLUMN lookup_value.is_system; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.is_system IS 'hodnota, na ktorej stojí logika: nedá sa skryť ani premenovať (zakladá iba migrácia)';
+
+
+--
+-- Name: COLUMN lookup_value.hidden_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.hidden_at IS 'skrytá hodnota sa nedá vybrať pri novom zadaní, staré záznamy ju zobrazujú ďalej';
+
+
+--
 -- Name: offer; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1705,8 +3017,24 @@ CREATE TABLE public.offer (
     hubspot_quote_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
     CONSTRAINT offer_version_check CHECK ((version > 0))
 );
+
+
+--
+-- Name: COLUMN offer.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN offer.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.org_id IS 'preberá sa od dealu';
 
 
 --
@@ -1747,6 +3075,146 @@ CREATE TABLE public.oom_device (
 
 
 --
+-- Name: org; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    code text NOT NULL,
+    country public.country_code NOT NULL,
+    currency character(3) NOT NULL,
+    status public.org_status DEFAULT 'pripravuje_sa'::public.org_status NOT NULL,
+    is_default boolean DEFAULT false NOT NULL,
+    timezone text DEFAULT 'Europe/Bratislava'::text NOT NULL,
+    legal_name text NOT NULL,
+    reg_no text,
+    tax_no text,
+    vat_no text,
+    address text,
+    registry_entry text,
+    statutory text,
+    support_phone text,
+    email text,
+    web text,
+    regulator_license text,
+    logo_updated_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT org_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,40}$'::text)),
+    CONSTRAINT org_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT org_legal_name_check CHECK ((btrim(legal_name) <> ''::text))
+);
+
+
+--
+-- Name: TABLE org; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.org IS 'spoločnosti skupiny Greenlogy (nie firmy zákazníkov – tie sú v company)';
+
+
+--
+-- Name: COLUMN org.reg_no; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.org.reg_no IS 'IČO (SK, CZ) alebo OIB (HR) spoločnosti';
+
+
+--
+-- Name: COLUMN org.regulator_license; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.org.regulator_license IS 'číslo povolenia regulátora: SK ÚRSO, CZ ERÚ, HR HERA';
+
+
+--
+-- Name: org_bank_account; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_bank_account (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    iban text NOT NULL,
+    bic text,
+    bank_name text,
+    purposes public.bank_account_purpose[] DEFAULT '{}'::public.bank_account_purpose[] NOT NULL,
+    is_primary boolean DEFAULT false NOT NULL,
+    archived_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT org_bank_account_iban_check CHECK ((iban ~ '^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$'::text))
+);
+
+
+--
+-- Name: COLUMN org_bank_account.iban; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.org_bank_account.iban IS 'IBAN bez medzier, veľkými písmenami (upraví spúšťač)';
+
+
+--
+-- Name: org_day_off; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_day_off (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    date date NOT NULL,
+    kind public.day_off_kind NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT org_day_off_name_check CHECK ((btrim(name) <> ''::text))
+);
+
+
+--
+-- Name: TABLE org_day_off; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.org_day_off IS 'štátne sviatky (iba migráciou, podľa zákona krajiny) a firemné voľno (admin)';
+
+
+--
+-- Name: org_logo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_logo (
+    org_id uuid NOT NULL,
+    mime text NOT NULL,
+    data bytea NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT org_logo_data_check CHECK ((octet_length(data) <= 524288)),
+    CONSTRAINT org_logo_mime_check CHECK ((mime = ANY (ARRAY['image/svg+xml'::text, 'image/png'::text])))
+);
+
+
+--
+-- Name: org_work_hours; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_work_hours (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    weekday smallint NOT NULL,
+    work_from time without time zone NOT NULL,
+    work_to time without time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT org_work_hours_check CHECK ((work_to > work_from)),
+    CONSTRAINT org_work_hours_weekday_check CHECK (((weekday >= 1) AND (weekday <= 7)))
+);
+
+
+--
+-- Name: TABLE org_work_hours; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.org_work_hours IS 'týždenný pracovný čas spoločnosti; deň bez riadku = voľno; 1 = pondelok';
+
+
+--
 -- Name: pipeline; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1756,8 +3224,25 @@ CREATE TABLE public.pipeline (
     sort_order integer DEFAULT 0 NOT NULL,
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    org_id uuid,
+    kind public.deal_kind NOT NULL,
+    archived_at timestamp with time zone
 );
+
+
+--
+-- Name: COLUMN pipeline.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline.org_id IS 'NULL = celá skupina';
+
+
+--
+-- Name: COLUMN pipeline.kind; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline.kind IS 'druh obchodu (jadro), názov pipeline sa meniť dá';
 
 
 --
@@ -1770,14 +3255,52 @@ CREATE TABLE public.pipeline_stage (
     name text NOT NULL,
     sort_order integer DEFAULT 0 NOT NULL,
     probability numeric(3,2),
-    is_closed boolean DEFAULT false NOT NULL,
-    is_won boolean DEFAULT false NOT NULL,
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT pipeline_stage_probability_check CHECK (((probability >= (0)::numeric) AND (probability <= (1)::numeric))),
-    CONSTRAINT pipeline_stage_won_is_closed_check CHECK (((NOT is_won) OR is_closed))
+    outcome public.stage_outcome DEFAULT 'otvoreny'::public.stage_outcome NOT NULL,
+    archived_at timestamp with time zone,
+    is_closed boolean GENERATED ALWAYS AS ((outcome <> 'otvoreny'::public.stage_outcome)) STORED,
+    is_won boolean GENERATED ALWAYS AS ((outcome = 'vyhrany'::public.stage_outcome)) STORED,
+    CONSTRAINT pipeline_stage_probability_check CHECK (((probability >= (0)::numeric) AND (probability <= (1)::numeric)))
 );
+
+
+--
+-- Name: COLUMN pipeline_stage.outcome; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline_stage.outcome IS 'typ stage: otvorený / vyhraný / prehraný';
+
+
+--
+-- Name: COLUMN pipeline_stage.is_closed; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline_stage.is_closed IS 'vypočítané z outcome (pre staršie dopyty)';
+
+
+--
+-- Name: pipeline_stage_required_field; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pipeline_stage_required_field (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    stage_id uuid NOT NULL,
+    core_field text,
+    custom_field_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pipeline_stage_required_field_core_field_check CHECK ((core_field ~ '^[a-z][a-z0-9_]{1,62}$'::text)),
+    CONSTRAINT pipeline_stage_required_field_one_check CHECK (((core_field IS NULL) <> (custom_field_id IS NULL)))
+);
+
+
+--
+-- Name: COLUMN pipeline_stage_required_field.core_field; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline_stage_required_field.core_field IS 'pole jadra dealu zo zoznamu v kóde (napr. lost_reason)';
 
 
 --
@@ -1919,8 +3442,62 @@ CREATE TABLE public.team (
     name text NOT NULL,
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    code text NOT NULL,
+    description text,
+    all_orgs boolean DEFAULT false NOT NULL,
+    can_change_owner boolean DEFAULT false NOT NULL,
+    is_external boolean DEFAULT false NOT NULL,
+    archived_at timestamp with time zone,
+    CONSTRAINT team_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,40}$'::text)),
+    CONSTRAINT team_external_check CHECK ((NOT (is_external AND (all_orgs OR can_change_owner))))
 );
+
+
+--
+-- Name: COLUMN team.all_orgs; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team.all_orgs IS 'tím vidí všetky spoločnosti skupiny (CEO, Nákup, Marketing)';
+
+
+--
+-- Name: COLUMN team.can_change_owner; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team.can_change_owner IS 'členovia tímu menia vlastníka (obchodníka) záznamov; okrem nich iba admin';
+
+
+--
+-- Name: COLUMN team.is_external; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team.is_external IS 'externý tím: nikdy nesmie dostať „všetko“ (poistka v databáze)';
+
+
+--
+-- Name: team_permission; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.team_permission (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    team_id uuid NOT NULL,
+    module public.crm_module NOT NULL,
+    view_scope public.access_scope DEFAULT 'nic'::public.access_scope NOT NULL,
+    edit_scope public.access_scope DEFAULT 'nic'::public.access_scope NOT NULL,
+    can_archive boolean DEFAULT false NOT NULL,
+    can_export boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT team_permission_edit_le_view_check CHECK ((edit_scope <= view_scope))
+);
+
+
+--
+-- Name: TABLE team_permission; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.team_permission IS 'práva tímu po moduloch; „iba svoje“ = záznamy, kde je používateľ vlastníkom';
 
 
 --
@@ -1983,6 +3560,22 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: app_user_org app_user_org_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_user_org
+    ADD CONSTRAINT app_user_org_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: app_user_org app_user_org_user_id_org_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_user_org
+    ADD CONSTRAINT app_user_org_user_id_org_id_key UNIQUE (user_id, org_id);
+
+
+--
 -- Name: app_user app_user_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2003,7 +3596,7 @@ ALTER TABLE ONLY public.audit_log
 --
 
 ALTER TABLE ONLY public.business_calendar
-    ADD CONSTRAINT business_calendar_pkey PRIMARY KEY (date);
+    ADD CONSTRAINT business_calendar_pkey PRIMARY KEY (org_id, date);
 
 
 --
@@ -2191,6 +3784,70 @@ ALTER TABLE ONLY public.conversation
 
 
 --
+-- Name: custom_field custom_field_entity_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field
+    ADD CONSTRAINT custom_field_entity_key_key UNIQUE (entity, key);
+
+
+--
+-- Name: custom_field_option custom_field_option_field_id_label_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_option
+    ADD CONSTRAINT custom_field_option_field_id_label_key UNIQUE (field_id, label);
+
+
+--
+-- Name: custom_field_option custom_field_option_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_option
+    ADD CONSTRAINT custom_field_option_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: custom_field custom_field_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field
+    ADD CONSTRAINT custom_field_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: custom_field_section custom_field_section_entity_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_section
+    ADD CONSTRAINT custom_field_section_entity_name_key UNIQUE (entity, name);
+
+
+--
+-- Name: custom_field_section custom_field_section_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_section
+    ADD CONSTRAINT custom_field_section_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: custom_field_team custom_field_team_field_id_team_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_team
+    ADD CONSTRAINT custom_field_team_field_id_team_id_key UNIQUE (field_id, team_id);
+
+
+--
+-- Name: custom_field_team custom_field_team_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_team
+    ADD CONSTRAINT custom_field_team_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: deal_contact deal_contact_deal_id_contact_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2239,11 +3896,43 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: export_log export_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.export_log
+    ADD CONSTRAINT export_log_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: fve_project fve_project_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.fve_project
     ADD CONSTRAINT fve_project_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: lookup_list lookup_list_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_list
+    ADD CONSTRAINT lookup_list_pkey PRIMARY KEY (code);
+
+
+--
+-- Name: lookup_value lookup_value_list_code_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_value
+    ADD CONSTRAINT lookup_value_list_code_code_key UNIQUE (list_code, code);
+
+
+--
+-- Name: lookup_value lookup_value_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_value
+    ADD CONSTRAINT lookup_value_pkey PRIMARY KEY (id);
 
 
 --
@@ -2311,19 +4000,83 @@ ALTER TABLE ONLY public.oom
 
 
 --
+-- Name: org_bank_account org_bank_account_org_id_iban_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_bank_account
+    ADD CONSTRAINT org_bank_account_org_id_iban_key UNIQUE (org_id, iban);
+
+
+--
+-- Name: org_bank_account org_bank_account_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_bank_account
+    ADD CONSTRAINT org_bank_account_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: org org_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org
+    ADD CONSTRAINT org_code_key UNIQUE (code);
+
+
+--
+-- Name: org_day_off org_day_off_org_id_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_day_off
+    ADD CONSTRAINT org_day_off_org_id_date_key UNIQUE (org_id, date);
+
+
+--
+-- Name: org_day_off org_day_off_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_day_off
+    ADD CONSTRAINT org_day_off_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: org_logo org_logo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_logo
+    ADD CONSTRAINT org_logo_pkey PRIMARY KEY (org_id);
+
+
+--
+-- Name: org org_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org
+    ADD CONSTRAINT org_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: org_work_hours org_work_hours_org_id_weekday_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_work_hours
+    ADD CONSTRAINT org_work_hours_org_id_weekday_key UNIQUE (org_id, weekday);
+
+
+--
+-- Name: org_work_hours org_work_hours_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_work_hours
+    ADD CONSTRAINT org_work_hours_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: pipeline pipeline_hubspot_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.pipeline
     ADD CONSTRAINT pipeline_hubspot_id_key UNIQUE (hubspot_id);
-
-
---
--- Name: pipeline pipeline_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pipeline
-    ADD CONSTRAINT pipeline_name_key UNIQUE (name);
 
 
 --
@@ -2364,6 +4117,22 @@ ALTER TABLE ONLY public.pipeline_stage
 
 ALTER TABLE ONLY public.pipeline_stage
     ADD CONSTRAINT pipeline_stage_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pipeline_stage_required_field pipeline_stage_required_field_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pipeline_stage_required_field
+    ADD CONSTRAINT pipeline_stage_required_field_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pipeline_stage_required_field pipeline_stage_required_field_stage_id_core_field_custom_fi_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pipeline_stage_required_field
+    ADD CONSTRAINT pipeline_stage_required_field_stage_id_core_field_custom_fi_key UNIQUE NULLS NOT DISTINCT (stage_id, core_field, custom_field_id);
 
 
 --
@@ -2455,6 +4224,14 @@ ALTER TABLE ONLY public.sync_run
 
 
 --
+-- Name: team team_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team
+    ADD CONSTRAINT team_code_key UNIQUE (code);
+
+
+--
 -- Name: team team_hubspot_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2468,6 +4245,22 @@ ALTER TABLE ONLY public.team
 
 ALTER TABLE ONLY public.team
     ADD CONSTRAINT team_name_key UNIQUE (name);
+
+
+--
+-- Name: team_permission team_permission_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team_permission
+    ADD CONSTRAINT team_permission_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: team_permission team_permission_team_id_module_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team_permission
+    ADD CONSTRAINT team_permission_team_id_module_key UNIQUE (team_id, module);
 
 
 --
@@ -2567,6 +4360,13 @@ CREATE UNIQUE INDEX app_user_email_key ON public.app_user USING btree (lower(ema
 
 
 --
+-- Name: app_user_org_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX app_user_org_org_id_idx ON public.app_user_org USING btree (org_id);
+
+
+--
 -- Name: app_user_team_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2592,6 +4392,13 @@ CREATE INDEX audit_log_changed_by_idx ON public.audit_log USING btree (changed_b
 --
 
 CREATE INDEX audit_log_record_idx ON public.audit_log USING btree (table_name, record_id, changed_at);
+
+
+--
+-- Name: audit_log_table_changed_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_log_table_changed_at_idx ON public.audit_log USING btree (table_name, changed_at);
 
 
 --
@@ -2644,10 +4451,24 @@ CREATE UNIQUE INDEX company_contact_one_main_key ON public.company_contact USING
 
 
 --
--- Name: company_ico_key; Type: INDEX; Schema: public; Owner: -
+-- Name: company_country_ico_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX company_ico_key ON public.company USING btree (ico);
+CREATE UNIQUE INDEX company_country_ico_key ON public.company USING btree (country, ico);
+
+
+--
+-- Name: company_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_custom_idx ON public.company USING gin (custom jsonb_path_ops);
+
+
+--
+-- Name: company_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_org_id_idx ON public.company USING btree (org_id);
 
 
 --
@@ -2672,6 +4493,13 @@ CREATE INDEX consent_contact_purpose_idx ON public.consent USING btree (contact_
 
 
 --
+-- Name: contact_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contact_custom_idx ON public.contact USING gin (custom jsonb_path_ops);
+
+
+--
 -- Name: contact_email_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2683,6 +4511,13 @@ CREATE INDEX contact_email_idx ON public.contact USING btree (lower(btrim(email)
 --
 
 CREATE INDEX contact_mobile_norm_idx ON public.contact USING btree (mobile_norm);
+
+
+--
+-- Name: contact_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contact_org_id_idx ON public.contact USING btree (org_id);
 
 
 --
@@ -2718,6 +4553,20 @@ CREATE INDEX contact_status_idx ON public.contact USING btree (status) WHERE is_
 --
 
 CREATE INDEX contract_company_id_idx ON public.contract USING btree (company_id);
+
+
+--
+-- Name: contract_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_custom_idx ON public.contract USING gin (custom jsonb_path_ops);
+
+
+--
+-- Name: contract_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_org_id_idx ON public.contract USING btree (org_id);
 
 
 --
@@ -2826,10 +4675,24 @@ CREATE INDEX deal_contact_contact_id_idx ON public.deal_contact USING btree (con
 
 
 --
+-- Name: deal_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_custom_idx ON public.deal USING gin (custom jsonb_path_ops);
+
+
+--
 -- Name: deal_oom_oom_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX deal_oom_oom_id_idx ON public.deal_oom USING btree (oom_id);
+
+
+--
+-- Name: deal_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_org_id_idx ON public.deal USING btree (org_id);
 
 
 --
@@ -2861,10 +4724,31 @@ CREATE INDEX deal_stage_id_idx ON public.deal USING btree (stage_id, pipeline_id
 
 
 --
+-- Name: export_log_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX export_log_created_at_idx ON public.export_log USING btree (created_at);
+
+
+--
 -- Name: fve_project_deal_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX fve_project_deal_id_idx ON public.fve_project USING btree (deal_id);
+
+
+--
+-- Name: lookup_value_label_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX lookup_value_label_key ON public.lookup_value USING btree (list_code, org_id, lower(label)) NULLS NOT DISTINCT;
+
+
+--
+-- Name: offer_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX offer_custom_idx ON public.offer USING gin (custom jsonb_path_ops);
 
 
 --
@@ -2889,6 +4773,13 @@ CREATE INDEX offer_item_product_id_idx ON public.offer_item USING btree (product
 
 
 --
+-- Name: offer_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX offer_org_id_idx ON public.offer USING btree (org_id);
+
+
+--
 -- Name: oom_company_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2896,10 +4787,24 @@ CREATE INDEX oom_company_id_idx ON public.oom USING btree (company_id);
 
 
 --
+-- Name: oom_custom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_custom_idx ON public.oom USING gin (custom jsonb_path_ops);
+
+
+--
 -- Name: oom_device_oom_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX oom_device_oom_id_idx ON public.oom_device USING btree (oom_id);
+
+
+--
+-- Name: oom_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_org_id_idx ON public.oom USING btree (org_id);
 
 
 --
@@ -2914,6 +4819,27 @@ CREATE INDEX oom_person_id_idx ON public.oom USING btree (person_id);
 --
 
 CREATE INDEX oom_status_idx ON public.oom USING btree (status);
+
+
+--
+-- Name: org_bank_account_one_primary_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX org_bank_account_one_primary_key ON public.org_bank_account USING btree (org_id) WHERE (is_primary AND (archived_at IS NULL));
+
+
+--
+-- Name: org_one_default_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX org_one_default_key ON public.org USING btree (is_default) WHERE is_default;
+
+
+--
+-- Name: pipeline_org_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX pipeline_org_name_key ON public.pipeline USING btree (org_id, name) NULLS NOT DISTINCT;
 
 
 --
@@ -3001,6 +4927,13 @@ CREATE INDEX web_event_posthog_distinct_id_idx ON public.web_event USING btree (
 
 
 --
+-- Name: app_user trg_app_user_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_app_user_guard BEFORE INSERT OR DELETE OR UPDATE ON public.app_user FOR EACH ROW EXECUTE FUNCTION public.app_user_guard();
+
+
+--
 -- Name: activity trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3012,6 +4945,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.activity FOR
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: app_user_org trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user_org FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -3099,6 +5039,34 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.conversation
 
 
 --
+-- Name: custom_field trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.custom_field FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: custom_field_option trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.custom_field_option FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: custom_field_section trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.custom_field_section FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: custom_field_team trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.custom_field_team FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: deal trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3124,6 +5092,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.deal_oom FOR
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.fve_project FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: lookup_value trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -3155,6 +5130,34 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_device F
 
 
 --
+-- Name: org trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.org FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: org_bank_account trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.org_bank_account FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: org_day_off trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.org_day_off FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: org_work_hours trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.org_work_hours FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: pipeline trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3166,6 +5169,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.pipeline FOR
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.pipeline_stage FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: pipeline_stage_required_field trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.pipeline_stage_required_field FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -3211,10 +5221,101 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.team FOR EAC
 
 
 --
+-- Name: team_permission trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.team_permission FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: voucher trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.voucher FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: org_day_off trg_business_calendar; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_business_calendar AFTER INSERT OR DELETE OR UPDATE ON public.org_day_off FOR EACH STATEMENT EXECUTE FUNCTION public.business_calendar_rebuild();
+
+
+--
+-- Name: org_work_hours trg_business_calendar; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_business_calendar AFTER INSERT OR DELETE OR UPDATE ON public.org_work_hours FOR EACH STATEMENT EXECUTE FUNCTION public.business_calendar_rebuild();
+
+
+--
+-- Name: company_contact trg_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.company_contact FOR EACH ROW EXECUTE FUNCTION public.company_contact_check();
+
+
+--
+-- Name: company trg_country_default; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_country_default BEFORE INSERT ON public.company FOR EACH ROW EXECUTE FUNCTION public.company_country_default();
+
+
+--
+-- Name: company trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.company FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('firma');
+
+
+--
+-- Name: contact trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.contact FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('osoba');
+
+
+--
+-- Name: contract trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.contract FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('zmluva');
+
+
+--
+-- Name: deal trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.deal FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('deal');
+
+
+--
+-- Name: offer trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.offer FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('ponuka');
+
+
+--
+-- Name: oom trg_custom_values; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.custom_values_check('oom');
+
+
+--
+-- Name: company trg_customer_org_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_org_guard BEFORE UPDATE OF org_id ON public.company FOR EACH ROW EXECUTE FUNCTION public.customer_org_guard();
+
+
+--
+-- Name: contact trg_customer_org_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_org_guard BEFORE UPDATE OF org_id ON public.contact FOR EACH ROW EXECUTE FUNCTION public.customer_org_guard();
 
 
 --
@@ -3229,6 +5330,27 @@ CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.company FOR
 --
 
 CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.contact FOR EACH ROW EXECUTE FUNCTION public.customer_status_track();
+
+
+--
+-- Name: custom_field trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.custom_field FOR EACH ROW EXECUTE FUNCTION public.custom_field_guard();
+
+
+--
+-- Name: custom_field_option trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE ON public.custom_field_option FOR EACH ROW EXECUTE FUNCTION public.custom_field_option_guard();
+
+
+--
+-- Name: lookup_value trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.lookup_value_guard();
 
 
 --
@@ -3267,6 +5389,34 @@ CREATE TRIGGER trg_mark_household AFTER INSERT OR UPDATE OF person_id ON public.
 
 
 --
+-- Name: pipeline trg_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_no_delete BEFORE DELETE ON public.pipeline FOR EACH ROW WHEN ((CURRENT_USER <> 'crm_sync'::name)) EXECUTE FUNCTION public.pipeline_no_delete();
+
+
+--
+-- Name: pipeline_stage trg_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_no_delete BEFORE DELETE ON public.pipeline_stage FOR EACH ROW WHEN ((CURRENT_USER <> 'crm_sync'::name)) EXECUTE FUNCTION public.pipeline_no_delete();
+
+
+--
+-- Name: org_bank_account trg_normalize; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_normalize BEFORE INSERT OR UPDATE OF iban ON public.org_bank_account FOR EACH ROW EXECUTE FUNCTION public.org_bank_account_normalize();
+
+
+--
+-- Name: deal_contact trg_org_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_org_check BEFORE INSERT OR UPDATE ON public.deal_contact FOR EACH ROW EXECUTE FUNCTION public.deal_contact_org_check();
+
+
+--
 -- Name: company trg_owner_change_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3281,6 +5431,48 @@ CREATE TRIGGER trg_owner_change_guard BEFORE UPDATE OF owner_id ON public.contac
 
 
 --
+-- Name: audit_log trg_protect; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect BEFORE DELETE OR UPDATE ON public.audit_log FOR EACH ROW EXECUTE FUNCTION public.audit_log_protect();
+
+
+--
+-- Name: audit_log trg_protect_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect_truncate BEFORE TRUNCATE ON public.audit_log FOR EACH STATEMENT EXECUTE FUNCTION public.audit_log_protect();
+
+
+--
+-- Name: contract trg_record_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.contract FOR EACH ROW EXECUTE FUNCTION public.record_org_fill();
+
+
+--
+-- Name: deal trg_record_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.deal FOR EACH ROW EXECUTE FUNCTION public.record_org_fill();
+
+
+--
+-- Name: offer trg_record_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.offer FOR EACH ROW EXECUTE FUNCTION public.record_org_fill();
+
+
+--
+-- Name: oom trg_record_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.record_org_fill();
+
+
+--
 -- Name: activity trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3292,6 +5484,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.activity FOR EACH ROW 
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.app_user FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: app_user_org trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.app_user_org FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -3386,6 +5585,34 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.conversation FOR EACH 
 
 
 --
+-- Name: custom_field trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.custom_field FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: custom_field_option trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.custom_field_option FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: custom_field_section trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.custom_field_section FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: custom_field_team trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.custom_field_team FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: deal trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3411,6 +5638,20 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.deal_oom FOR EACH ROW 
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.fve_project FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: lookup_list trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.lookup_list FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: lookup_value trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -3442,6 +5683,41 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_device FOR EACH RO
 
 
 --
+-- Name: org trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.org FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: org_bank_account trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.org_bank_account FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: org_day_off trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.org_day_off FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: org_logo trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.org_logo FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: org_work_hours trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.org_work_hours FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: pipeline trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3453,6 +5729,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline FOR EACH ROW 
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline_stage FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: pipeline_stage_required_field trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline_stage_required_field FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -3498,6 +5781,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.team FOR EACH ROW EXEC
 
 
 --
+-- Name: team_permission trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.team_permission FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: voucher trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3509,6 +5799,34 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.voucher FOR EACH ROW E
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.web_event FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: contact trg_source_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_source_check BEFORE INSERT OR UPDATE OF source, org_id ON public.contact FOR EACH ROW EXECUTE FUNCTION public.contact_source_check();
+
+
+--
+-- Name: team trg_team_external_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_team_external_guard BEFORE UPDATE OF is_external ON public.team FOR EACH ROW EXECUTE FUNCTION public.team_external_guard();
+
+
+--
+-- Name: team_permission trg_team_external_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_team_external_guard BEFORE INSERT OR UPDATE ON public.team_permission FOR EACH ROW EXECUTE FUNCTION public.team_external_guard();
+
+
+--
+-- Name: team trg_team_permission_init; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_team_permission_init AFTER INSERT ON public.team FOR EACH ROW EXECUTE FUNCTION public.team_permission_init();
 
 
 --
@@ -3560,11 +5878,35 @@ ALTER TABLE ONLY public.activity
 
 
 --
+-- Name: app_user_org app_user_org_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_user_org
+    ADD CONSTRAINT app_user_org_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: app_user_org app_user_org_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_user_org
+    ADD CONSTRAINT app_user_org_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id) ON DELETE CASCADE;
+
+
+--
 -- Name: app_user app_user_team_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.app_user
     ADD CONSTRAINT app_user_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.team(id);
+
+
+--
+-- Name: business_calendar business_calendar_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_calendar
+    ADD CONSTRAINT business_calendar_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -3632,6 +5974,14 @@ ALTER TABLE ONLY public.company_contact
 
 
 --
+-- Name: company company_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company
+    ADD CONSTRAINT company_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: company company_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3645,6 +5995,14 @@ ALTER TABLE ONLY public.company
 
 ALTER TABLE ONLY public.consent
     ADD CONSTRAINT consent_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contact(id);
+
+
+--
+-- Name: contact contact_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact
+    ADD CONSTRAINT contact_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -3669,6 +6027,14 @@ ALTER TABLE ONLY public.contract
 
 ALTER TABLE ONLY public.contract
     ADD CONSTRAINT contract_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: contract contract_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract
+    ADD CONSTRAINT contract_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -3744,6 +6110,46 @@ ALTER TABLE ONLY public.conversation
 
 
 --
+-- Name: custom_field_option custom_field_option_field_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_option
+    ADD CONSTRAINT custom_field_option_field_id_fkey FOREIGN KEY (field_id) REFERENCES public.custom_field(id);
+
+
+--
+-- Name: custom_field custom_field_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field
+    ADD CONSTRAINT custom_field_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: custom_field custom_field_section_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field
+    ADD CONSTRAINT custom_field_section_id_fkey FOREIGN KEY (section_id) REFERENCES public.custom_field_section(id);
+
+
+--
+-- Name: custom_field_team custom_field_team_field_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_team
+    ADD CONSTRAINT custom_field_team_field_id_fkey FOREIGN KEY (field_id) REFERENCES public.custom_field(id) ON DELETE CASCADE;
+
+
+--
+-- Name: custom_field_team custom_field_team_team_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_field_team
+    ADD CONSTRAINT custom_field_team_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.team(id);
+
+
+--
 -- Name: deal deal_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3784,6 +6190,14 @@ ALTER TABLE ONLY public.deal_oom
 
 
 --
+-- Name: deal deal_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal
+    ADD CONSTRAINT deal_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: deal deal_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3816,11 +6230,35 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: export_log export_log_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.export_log
+    ADD CONSTRAINT export_log_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
 -- Name: fve_project fve_project_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.fve_project
     ADD CONSTRAINT fve_project_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: lookup_value lookup_value_list_code_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_value
+    ADD CONSTRAINT lookup_value_list_code_fkey FOREIGN KEY (list_code) REFERENCES public.lookup_list(code);
+
+
+--
+-- Name: lookup_value lookup_value_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_value
+    ADD CONSTRAINT lookup_value_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -3856,6 +6294,14 @@ ALTER TABLE ONLY public.offer_item
 
 
 --
+-- Name: offer offer_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: oom oom_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3872,6 +6318,14 @@ ALTER TABLE ONLY public.oom_device
 
 
 --
+-- Name: oom oom_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom
+    ADD CONSTRAINT oom_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: oom oom_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3880,11 +6334,67 @@ ALTER TABLE ONLY public.oom
 
 
 --
+-- Name: org_bank_account org_bank_account_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_bank_account
+    ADD CONSTRAINT org_bank_account_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: org_day_off org_day_off_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_day_off
+    ADD CONSTRAINT org_day_off_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: org_logo org_logo_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_logo
+    ADD CONSTRAINT org_logo_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: org_work_hours org_work_hours_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_work_hours
+    ADD CONSTRAINT org_work_hours_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: pipeline pipeline_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pipeline
+    ADD CONSTRAINT pipeline_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: pipeline_stage pipeline_stage_pipeline_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.pipeline_stage
     ADD CONSTRAINT pipeline_stage_pipeline_id_fkey FOREIGN KEY (pipeline_id) REFERENCES public.pipeline(id);
+
+
+--
+-- Name: pipeline_stage_required_field pipeline_stage_required_field_custom_field_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pipeline_stage_required_field
+    ADD CONSTRAINT pipeline_stage_required_field_custom_field_id_fkey FOREIGN KEY (custom_field_id) REFERENCES public.custom_field(id);
+
+
+--
+-- Name: pipeline_stage_required_field pipeline_stage_required_field_stage_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pipeline_stage_required_field
+    ADD CONSTRAINT pipeline_stage_required_field_stage_id_fkey FOREIGN KEY (stage_id) REFERENCES public.pipeline_stage(id) ON DELETE CASCADE;
 
 
 --
@@ -3928,6 +6438,14 @@ ALTER TABLE ONLY public.supplier_switch
 
 
 --
+-- Name: team_permission team_permission_team_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team_permission
+    ADD CONSTRAINT team_permission_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.team(id) ON DELETE CASCADE;
+
+
+--
 -- Name: voucher voucher_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3952,17 +6470,22 @@ ALTER TABLE ONLY public.web_event
 
 
 --
+-- Name: app_user; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.app_user ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: app_user_org; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.app_user_org ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: company; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 ALTER TABLE public.company ENABLE ROW LEVEL SECURITY;
-
---
--- Name: company company_access; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY company_access ON public.company USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id))));
-
 
 --
 -- Name: company_contact; Type: ROW SECURITY; Schema: public; Owner: -
@@ -3971,24 +6494,610 @@ CREATE POLICY company_access ON public.company USING ((( SELECT public.crm_sees_
 ALTER TABLE public.company_contact ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: company_contact company_contact_access; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY company_contact_access ON public.company_contact USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR public.crm_external_owns_company(company_id))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR public.crm_external_owns_company(company_id)));
-
-
---
 -- Name: contact; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 ALTER TABLE public.contact ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: contact contact_access; Type: POLICY; Schema: public; Owner: -
+-- Name: custom_field; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
-CREATE POLICY contact_access ON public.contact USING ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)) OR public.crm_external_sees_contact(id))) WITH CHECK ((( SELECT public.crm_sees_all() AS crm_sees_all) OR (owner_id = ( SELECT public.crm_external_user_id() AS crm_external_user_id)) OR public.crm_external_sees_contact(id)));
+ALTER TABLE public.custom_field ENABLE ROW LEVEL SECURITY;
 
+--
+-- Name: custom_field_option; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.custom_field_option ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: custom_field_section; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.custom_field_section ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: custom_field_team; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.custom_field_team ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: company_contact customer_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_delete ON public.company_contact FOR DELETE USING (public.crm_company_access(company_id, 'edit'::text));
+
+
+--
+-- Name: company customer_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_insert ON public.company FOR INSERT WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND (owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id))))));
+
+
+--
+-- Name: company_contact customer_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_insert ON public.company_contact FOR INSERT WITH CHECK (public.crm_company_access(company_id, 'edit'::text));
+
+
+--
+-- Name: contact customer_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_insert ON public.contact FOR INSERT WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND (owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id))))));
+
+
+--
+-- Name: company customer_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_select ON public.company FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'view'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'view'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND (owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id))))));
+
+
+--
+-- Name: company_contact customer_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_select ON public.company_contact FOR SELECT USING (public.crm_company_access(company_id, 'view'::text));
+
+
+--
+-- Name: contact customer_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_select ON public.contact FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'view'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'view'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND ((owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR public.crm_contact_on_own_company(id))))));
+
+
+--
+-- Name: company customer_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_update ON public.company FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND (owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)))))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND (owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id))))));
+
+
+--
+-- Name: company_contact customer_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_update ON public.company_contact FOR UPDATE USING (public.crm_company_access(company_id, 'edit'::text)) WITH CHECK (public.crm_company_access(company_id, 'edit'::text));
+
+
+--
+-- Name: contact customer_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customer_update ON public.contact FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND ((owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR public.crm_contact_on_own_company(id)))))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND ((owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR public.crm_contact_on_own_company(id))))));
+
+
+--
+-- Name: lookup_list; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.lookup_list ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: lookup_value; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.lookup_value ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.org ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org_bank_account; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.org_bank_account ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org_day_off; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.org_day_off ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org_logo; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.org_logo ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org_work_hours; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.org_work_hours ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: pipeline; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.pipeline ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: pipeline_stage; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.pipeline_stage ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: pipeline_stage_required_field; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.pipeline_stage_required_field ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: org_day_off settings_day_off_kind_del; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_day_off_kind_del ON public.org_day_off AS RESTRICTIVE FOR DELETE USING (((kind = 'firemne_volno'::public.day_off_kind) OR public.crm_is_service()));
+
+
+--
+-- Name: org_day_off settings_day_off_kind_ins; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_day_off_kind_ins ON public.org_day_off AS RESTRICTIVE FOR INSERT WITH CHECK (((kind = 'firemne_volno'::public.day_off_kind) OR public.crm_is_service()));
+
+
+--
+-- Name: org_day_off settings_day_off_kind_upd; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_day_off_kind_upd ON public.org_day_off AS RESTRICTIVE FOR UPDATE USING (((kind = 'firemne_volno'::public.day_off_kind) OR public.crm_is_service())) WITH CHECK (((kind = 'firemne_volno'::public.day_off_kind) OR public.crm_is_service()));
+
+
+--
+-- Name: app_user_org settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.app_user_org FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_section settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.custom_field_section FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_team settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.custom_field_team FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_day_off settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.org_day_off FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_logo settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.org_logo FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline_stage_required_field settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.pipeline_stage_required_field FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: app_user settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.app_user FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: app_user_org settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.app_user_org FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.custom_field FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_option settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.custom_field_option FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_section settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.custom_field_section FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_team settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.custom_field_team FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: lookup_value settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.lookup_value FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.org FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_bank_account settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.org_bank_account FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_day_off settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.org_day_off FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_logo settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.org_logo FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_work_hours settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.org_work_hours FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.pipeline FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline_stage settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.pipeline_stage FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline_stage_required_field settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.pipeline_stage_required_field FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: team settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.team FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: team_permission settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.team_permission FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: lookup_value settings_no_system; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_no_system ON public.lookup_value AS RESTRICTIVE FOR INSERT WITH CHECK (((NOT is_system) OR public.crm_is_service()));
+
+
+--
+-- Name: app_user settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.app_user FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: app_user_org settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.app_user_org FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: custom_field settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.custom_field FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: custom_field_option settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.custom_field_option FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: custom_field_section settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.custom_field_section FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: custom_field_team settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.custom_field_team FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: lookup_list settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.lookup_list FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: lookup_value settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.lookup_value FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: org settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.org FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: org_bank_account settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.org_bank_account FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: org_day_off settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.org_day_off FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: org_logo settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.org_logo FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: org_work_hours settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.org_work_hours FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: pipeline settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.pipeline FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: pipeline_stage settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.pipeline_stage FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: pipeline_stage_required_field settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.pipeline_stage_required_field FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: team settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.team FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: team_permission settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.team_permission FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
+-- Name: app_user settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.app_user FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: app_user_org settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.app_user_org FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.custom_field FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_option settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.custom_field_option FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_section settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.custom_field_section FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: custom_field_team settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.custom_field_team FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: lookup_value settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.lookup_value FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.org FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_bank_account settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.org_bank_account FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_day_off settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.org_day_off FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_logo settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.org_logo FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: org_work_hours settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.org_work_hours FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.pipeline FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline_stage settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.pipeline_stage FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: pipeline_stage_required_field settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.pipeline_stage_required_field FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: team settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.team FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: team_permission settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.team_permission FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: team; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.team ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: team_permission; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.team_permission ENABLE ROW LEVEL SECURITY;
 
 --
 -- PostgreSQL database dump complete
@@ -4006,4 +7115,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0002'),
     ('0003'),
     ('0004'),
-    ('0005');
+    ('0005'),
+    ('0006'),
+    ('0007'),
+    ('0008');
