@@ -1,6 +1,6 @@
 # Stav projektu
 
-Aktualizované: 11. 10. 2026
+Aktualizované: 12. 10. 2026
 
 ## Hotové
 
@@ -13,13 +13,15 @@ Aktualizované: 11. 10. 2026
 
 ## Prebieha
 
-- Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nová vzorka (1 340 riadkov) na `dev`; API a frontend podľa dizajnu 01, 08–10 nasadené na https://crm-core.peter-700.workers.dev (11. 10.). Ďalej: Peter prezrie obrazovky a zapíše pripomienky.
+- Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nová vzorka (1 340 riadkov) na `dev`; API a frontend podľa dizajnu 01, 08–10 nasadené na https://crm-core.peter-700.workers.dev (11. 10.). 12. 10.: vetva `dev` zmizla a bola obnovená (nová vetva z `main`, migrácie 0001–0005, rola prototypu, Hyperdrive, vzorka); prototyp znova funguje. Ďalej: Peter prezrie obrazovky a zapíše pripomienky.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
 
 ## Otvorené
 
+- Zistiť v Neon (Monitoring / Operations), kto alebo čo 12. 10. zmazalo vetvu `dev`; ak nie automatická expirácia, preveriť prístupy k projektu
+- Neon free plán: Hyperdrive drží spojenie na `dev` a výpočet sa neuspáva (limit 100 CU-hodín/mesiac) – sledovať Billing / Usage
 - Opakované čísla zmlúv na dealoch (18 vo vzorke) vs. `contract.number` unikátne a 1 deal = 1 zmluva – rozhodnúť pred migráciou
 - Smer zmluvných cien pri veľkoobchodných OOM (pole `typ_oom` prázdne)
 - `customer_v`: B2C zákazník = kontakt bez firmy, ktorý vlastní OOM, deal alebo zmluvu (nie každý kontakt bez firmy)

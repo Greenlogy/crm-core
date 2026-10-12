@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Vytvorí rolu crm_prototype_ro (iba čítanie) na Neon vetve dev a overí ju (modul 2, krok 3).
 # Použitie: ./api/db/create-prototype-role.sh
+#           ./api/db/create-prototype-role.sh --nove-heslo   (rola už existuje: nové heslo a nový riadok v .dev.vars)
 #
 # 1. vygeneruje heslo (nikdy sa nevypisuje, neprechádza argumentmi príkazov),
 # 2. vytvorí rolu a spustí api/db/prototype-role.sql (práva),
 # 3. zapíše DATABASE_URL_DEV_RO do .dev.vars,
 # 4. overí: SELECT prejde, INSERT zlyhá.
-# Iba dev. Ak rola alebo DATABASE_URL_DEV_RO už existuje, skript skončí bez zmeny.
+# Iba dev. Ak rola alebo DATABASE_URL_DEV_RO už existuje, skript skončí bez zmeny (okrem --nove-heslo).
+# .dev.vars nesmie byť počas behu otvorený v editore s neuloženými zmenami – editor by zápis prepísal.
 
 set -euo pipefail
 
@@ -14,8 +16,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VARS_FILE="$ROOT/.dev.vars"
 ROLE="crm_prototype_ro"
 export PATH="/Applications/Postgres.app/Contents/Versions/latest/bin:$PATH"
+RESET=false
+[[ "${1:-}" == "--nove-heslo" ]] && RESET=true
 
-if grep -qE '^DATABASE_URL_DEV_RO=' "$VARS_FILE"; then
+if ! $RESET && grep -qE '^DATABASE_URL_DEV_RO=' "$VARS_FILE"; then
   echo "DATABASE_URL_DEV_RO už v .dev.vars je, nič nemením." >&2
   exit 1
 fi
@@ -55,15 +59,20 @@ PASSWORD="$(node -e '
 (
   eval "$(libpq_env "$DEV_URL")"
   EXISTS="$(psql -X -At -c "SELECT 1 FROM pg_roles WHERE rolname = '$ROLE'")"
+  if $RESET; then
+    [[ "$EXISTS" == "1" ]] || { echo "Rola $ROLE neexistuje – spusti skript bez --nove-heslo." >&2; exit 1; }
+    # Heslo ide cez stdin, nie cez argument.
+    printf "ALTER ROLE %s PASSWORD '%s';\n" "$ROLE" "$PASSWORD" | psql -X -q -v ON_ERROR_STOP=1
+    exit 0
+  fi
   if [[ "$EXISTS" == "1" ]]; then
-    echo "Rola $ROLE už existuje, nič nemením." >&2
+    echo "Rola $ROLE už existuje, nič nemením (nové heslo: --nove-heslo)." >&2
     exit 1
   fi
-  # Heslo ide cez stdin, nie cez argument.
   printf "CREATE ROLE %s LOGIN PASSWORD '%s';\n" "$ROLE" "$PASSWORD" | psql -X -q -v ON_ERROR_STOP=1
   psql -X -q -v ON_ERROR_STOP=1 -f "$ROOT/api/db/prototype-role.sql"
 )
-echo "Rola $ROLE vytvorená, práva nastavené."
+if $RESET; then echo "Rola $ROLE má nové heslo."; else echo "Rola $ROLE vytvorená, práva nastavené."; fi
 
 # --- 3. Zápis do .dev.vars ---
 RO_URL="$(DB_URL="$DEV_URL" RO_USER="$ROLE" RO_PASS="$PASSWORD" node -e '
@@ -72,7 +81,12 @@ RO_URL="$(DB_URL="$DEV_URL" RO_USER="$ROLE" RO_PASS="$PASSWORD" node -e '
   u.password = process.env.RO_PASS;
   process.stdout.write(u.toString());
 ')"
-printf 'DATABASE_URL_DEV_RO=%s\n' "$RO_URL" >>"$VARS_FILE"
+# Starý riadok (ak je) sa nahradí; ostatné riadky ostávajú.
+TMP="$(mktemp)"
+grep -vE '^DATABASE_URL_DEV_RO=' "$VARS_FILE" >"$TMP" || true
+printf 'DATABASE_URL_DEV_RO=%s\n' "$RO_URL" >>"$TMP"
+cat "$TMP" >"$VARS_FILE"
+rm -f "$TMP"
 unset PASSWORD
 echo "DATABASE_URL_DEV_RO zapísané do .dev.vars."
 

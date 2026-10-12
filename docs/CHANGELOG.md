@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-12
+
+- Výpadok prototypu: Neon vetva `dev` zmizla (pravdepodobne automatické zmazanie nastavené pri jej vytvorení; príčinu treba potvrdiť v Neon Operations). `main` nedotknutá (prázdna). Server Neonu pri neexistujúcej vetve hlásil „password authentication failed“.
+- Obnova: nová vetva `dev` z `main` (Peter), migrácie 0001–0005 a testy (36 kontrol) prešli, rola `crm_prototype_ro` znova, Hyperdrive `crm-core-dev` prepojený na novú vetvu, vzorka (1 340 riadkov) nahratá; Worker sa nemenil
+- `api/db/update-hyperdrive.sh` (prepojenie existujúceho Hyperdrive na aktuálne `DATABASE_URL_DEV_RO`); `api/db/create-prototype-role.sh --nove-heslo` (nové heslo existujúcej role, riadok v `.dev.vars` sa nahrádza, nie pripisuje)
+
 ## 2026-10-11
 
 - Frontend prototypu podľa dizajnu modulu Zákazníci (obrazovky 01, 08–10): menu Zákazníci / Leady (s počtom) / Kontakty; zoznam zákazníkov s filtrom stavu a počtami, segmentom, vlastníkom a prepínačom marketingových kontaktov a archívu; Leady; nový zoznam Kontakty; karta firmy so stavom, označeniami, rolami a hlavným kontaktom; nová karta osoby (domácnosť aj kontakt vo firme) s vývojom stavu z `audit_log`; karty domácností na `/osoby/:id` (staré `/domacnosti/:id` presmeruje); stredný a pravý stĺpec karty užšie, aby sa pri 1 440 px nezalamovali
