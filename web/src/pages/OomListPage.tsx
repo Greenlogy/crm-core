@@ -10,6 +10,7 @@ import { date, mwh, num, text } from '../lib/format';
 import { useMe } from '../lib/me';
 import { label, OOM_STATUS, OOM_TYPE } from '../lib/labels';
 import { oomAddress } from './OomPage';
+import { planText } from '../components/oom-actions';
 
 const CHIPS: [string, string, keyof OomList['counts']][] = [
   ['', 'Všetky', 'all'],
@@ -19,6 +20,7 @@ const CHIPS: [string, string, keyof OomList['counts']][] = [
   ['zrusene', 'Zrušené', 'zrusene'],
   ['prepisane', 'Prepísané', 'prepisane'],
   ['zasekol', 'Prechod sa zasekol', 'zasekol'],
+  ['zlyhal', 'Plán zlyhal', 'zlyhal'],
 ];
 
 const TYPES: [string, string][] = [
@@ -192,6 +194,8 @@ export function OomListPage() {
                         <StatusPill map={OOM_STATUS} value={o.status} />
                         {o.transferred_from_name && <span className="sub">prepis od {o.transferred_from_name}</span>}
                         {o.switch_stuck && <Pill tone="warning">prechod sa zasekol</Pill>}
+                        {o.plan_kind && <Pill tone="info">{planText(o.plan_kind, o.plan_date)}</Pill>}
+                        {o.plan_failed && <Pill tone="negative">plán zlyhal</Pill>}
                         {o.active_missing && o.active_missing.length > 0 && (
                           <Pill tone="warning">
                             <span title={`Chýba: ${o.active_missing.join(', ')}`}>chýbajú údaje</span>

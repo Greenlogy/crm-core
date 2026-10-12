@@ -430,7 +430,7 @@ SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003921', '00000000-0000-4000
 SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003922', NULL, '00000000-0000-4000-8000-000000001802',
                      '24ZZS000TEST721K', 'spotreba', 'aktivne');
 
-GRANT SELECT, INSERT, UPDATE ON oom, oom_customer, oom_device, oom_contact, oom_import TO crm_rls_test;
+GRANT SELECT, INSERT, UPDATE ON oom, oom_customer, oom_device, oom_contact, oom_import, oom_planned_change TO crm_rls_test;
 GRANT DELETE ON oom_device, oom_contact TO crm_rls_test;
 GRANT SELECT ON supplier_switch, oom_v, contact_oom_v, org, lookup_value, lookup_list, team_permission,
                 deal_oom, contract_price, offer_item, conversation, deal, deal_contact TO crm_rls_test;
@@ -627,3 +627,156 @@ BEGIN
   RAISE NOTICE 'OK: audit importu a mazania, východiskové práva modulu Odberné miesta';
 END;
 $$;
+
+-- ============================================================================
+-- 0016: plánované zmeny (prepis, odchod, zrušenie k budúcemu dátumu), nočný beh, EIC v histórii
+-- ============================================================================
+
+-- O16. Plán odchodu, blokovanie, zmena dátumu, vykonanie nočným behom (ako vlastník = služba)
+DO $$
+DECLARE
+  f  constant uuid := '00000000-0000-4000-8000-000000004001';
+  n  constant uuid := '00000000-0000-4000-8000-000000004002';
+  p1 constant uuid := '00000000-0000-4000-8000-000000004011';
+  p2 constant uuid := '00000000-0000-4000-8000-000000004012';
+  p3 constant uuid := '00000000-0000-4000-8000-000000004013';
+  p4 constant uuid := '00000000-0000-4000-8000-000000004014';
+  v_plan uuid;
+  r      jsonb;
+BEGIN
+  INSERT INTO company (id, name, ico, is_customer) VALUES (f, 'Plánová s.r.o.', '49494949', true);
+  INSERT INTO contact (id, first_name, last_name, email, is_household) VALUES (n, 'Nora', 'Nová', 'nora.nova@example.test', true);
+  PERFORM pg_temp.t_oom(p1, f, NULL, '24ZZS000TEST730J', 'spotreba', 'aktivne');
+  PERFORM pg_temp.t_oom(p2, f, NULL, '24ZZS000TEST731H', 'spotreba', 'aktivne');
+  PERFORM pg_temp.t_oom(p3, f, NULL, '24ZZS000TEST732F', 'spotreba', 'aktivne');
+  PERFORM pg_temp.t_oom(p4, f, NULL, '24ZZS000TEST733D', 'spotreba', 'aktivne');
+
+  -- odchod k 31. 12. 2027 (posledný deň dodávky): zatiaľ sa nič nemení
+  v_plan := oom_plan_change(p1, 'odchod', '2027-12-31');
+  ASSERT v_plan IS NOT NULL, 'budúci odchod = plán';
+  ASSERT (SELECT status FROM oom WHERE id = p1) = 'aktivne', 'stav sa do termínu nemení';
+  ASSERT (SELECT plan_kind = 'odchod' AND plan_date = '2027-12-31' FROM oom_v WHERE id = p1), 'oom_v: plánovaný odchod';
+
+  -- plán blokuje zmenu stavu a prepis, nie úpravu údajov
+  BEGIN
+    PERFORM oom_set_status(p1, 'zrusene', '2027-01-31');
+    RAISE EXCEPTION 'CHYBA: zrušenie pri aktívnom pláne prešlo';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM oom_transfer(p1, NULL, n, '2027-02-01');
+    RAISE EXCEPTION 'CHYBA: prepis pri aktívnom pláne prešiel';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM oom_plan_change(p1, 'zrusenie', '2027-06-30');
+    RAISE EXCEPTION 'CHYBA: druhý plán prešiel';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE oom SET name = 'Hala s plánom', breaker_a = 32 WHERE id = p1;
+
+  -- zmena dátumu; beh deň pred vykonaním nič, v deň vykonania (deň po poslednom dni dodávky) áno
+  PERFORM oom_plan_reschedule(v_plan, '2027-06-30');
+  r := oom_daily_run_at('2027-06-30');
+  ASSERT (r ->> 'plany_vykonane')::int = 0, format('30. 6. ešte nie: %s', r);
+  r := oom_daily_run_at('2027-07-01');
+  ASSERT (r ->> 'plany_vykonane')::int = 1, format('1. 7. vykonané: %s', r);
+  ASSERT (SELECT status FROM oom WHERE id = p1) = 'odidene', 'OOM Odídené';
+  ASSERT (SELECT valid_to FROM oom_customer WHERE oom_id = p1 AND end_reason = 'odchod') = '2027-06-30', 'posledný deň dodávky 30. 6.';
+  ASSERT (SELECT status FROM oom_planned_change WHERE id = v_plan) = 'vykonana', 'plán vykonaný';
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'oom_planned_change' AND record_id = v_plan
+                  AND source = 'system' AND diff -> 'status' ->> 'new' = 'vykonana'), 'vykonanie v audite ako Systém';
+
+  -- prepis od 1. 3. 2027 (prvý deň nového odberateľa)
+  v_plan := oom_plan_change(p2, 'prepis', '2027-03-01', NULL, n);
+  r := oom_daily_run_at('2027-02-28');
+  ASSERT (SELECT person_id IS NULL FROM oom WHERE id = p2), 'pred termínom ostáva firma';
+  r := oom_daily_run_at('2027-03-01');
+  ASSERT (SELECT person_id FROM oom WHERE id = p2) = n, 'od 1. 3. Nová';
+  ASSERT (SELECT valid_from FROM oom_customer WHERE oom_id = p2 AND person_id = n) = '2027-03-01', 'väzba od 1. 3.';
+
+  -- dátum v minulosti = hneď, bez plánu
+  ASSERT oom_plan_change(p3, 'zrusenie', crm_today() - 1) IS NULL, 'minulý dátum: hneď';
+  ASSERT (SELECT status FROM oom WHERE id = p3) = 'zrusene', 'zrušené hneď';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom_planned_change WHERE oom_id = p3), 'bez plánu';
+
+  -- kontroly zadania
+  BEGIN
+    PERFORM oom_plan_change(p4, 'prepis', '2027-05-01', f, NULL);
+    RAISE EXCEPTION 'CHYBA: prepis na toho istého zákazníka prešiel';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM oom_plan_change(p4, 'odchod', '2020-01-01');
+    RAISE EXCEPTION 'CHYBA: odchod pred začiatkom väzby prešiel';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+
+  -- zlyhaný plán: OOM medzitým odišlo iným spôsobom (tu priamo v databáze) → „zlyhal“, stav bez zmeny
+  v_plan := oom_plan_change(p4, 'prepis', '2027-05-01', NULL, n);
+  UPDATE oom_customer SET valid_to = '2026-12-31', end_reason = 'odchod', status = 'odidene'
+   WHERE oom_id = p4 AND valid_to IS NULL;
+  r := oom_daily_run_at('2027-05-01');
+  ASSERT (r ->> 'plany_zlyhali')::int = 1, format('zlyhal: %s', r);
+  ASSERT (SELECT status = 'zlyhala' AND error LIKE 'Prepísať sa dá iba%' FROM oom_planned_change WHERE id = v_plan), 'dôvod zlyhania';
+  ASSERT (SELECT plan_failed AND plan_kind IS NULL FROM oom_v WHERE id = p4), 'oom_v: plán zlyhal';
+  ASSERT (SELECT person_id IS NULL AND status = 'odidene' FROM oom WHERE id = p4), 'stav bez zmeny';
+  PERFORM oom_plan_cancel(v_plan);
+  ASSERT NOT (SELECT plan_failed FROM oom_v WHERE id = p4), 'zrušený zlyhaný plán sa už neukazuje';
+  RAISE NOTICE 'OK: plán odchodu a prepisu, blokovanie stavu (nie údajov), zmena dátumu, nočný beh, minulý dátum hneď, zlyhaný plán';
+END;
+$$;
+
+SET LOCAL ROLE crm_rls_test;
+
+-- O17. Externý A: plán na svojom OOM, nie prepis na cudzieho; B jeho plán nevidí; EIC v histórii
+DO $$
+DECLARE
+  v_plan uuid;
+  r      record;
+BEGIN
+  PERFORM set_config('app.require_user', 'on', true);
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001002', true);
+  BEGIN
+    PERFORM oom_plan_change('00000000-0000-4000-8000-000000003921', 'prepis', '2027-02-01',
+                            '00000000-0000-4000-8000-000000000101', NULL);
+    RAISE EXCEPTION 'CHYBA: externý naplánoval prepis na cudzieho zákazníka';
+  EXCEPTION WHEN no_data_found THEN NULL;   -- cudzieho zákazníka nevidí: „Nový odberateľ neexistuje“
+  END;
+  BEGIN
+    PERFORM oom_plan_change('00000000-0000-4000-8000-000000000301', 'odchod', '2027-12-31');
+    RAISE EXCEPTION 'CHYBA: externý naplánoval odchod cudzieho OOM';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  v_plan := oom_plan_change('00000000-0000-4000-8000-000000003921', 'odchod', '2027-12-31');
+  ASSERT (SELECT count(*) FROM oom_planned_change) = 1, 'A vidí svoj plán';
+  PERFORM oom_plan_reschedule(v_plan, '2027-11-30');
+  BEGIN
+    PERFORM oom_daily_run_at('2027-12-01');
+    RAISE EXCEPTION 'CHYBA: aplikácia spustila beh k dátumu';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- história po prepise (O13): A vidí EIC OOM, ktoré už patrí B
+  SELECT * INTO r FROM oom_brief('00000000-0000-4000-8000-000000003922');
+  ASSERT r.eic = '24ZZS000TEST721K', 'A: EIC v histórii po prepise';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom_brief('00000000-0000-4000-8000-000000000301')), 'A: cudzie OOM bez väzby nie';
+
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001003', true);
+  ASSERT (SELECT count(*) FROM oom_planned_change) = 0, 'B nevidí plán A';
+  BEGIN
+    PERFORM oom_plan_cancel(v_plan);
+    RAISE EXCEPTION 'CHYBA: B zrušil plán A';
+  EXCEPTION WHEN no_data_found THEN NULL;
+  END;
+
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000001002', true);
+  PERFORM oom_plan_cancel(v_plan);
+  ASSERT (SELECT status FROM oom_planned_change WHERE id = v_plan) = 'zrusena', 'A zrušil svoj plán';
+  PERFORM set_config('app.user_id', '', true);
+  PERFORM set_config('app.require_user', '', true);
+  RAISE NOTICE 'OK: plány a „iba svoje“ (vlastné áno, cudzie nie, beh k dátumu nie), EIC v histórii po prepise';
+END;
+$$;
+
+RESET ROLE;

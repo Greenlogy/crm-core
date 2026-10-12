@@ -229,12 +229,18 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
     // OOM zákazníka zo všetkých väzieb (aj odídené a prepísané) so stavom podľa obdobia väzby.
     // OOM, ktoré už patrí inému zákazníkovi a používateľ ho nevidí (RLS), má prázdne údaje okrem väzby.
     sql`
-      SELECT l.oom_id AS id, l.id AS link_id, o.eic, o.name, o.type, l.status, l.valid_from, l.valid_to, l.end_reason,
-             o.address_street, o.address_city, o.address_zip,
+      SELECT l.oom_id AS id, l.id AS link_id, coalesce(o.eic, b.eic) AS eic, coalesce(o.name, b.name) AS name,
+             coalesce(o.type, b.type) AS type, l.status, l.valid_from, l.valid_to, l.end_reason,
+             o.address_street, coalesce(o.address_city, b.address_city) AS address_city, o.address_zip,
              o.planned_consumption_vt_mwh, o.planned_consumption_nt_mwh, o.planned_feed_in_mwh, o.source_power_kw,
-             o.supply_from, o.supply_to
+             o.supply_from, o.supply_to, o.id IS NOT NULL AS visible,
+             CASE WHEN l.valid_to IS NULL THEN pl.kind END AS plan_kind,
+             CASE WHEN l.valid_to IS NULL THEN pl.effective_date END AS plan_date
         FROM oom_customer l
         LEFT JOIN oom o ON o.id = l.oom_id
+        -- EIC v histórii aj tomu, kto OOM už nevidí (po prepise, „iba svoje“) – 0016
+        LEFT JOIN LATERAL oom_brief(l.oom_id) b ON o.id IS NULL
+        LEFT JOIN oom_planned_change pl ON pl.oom_id = l.oom_id AND pl.status = 'planovana'
        WHERE l.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY l.valid_to IS NULL DESC, array_position(ARRAY['aktivne', 'pripravovane', 'odidene', 'prepisane', 'zrusene'], l.status::text),
                 o.eic, l.valid_from DESC`,

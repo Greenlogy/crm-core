@@ -1506,3 +1506,36 @@ textarea.inp {
 .at-date .input {
   width: auto;
 }
+
+/* --- Odberné miesta: plánované zmeny (F2a) --- */
+
+.plan-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.plan-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+.plan-banner.failed {
+  border-left-color: var(--negative);
+}
+.plan-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.plan-edit .inp {
+  width: auto;
+}

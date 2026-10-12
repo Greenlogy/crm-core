@@ -5,6 +5,7 @@ import type { ContractRow, DealRow, OomRow, StatusChange } from '../lib/api';
 import { date, mwh, period, sumNum } from '../lib/format';
 import { CONTRACT_STATUS, CUSTOMER_STATUS, dealTone, label, OOM_STATUS, OOM_TYPE, showFormer, STATUS_SOURCE } from '../lib/labels';
 import { Card, Empty, Item, Pill, StatusPill } from './ui';
+import { planText } from './oom-actions';
 
 // Stav zákazníka + „bývalý“ (napr. „Ponuka · bývalý“) + archív.
 export function CustomerStatus(props: { status: string | null; former: boolean; archived?: boolean }) {
@@ -54,10 +55,14 @@ export function OomsCard(props: { ooms: OomRow[] }) {
           <Item
             key={o.link_id ?? o.id}
             title={
-              o.eic ? (
+              o.eic && o.visible !== false ? (
                 <Link to={`/oom/${o.id}`} className="mono" style={{ color: 'var(--brand-text)' }}>
                   {o.eic}
                 </Link>
+              ) : o.eic ? (
+                <span className="mono" title="OOM už patrí inému zákazníkovi">
+                  {o.eic}
+                </span>
               ) : (
                 <span className="muted">OOM patrí inému zákazníkovi</span>
               )
@@ -76,7 +81,12 @@ export function OomsCard(props: { ooms: OomRow[] }) {
             ]
               .filter(Boolean)
               .join(' · ')}
-            side={<StatusPill map={OOM_STATUS} value={o.status} />}
+            side={
+              <span className="pills">
+                {o.plan_kind && <Pill tone="info">{planText(o.plan_kind, o.plan_date)}</Pill>}
+                <StatusPill map={OOM_STATUS} value={o.status} />
+              </span>
+            }
           />
         ))
       )}

@@ -4,6 +4,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { OomActions, PLAN_DATE_LABEL, PLAN_KIND, PlanBanner } from '../components/oom-actions';
 import { BackLink, Card, Empty, ErrorState, HubSpotLink, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
 import { date, eurMonth, eurMwh, kw, mwh, num, pct, period, sumNum, text } from '../lib/format';
@@ -44,7 +45,7 @@ export const oomAddress = (o: {
 
 export function OomPage() {
   const { id = '' } = useParams();
-  const { data: o, error } = useApi<OomCard>(`/api/oom/${id}`);
+  const { data: o, error, reload } = useApi<OomCard>(`/api/oom/${id}`);
   const [tab, setTab] = useState<Tab>('prehlad');
 
   if (error) return <ErrorState error={error} />;
@@ -83,7 +84,10 @@ export function OomPage() {
             </div>
           )}
         </div>
+        <OomActions o={o} onChanged={reload} />
       </header>
+
+      <PlanBanner o={o} onChanged={reload} />
 
       <section className="kpis" aria-label="Ukazovatele">
         {o.type === 'vyroba' ? (
@@ -440,6 +444,27 @@ function describe(o: OomCard): Event[] {
       const t = (d.device_type as string) ?? ((d.device_type as unknown as { new?: string })?.new);
       const what = e.action === 'insert' ? 'pridané' : e.action === 'delete' ? 'odobraté' : 'upravené';
       out.push({ key: e.id, icon: '⚙', title: <><b>Zariadenie {what}</b>{t ? ` · ${label(DEVICE_TYPE, t)}` : ''}</>, at: e.changed_at, meta: meta(e) });
+    } else if (e.table_name === 'oom_planned_change') {
+      const kind = (d.kind as string) ?? undefined;
+      const k = kind ?? o.plans.find((p) => p.id === e.record_id)?.kind ?? '';
+      const what = PLAN_KIND[k] ?? 'zmena';
+      if (e.action === 'insert') {
+        const who = typeof d.person_id === 'string' ? names[d.person_id] : typeof d.company_id === 'string' ? names[d.company_id] : null;
+        out.push({
+          key: e.id,
+          icon: '🗓',
+          title: <><b>Plánovaný {what}</b>{who ? ` na ${who}` : ''} · {PLAN_DATE_LABEL[k]?.toLowerCase()} {val(d.effective_date)}</>,
+          at: e.changed_at,
+          meta: meta(e),
+        });
+      } else {
+        const status = change('status')?.new as string | undefined;
+        const moved = change('effective_date');
+        if (moved) out.push({ key: e.id, icon: '🗓', title: <><b>Zmena dátumu plánu</b> ({what}) · {val(moved.old)} → {val(moved.new)}</>, at: e.changed_at, meta: meta(e) });
+        else if (status === 'zrusena') out.push({ key: e.id, icon: '🗓', title: <><b>Plán zrušený</b> ({what})</>, at: e.changed_at, meta: meta(e) });
+        else if (status === 'zlyhala') out.push({ key: e.id, icon: '⚠', title: <><b>Plán zlyhal</b> ({what}) · {String(change('error')?.new ?? '')}</>, at: e.changed_at, meta: meta(e) });
+        // vykonanie: udalosť väzby (prepis, odchod, zrušenie) je už na osi
+      }
     } else if (e.table_name === 'oom_contact') {
       const what = e.action === 'insert' ? 'pridaná' : e.action === 'delete' ? 'odobratá' : 'upravená';
       const who = typeof d.contact_id === 'string' ? names[d.contact_id] : undefined;

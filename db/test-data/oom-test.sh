@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Testovacie dáta modulu Odberné miesta (vymyslené, so znakom „TEST“) – iba Neon vetva dev (Test).
-# Použitie: ./db/test-data/oom-test.sh dev vytvor   10 zákazníkov a 20 OOM (oom-test.sql)
-#           ./db/test-data/oom-test.sh dev zmaz     zmaže ich (oom-test-delete.sql)
+# Použitie: ./db/test-data/oom-test.sh dev vytvor            10 zákazníkov a 20 OOM (oom-test.sql)
+#           ./db/test-data/oom-test.sh dev zmaz              zmaže ich (oom-test-delete.sql)
+#           ./db/test-data/oom-test.sh dev beh 2026-11-01    nočný beh OOM k dátumu (plány + aktivácia)
+#             – na vyskúšanie plánovaných zmien bez čakania do noci; mení všetky OOM na Teste
 # Pripojenie sa číta z .dev.vars (DATABASE_URL_DEV) a nevypisuje sa. Na main sa nespúšťa.
 
 set -euo pipefail
@@ -11,13 +13,15 @@ DIR="$ROOT/db/test-data"
 export PATH="/Applications/Postgres.app/Contents/Versions/latest/bin:$PATH"
 
 usage() {
-  echo "Použitie: ./db/test-data/oom-test.sh dev vytvor|zmaz" >&2
+  echo "Použitie: ./db/test-data/oom-test.sh dev vytvor|zmaz|beh RRRR-MM-DD" >&2
   exit 1
 }
-[[ $# -eq 2 && "$1" == "dev" ]] || usage
+[[ $# -ge 2 && "$1" == "dev" ]] || usage
+RUN_DATE=""
 case "$2" in
-  vytvor) FILE="$DIR/oom-test.sql" ;;
-  zmaz)   FILE="$DIR/oom-test-delete.sql" ;;
+  vytvor) [[ $# -eq 2 ]] || usage; FILE="$DIR/oom-test.sql" ;;
+  zmaz)   [[ $# -eq 2 ]] || usage; FILE="$DIR/oom-test-delete.sql" ;;
+  beh)    [[ $# -eq 3 && "$3" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || usage; RUN_DATE="$3" ;;
   *)      usage ;;
 esac
 
@@ -43,4 +47,9 @@ eval "$(DB_URL="$URL" node -e '
 ')"
 unset URL
 
-psql -X -q -f "$FILE"
+if [[ -n "$RUN_DATE" ]]; then
+  # premenná :'d' sa dosadí iba pri čítaní zo vstupu (nie pri -c)
+  echo "SELECT oom_daily_run_at(:'d'::date) AS vysledok;" | psql -X -q -v ON_ERROR_STOP=1 -v d="$RUN_DATE"
+else
+  psql -X -q -f "$FILE"
+fi

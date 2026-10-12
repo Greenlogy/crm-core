@@ -71,6 +71,9 @@ export type OomRow = {
   valid_from?: string;
   valid_to?: string | null;
   end_reason?: string | null;
+  plan_kind?: string | null;
+  plan_date?: string | null;
+  visible?: boolean;
   address_street: string | null;
   address_city: string | null;
   address_zip: string | null;
@@ -262,7 +265,7 @@ export type OomDevice = {
 
 export type AuditEvent = {
   id: string;
-  table_name: 'oom' | 'oom_customer' | 'oom_device' | 'oom_contact';
+  table_name: 'oom' | 'oom_customer' | 'oom_device' | 'oom_contact' | 'oom_planned_change';
   record_id: string;
   action: 'insert' | 'update' | 'delete';
   diff: Record<string, unknown>;
@@ -270,6 +273,23 @@ export type AuditEvent = {
   source: string;
   user_name: string | null;
   import_file: string | null;
+};
+
+/** Plánovaná zmena OOM (0016): prepis, odchod alebo zrušenie k budúcemu dátumu. */
+export type OomPlan = {
+  id: string;
+  kind: 'prepis' | 'odchod' | 'zrusenie';
+  effective_date: string;
+  status: 'planovana' | 'vykonana' | 'zrusena' | 'zlyhala';
+  error: string | null;
+  company_id: string | null;
+  person_id: string | null;
+  customer_name: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  executed_at: string | null;
+  cancelled_at: string | null;
+  cancelled_by_name: string | null;
 };
 
 /** Karta OOM (api/src/queries/oom.ts): riadok oom + údaje z oom_v + popisy číselníkov + práva. */
@@ -345,6 +365,11 @@ export type OomCard = {
   updated_at: string;
   can_edit: boolean;
   can_edit_active: boolean;
+  plan_kind: OomPlan['kind'] | null;
+  plan_date: string | null;
+  plan_id: string | null;
+  plan_failed: boolean;
+  plans: OomPlan[];
   links: OomLink[];
   devices: OomDevice[];
   contacts: {
@@ -392,13 +417,16 @@ export type OomListItem = {
   active_missing: string[] | null;
   transferred_from_name: string | null;
   transferred_on: string | null;
+  plan_kind: OomPlan['kind'] | null;
+  plan_date: string | null;
+  plan_failed: boolean;
 };
 
 export type OomList = {
   page: number;
   pageSize: number;
   total: number;
-  counts: { all: number; pripravovane: number; aktivne: number; odidene: number; zrusene: number; prepisane: number; zasekol: number };
+  counts: { all: number; pripravovane: number; aktivne: number; odidene: number; zrusene: number; prepisane: number; zasekol: number; zlyhal: number };
   items: OomListItem[];
 };
 

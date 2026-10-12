@@ -1,7 +1,7 @@
 # Modul 2 – Odberné miesta: návrh databázy
 
 Verzia 0.4 · 12. 10. 2026 · **odpovede zapracované** (v0.1 = návrh; v0.2 = Petrove odpovede a uzavreté otázky, časť 11; v0.3 = plán `0014` schválený, časti 3.2, 3.3, 4.4; v0.4 = plán `0015` schválený so zmenou: právo „upravovať Aktívne OOM“ v databáze, časti 7–9).
-Implementácia: `0013_oom_jadro`, `0014_oom_stav_zakaznika` na `dev` (12. 10.); `0015_oom_rls_import` napísaná a overená nanečisto.
+Implementácia: `0013`–`0015` na `dev` (12. 10.); `0016_oom_plany` (plánované zmeny, časť 7a) napísaná a overená nanečisto.
 Vychádza zo zadania `02-odberne-miesta.md` v0.2, zadania `01-zakaznici.md` v0.4 (časti 4 a 14),
 návrhu Nastavení `00-nastavenia-navrh-db.md` v0.2, migrácií `0001`–`0012` a obrazoviek 17–19.
 
@@ -364,6 +364,28 @@ s ním; audit zapíše celý obsah. Inak sa OOM nemaže (stav Zrušené) – odp
 Po `0015` bude chránené OOM, ale externý tím sa stále nedá obsadiť – tak to určuje rozhodnutie 2026-10-12.
 
 ---
+
+## 7a. Plánované zmeny (`0016`, F2a)
+
+Peter 12. 10.: prepis, odchod a zrušenie možno zadať k budúcemu dátumu; vykoná ich nočný beh.
+
+```sql
+oom_planned_change (oom, druh prepis|odchod|zrusenie, effective_date, pri prepise nový zákazník,
+                    status planovana|vykonana|zrusena|zlyhala, error, created_by, executed_at, cancelled_at/by)
+oom_plan_change(oom, druh, dátum, firma, osoba) → id plánu, alebo NULL = vykonané hneď
+oom_plan_reschedule(plán, dátum)   oom_plan_cancel(plán)   -- zrušiť aj zlyhaný („vyriešené“)
+oom_daily_run() → {plany_vykonane, plany_zlyhali, aktivovane}   -- Cron; oom_daily_run_at(dátum) iba testy
+oom_brief(oom) → EIC, názov, obec aj pre toho, kto vidí iba zákazníka väzby (história po prepise)
+```
+
+- **Dátum:** prepis = prvý deň nového odberateľa (vykoná sa v ten deň); odchod a zrušenie = posledný deň
+  dodávky (vykoná sa nasledujúci deň). Ak deň vykonania už nastal, zmena sa urobí hneď.
+- **Aktívny plán** (najviac jeden na OOM) blokuje iba odchod, zrušenie a prepis toho OOM; aktivácia,
+  úprava údajov, zariadení a kontaktov ide ďalej.
+- **Práva:** plán zadá, kto smie OOM upravovať; pri prepise s rozsahom „iba svoje“ iba na vlastného zákazníka.
+- **Zlyhaný plán:** stav sa nezmení, plán má dôvod; v zozname tlačidlo „Plán zlyhal“ a značka pri riadku.
+- **Audit:** zadanie, zmena dátumu a zrušenie s menom; vykonanie „Systém“.
+- `oom_v`: `plan_kind`, `plan_date`, `plan_id`, `plan_failed`.
 
 ## 8. Audit
 
