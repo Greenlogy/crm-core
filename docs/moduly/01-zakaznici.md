@@ -1,6 +1,6 @@
 # Modul 1 – Zákazníci: zadanie
 
-Verzia 0.3 · 11. 10. 2026 · **schválené Petrom** (v0.3 = doplnky po kontrole návrhu migrácie, časť 13).
+Verzia 0.4 · 12. 10. 2026 · **schválené Petrom** (v0.3 = doplnky po kontrole návrhu migrácie, časť 13; v0.4 = stav OOM „Neaktívne“ nahradený stavom „Pripravované“ podľa zadania modulu 2, časť 14).
 Vychádza z odpovedí v `01-zakaznici-otazky.md`. Model v0.3 je iba podklad, platí toto zadanie.
 
 ## 1. Čo modul rieši
@@ -52,9 +52,9 @@ Stav sa **nevyberá ručne, vypočíta sa** z OOM, dealov a zmlúv.
 | Marketingový kontakt | Je v databáze (newsletter, e-book…), ale nemá otvorený deal ani históriu zákazníka | predvolene skrytý |
 | Záujemca | Má otvorený deal bez odoslanej ponuky | áno |
 | Ponuka | Má otvorený deal s odoslanou ponukou | áno |
-| Čakajúci zákazník | Má zmluvu podpísanú, čakajúcu na zaradenie alebo aktívnu s budúcou účinnosťou a nemá aktívne ani neaktívne OOM (nový alebo vracajúci sa zákazník) | áno |
-| Zákazník | Má aspoň jedno OOM Aktívne alebo Neaktívne | áno |
-| Bývalý zákazník | Nemá aktívne ani neaktívne OOM a aspoň jedno OOM je Odídené (asset existuje, ide ku konkurencii) | áno, cieľ kampane na návrat |
+| Čakajúci zákazník | Nemá žiadne Aktívne OOM a má OOM v stave Pripravované alebo zmluvu podpísanú, čakajúcu na zaradenie či aktívnu s budúcou účinnosťou (nový alebo vracajúci sa zákazník) | áno |
+| Zákazník | Má aspoň jedno OOM Aktívne | áno |
+| Bývalý zákazník | Nemá Aktívne ani Pripravované OOM a aspoň jedno jeho OOM je Odídené (asset existuje, ide ku konkurencii) | áno, cieľ kampane na návrat |
 | Zrušený zákazník | Všetky jeho OOM sú Zrušené alebo Prepísané (nemá čo zazmluvniť) | nie, archív |
 
 Poradie pri súbehu: Zákazník > Čakajúci zákazník > Ponuka > Záujemca > Bývalý > Zrušený > Marketingový kontakt.
@@ -131,20 +131,6 @@ Zobrazenie: „Domácnosť“, „Domácnosť · výrobca“, „Firma“, „Fi
 - **Ochrana prístupu v databáze.** Obmedzenie externého obchodníka (čl. 6) platí priamo v databáze (Row Level Security), nie iba v API. Nahrádza skoršie rozhodnutie „externý má rovnaké práva ako interný, RLS sa nerobí“.
 - **Zmena vlastníka** mimo vedenia je povolená iba jednej určenej databázovej role pre synchronizáciu, nie každému spojeniu bez prihláseného používateľa.
 
-## 14. Dokončenie modulu nad Nastaveniami (schválené 12. 10. 2026)
+## 14. Zmena podľa modulu 2 (12. 10. 2026)
 
-Plán (fázy, každá s testovacím scenárom pre Petra; nasadenie na Test robí Peter, commit až po jeho vyskúšaní):
-
-- **F1 – Nová firma, nová osoba, úprava:** spoločnosť, krajina a IČO/OIB, označenia, vlastník; kontrola duplicít (IČO; e-mail a telefón iba upozornenie); úprava podľa práv tímu.
-- **F2 – Firma – osoba, vlastník, marketing, časová os:** pridanie a odobratie osoby vo firme, roly z číselníka, hlavný kontakt; zmena vlastníka (CEO a admin); „nechce marketing“ (dátum a zdroj); poznámka na časovej osi firmy a osoby (autor a čas); „Vývoj stavu“ na karte firmy aj osoby z auditu.
-- **F3 – Vlastné polia** na kartách (po sekciách), v zoznamoch ako stĺpce a filtre.
-- **F4 – Zoznamy a export:** zoznam Zákazníci predvolene bez marketingových kontaktov a archívu (prepínač „zobraziť aj…“); Leady = filter Záujemca + Ponuka; hľadanie podľa názvu, IČO/OIB, e-mailu a telefónu; filter a stĺpec Spoločnosť pre tímy so všetkými spoločnosťami; export do .xlsx s právom „exportovať“ a záznamom exportu.
-
-Rozhodnuté:
-
-1. **FinStat:** v F1 ručné vyplnenie; napojenie podľa IČO neskôr ako samostatný krok, API kľúč iba cez `wrangler secret`.
-2. **Servis** mení e-mail, telefón, mobil, adresu, „nechce marketing“, pridáva a odoberá osobu vo firme a mení jej roly. Nemení názov, IČO, označenia ani vlastníka.
-3. **Mazanie:** admin smie zmazať firmu alebo osobu bez väzieb (deal, odberné miesto, zmluva, osoba vo firme, aktivita); audit zapíše kto, kedy a celý obsah záznamu. Inak iba archív.
-4. **Export:** súbor .xlsx; IČO/OIB, telefóny a EIC ako text (bez straty úvodných núl).
-
-Stav: F1 na Teste, Peter vyskúšal 12. 10. 2026 (scenár 10 krokov vrátane práv Marketing a Servis). F2–F4 na Teste, Peter vyskúšal 12. 10. 2026.
+Stav OOM „Neaktívne“ v HubSpote v skutočnosti znamenal OOM, ktoré čaká na začiatok dodávky. V CRM sa volá **Pripravované** a stav Neaktívne sa ruší. Pravidlá stavov v časti 4 sú upravené: Zákazník = aspoň jedno Aktívne OOM; Čakajúci zákazník = žiadne Aktívne, ale Pripravované OOM alebo podpísaná zmluva s budúcou účinnosťou.

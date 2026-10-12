@@ -16,13 +16,14 @@ Stav k 11. 10. 2026 (večer, doplnené obrazovky modulu Zákazníci). Zdroj: ná
 - Rozloženie: ľavé menu 232 px, obsah s okrajom 24 × 36 px, karty s rohmi 12 px. Každý záznam v zozname na jednom riadku, dlhý text sa skráti.
 - Modul Zákazníci (zadanie `docs/moduly/01-zakaznici.md` v0.2): obrazovky 08–10 a upravená 01. Menu: „Firmy“ sa mení na „Zákazníci“, pribudla položka „Leady“ (= filter Záujemca + Ponuka). Obrazovky 02–07 majú v menu ešte „Firmy“; upravia sa pri svojich moduloch.
 - Modul 0 Nastavenia (zadanie `docs/moduly/00-nastavenia.md` v0.2): obrazovky 11–16. Nastavenia majú vlastné vnútorné menu (Spoločnosť, Používatelia, Tímy a práva, Číselníky, Vlastné polia, Pipelines a stage, Audit); položka Nastavenia je dole v hlavnom menu. Obrazovka Číselníky nie je nakreslená – použije rovnaký vzor ako Vlastné polia (zoznam + panel úpravy). Údaje firmy v hranatých zátvorkách sú zástupné.
+- Modul 2 Odberné miesta (zadanie `docs/moduly/02-odberne-miesta.md` v0.2): obrazovky 17–19. Platia namiesto staršej `02-karta-oom.html`. Karta OOM ukazuje históriu väzieb na zákazníkov s časovým rezom k dátumu a postup prechodu k Greenlogy; import z Excelu ukazuje náhľad (nové / zmena / chyba).
 - Karta firmy: KPI v jednom rade; vľavo údaje a FinStat, v strede časová os, vpravo kontakty, OOM, dealy, zmluvy (rozhodnutie z 10. 10. 2026).
 - Časy SLA sa počítajú v pracovnom čase Po–Pi 7:30–15:30.
 
 | Súbor | Obrazovka |
 | --- | --- |
 | `01-karta-firmy.html` | Karta firmy (zvolený variant B) |
-| `02-karta-oom.html` | Karta odberného miesta |
+| `02-karta-oom.html` | Karta odberného miesta (starší návrh, nahradená 18) |
 | `03-karta-zmluvy.html` | Karta zmluvy |
 | `04-pipeline-dealov.html` | Pipeline dealov (kanban) |
 | `05-editor-ponuky.html` | Editor ponuky |
@@ -37,3 +38,6 @@ Stav k 11. 10. 2026 (večer, doplnené obrazovky modulu Zákazníci). Zdroj: ná
 | `14-nastavenia-vlastne-polia.html` | Nastavenia – Vlastné polia (polia jadra zamknuté) |
 | `15-nastavenia-pipelines.html` | Nastavenia – Pipelines a stage (ukážka) |
 | `16-nastavenia-audit.html` | Nastavenia – Audit |
+| `17-oom-zoznam.html` | Odberné miesta – zoznam (filter stavov, „Prechod sa zasekol“) |
+| `18-oom-karta.html` | Karta OOM (komu patrí v čase, prechod, zariadenia) |
+| `19-oom-import.html` | Import OOM z Excelu – náhľad a kontrola |
