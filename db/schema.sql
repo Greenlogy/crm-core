@@ -365,6 +365,29 @@ CREATE TYPE public.oom_link_end_reason AS ENUM (
 
 
 --
+-- Name: oom_plan_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_plan_kind AS ENUM (
+    'prepis',
+    'odchod',
+    'zrusenie'
+);
+
+
+--
+-- Name: oom_plan_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_plan_status AS ENUM (
+    'planovana',
+    'vykonana',
+    'zrusena',
+    'zlyhala'
+);
+
+
+--
 -- Name: oom_source_category; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -2471,6 +2494,24 @@ COMMENT ON FUNCTION public.oom_active_required_missing(o public.oom) IS 'chýbaj
 
 
 --
+-- Name: oom_brief(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_brief(p_oom_id uuid) RETURNS TABLE(eic text, name text, address_city text, type public.oom_type)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT o.eic, o.name, o.address_city, o.type
+    FROM oom o
+   WHERE o.id = p_oom_id
+     AND (crm_oom_access(o.id, 'view')
+          OR EXISTS (SELECT 1 FROM oom_customer l
+                      WHERE l.oom_id = o.id
+                        AND (crm_company_access(l.company_id, 'view') OR crm_contact_access(l.person_id, 'view'))))
+$$;
+
+
+--
 -- Name: oom_child_active_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2602,6 +2643,42 @@ BEGIN
     PERFORM customer_refresh(OLD.company_id, OLD.person_id);
   END IF;
   RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: oom_daily_run(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_daily_run() RETURNS jsonb
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT oom_daily_run_at(crm_today())
+$$;
+
+
+--
+-- Name: oom_daily_run_at(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_daily_run_at(p_today date) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_id     uuid;
+  v_done   integer := 0;
+  v_failed integer := 0;
+BEGIN
+  FOR v_id IN SELECT id FROM oom_planned_change
+               WHERE status = 'planovana' AND oom_plan_due_on(kind, effective_date) <= p_today
+               ORDER BY effective_date, created_at LOOP
+    IF oom_plan_execute(v_id) THEN v_done := v_done + 1; ELSE v_failed := v_failed + 1; END IF;
+  END LOOP;
+  RETURN jsonb_build_object('plany_vykonane', v_done, 'plany_zlyhali', v_failed,
+                            'aktivovane', oom_activate_due_at(p_today));
 END;
 $$;
 
@@ -2791,6 +2868,214 @@ $$;
 
 
 --
+-- Name: oom_plan_cancel(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_cancel(p_plan_id uuid) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  UPDATE oom_planned_change SET status = 'zrusena', cancelled_at = now(), cancelled_by = crm_active_user_id()
+   WHERE id = p_plan_id AND status IN ('planovana', 'zlyhala');
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Plánovaná zmena neexistuje alebo sa už nedá zrušiť.' USING ERRCODE = 'no_data_found';
+  END IF;
+END;
+$$;
+
+
+--
+-- Name: oom_plan_change(uuid, public.oom_plan_kind, date, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_change(p_oom_id uuid, p_kind public.oom_plan_kind, p_date date, p_company_id uuid DEFAULT NULL::uuid, p_person_id uuid DEFAULT NULL::uuid) RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_link oom_customer;
+  v_org  uuid;
+  v_id   uuid;
+BEGIN
+  IF p_date IS NULL THEN
+    RAISE EXCEPTION 'Chýba dátum.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (p_kind = 'prepis') <> (num_nonnulls(p_company_id, p_person_id) = 1) OR num_nonnulls(p_company_id, p_person_id) > 1 THEN
+    RAISE EXCEPTION 'Pri prepise zadajte práve jedného nového odberateľa (firmu alebo domácnosť); pri odchode a zrušení žiadneho.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT crm_oom_access(p_oom_id, 'edit') THEN
+    RAISE EXCEPTION 'Toto odberné miesto nemôžete meniť.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  PERFORM oom_plan_guard(p_oom_id);
+  SELECT * INTO v_link FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Odberné miesto nemá otvorenú väzbu (je Odídené, Zrušené alebo Prepísané).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF p_kind = 'prepis' THEN
+    IF (v_link.company_id, v_link.person_id) IS NOT DISTINCT FROM (p_company_id, p_person_id) THEN
+      RAISE EXCEPTION 'Nový odberateľ je ten istý zákazník.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_date <= v_link.valid_from THEN
+      RAISE EXCEPTION 'Dátum prepisu musí byť po začiatku väzby (%).', v_link.valid_from USING ERRCODE = 'check_violation';
+    END IF;
+    IF NOT (crm_company_access(p_company_id, 'view') OR crm_contact_access(p_person_id, 'view')) THEN
+      RAISE EXCEPTION 'Nový odberateľ neexistuje.' USING ERRCODE = 'no_data_found';
+    END IF;
+    IF crm_scope('odberne_miesta', 'edit') = 'iba_svoje' AND NOT crm_customer_owned(p_company_id, p_person_id) THEN
+      RAISE EXCEPTION 'Prepísať môžete iba na vlastného zákazníka.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    v_org := coalesce((SELECT org_id FROM company WHERE id = p_company_id), (SELECT org_id FROM contact WHERE id = p_person_id));
+    IF v_org <> v_link.org_id THEN
+      RAISE EXCEPTION 'Nový odberateľ patrí inej spoločnosti skupiny.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF p_date < v_link.valid_from THEN
+    RAISE EXCEPTION 'Posledný deň dodávky nemôže byť pred začiatkom väzby (%).', v_link.valid_from USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF oom_plan_due_on(p_kind, p_date) <= crm_today() THEN
+    CASE p_kind
+      WHEN 'prepis'   THEN PERFORM oom_transfer(p_oom_id, p_company_id, p_person_id, p_date);
+      WHEN 'odchod'   THEN PERFORM oom_set_status(p_oom_id, 'odidene', p_date);
+      WHEN 'zrusenie' THEN PERFORM oom_set_status(p_oom_id, 'zrusene', p_date);
+    END CASE;
+    RETURN NULL;
+  END IF;
+
+  INSERT INTO oom_planned_change (oom_id, org_id, kind, effective_date, company_id, person_id, created_by)
+  VALUES (p_oom_id, v_link.org_id, p_kind, p_date, p_company_id, p_person_id, crm_active_user_id())
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: oom_plan_due_on(public.oom_plan_kind, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_due_on(p_kind public.oom_plan_kind, p_date date) RETURNS date
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN p_kind = 'prepis' THEN p_date ELSE p_date + 1 END
+$$;
+
+
+--
+-- Name: oom_plan_execute(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_execute(p_plan_id uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_plan oom_planned_change;
+  v_prev text := crm_as_system(true);
+  v_ok   boolean := true;
+BEGIN
+  SELECT * INTO v_plan FROM oom_planned_change WHERE id = p_plan_id AND status = 'planovana' FOR UPDATE;
+  IF NOT FOUND THEN
+    PERFORM set_config('app.change_source', v_prev, true);
+    RETURN false;
+  END IF;
+  PERFORM set_config('crm.oom_plan_run', 'on', true);
+  BEGIN
+    CASE v_plan.kind
+      WHEN 'prepis'   THEN PERFORM oom_transfer(v_plan.oom_id, v_plan.company_id, v_plan.person_id, v_plan.effective_date);
+      WHEN 'odchod'   THEN PERFORM oom_set_status(v_plan.oom_id, 'odidene', v_plan.effective_date);
+      WHEN 'zrusenie' THEN PERFORM oom_set_status(v_plan.oom_id, 'zrusene', v_plan.effective_date);
+    END CASE;
+    UPDATE oom_planned_change SET status = 'vykonana', executed_at = now() WHERE id = p_plan_id;
+  EXCEPTION WHEN OTHERS THEN
+    UPDATE oom_planned_change SET status = 'zlyhala', error = SQLERRM, executed_at = now() WHERE id = p_plan_id;
+    v_ok := false;
+  END;
+  PERFORM set_config('crm.oom_plan_run', '', true);
+  PERFORM set_config('app.change_source', v_prev, true);
+  RETURN v_ok;
+END;
+$$;
+
+
+--
+-- Name: oom_plan_guard(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_guard(p_oom_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF coalesce(current_setting('crm.oom_plan_run', true), '') <> 'on'
+     AND EXISTS (SELECT 1 FROM oom_planned_change WHERE oom_id = p_oom_id AND status = 'planovana') THEN
+    RAISE EXCEPTION 'Odberné miesto má plánovanú zmenu. Najprv ju zrušte alebo zmeňte jej dátum.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+END;
+$$;
+
+
+--
+-- Name: oom_plan_reschedule(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_reschedule(p_plan_id uuid, p_date date) RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_plan oom_planned_change;
+  v_from date;
+BEGIN
+  SELECT * INTO v_plan FROM oom_planned_change WHERE id = p_plan_id AND status = 'planovana' FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Plánovaná zmena neexistuje alebo už nie je aktívna.' USING ERRCODE = 'no_data_found';
+  END IF;
+  v_from := (SELECT valid_from FROM oom_customer WHERE oom_id = v_plan.oom_id AND valid_to IS NULL);
+  IF p_date IS NULL OR (v_plan.kind = 'prepis' AND p_date <= v_from) OR (v_plan.kind <> 'prepis' AND p_date < v_from) THEN
+    RAISE EXCEPTION 'Dátum musí byť po začiatku väzby (%).', v_from USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE oom_planned_change SET effective_date = p_date WHERE id = p_plan_id;
+  IF oom_plan_due_on(v_plan.kind, p_date) <= crm_today() THEN
+    -- deň už nastal: zmena hneď, s právami používateľa (ako pri zadaní s dátumom v minulosti)
+    PERFORM set_config('crm.oom_plan_run', 'on', true);
+    CASE v_plan.kind
+      WHEN 'prepis'   THEN PERFORM oom_transfer(v_plan.oom_id, v_plan.company_id, v_plan.person_id, p_date);
+      WHEN 'odchod'   THEN PERFORM oom_set_status(v_plan.oom_id, 'odidene', p_date);
+      WHEN 'zrusenie' THEN PERFORM oom_set_status(v_plan.oom_id, 'zrusene', p_date);
+    END CASE;
+    PERFORM set_config('crm.oom_plan_run', '', true);
+    UPDATE oom_planned_change SET status = 'vykonana', executed_at = now() WHERE id = p_plan_id;
+    RETURN NULL;
+  END IF;
+  RETURN p_plan_id;
+END;
+$$;
+
+
+--
+-- Name: oom_plan_row_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_plan_row_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.oom_id <> OLD.oom_id OR NEW.kind <> OLD.kind
+     OR NEW.company_id IS DISTINCT FROM OLD.company_id OR NEW.person_id IS DISTINCT FROM OLD.person_id THEN
+    RAISE EXCEPTION 'Druh, odberné miesto a odberateľ plánu sa nemenia (zrušte plán a zadajte nový).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.status IN ('vykonana', 'zrusena') THEN
+    RAISE EXCEPTION 'Vykonaný alebo zrušený plán sa nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: oom_reconnect(uuid, uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2834,6 +3119,9 @@ CREATE FUNCTION public.oom_set_status(p_oom_id uuid, p_status public.oom_status,
 DECLARE
   v_link oom_customer;
 BEGIN
+  IF p_status IN ('odidene', 'zrusene') THEN
+    PERFORM oom_plan_guard(p_oom_id);
+  END IF;
   SELECT * INTO v_link FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Odberné miesto nemá otvorenú väzbu (je Odídené, Zrušené alebo Prepísané).'
@@ -2869,6 +3157,7 @@ BEGIN
   IF num_nonnulls(p_company_id, p_person_id) <> 1 THEN
     RAISE EXCEPTION 'oom_transfer: zadaj práve jedno z company_id / person_id';
   END IF;
+  PERFORM oom_plan_guard(p_oom_id);
   SELECT * INTO v_link FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Prepísať sa dá iba Pripravované alebo Aktívne odberné miesto.' USING ERRCODE = 'check_violation';
@@ -4342,6 +4631,56 @@ COMMENT ON TABLE public.oom_import IS 'import OOM z Excelu: kto, kedy, súbor a 
 
 
 --
+-- Name: oom_planned_change; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_planned_change (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    kind public.oom_plan_kind NOT NULL,
+    effective_date date NOT NULL,
+    company_id uuid,
+    person_id uuid,
+    status public.oom_plan_status DEFAULT 'planovana'::public.oom_plan_status NOT NULL,
+    error text,
+    created_by uuid,
+    executed_at timestamp with time zone,
+    cancelled_at timestamp with time zone,
+    cancelled_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oom_plan_customer_check CHECK (
+CASE
+    WHEN (kind = 'prepis'::public.oom_plan_kind) THEN (num_nonnulls(company_id, person_id) = 1)
+    ELSE (num_nonnulls(company_id, person_id) = 0)
+END),
+    CONSTRAINT oom_plan_error_check CHECK ((((status <> 'zlyhala'::public.oom_plan_status) OR (error IS NOT NULL)) AND ((error IS NULL) OR (status = ANY (ARRAY['zlyhala'::public.oom_plan_status, 'zrusena'::public.oom_plan_status])))))
+);
+
+
+--
+-- Name: TABLE oom_planned_change; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_planned_change IS 'plánovaný prepis, odchod alebo zrušenie OOM k budúcemu dátumu; vykoná nočný beh (oom_daily_run)';
+
+
+--
+-- Name: COLUMN oom_planned_change.effective_date; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_planned_change.effective_date IS 'prepis: prvý deň nového odberateľa; odchod a zrušenie: posledný deň dodávky';
+
+
+--
+-- Name: COLUMN oom_planned_change.error; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_planned_change.error IS 'dôvod, prečo sa plán nedal vykonať (status zlyhala)';
+
+
+--
 -- Name: org; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4462,8 +4801,14 @@ CREATE VIEW public.oom_v WITH (security_invoker='true') AS
     (prev.valid_to + 1) AS transferred_on,
     o.custom,
     o.created_at,
-    o.updated_at
-   FROM (((((((public.oom o
+    o.updated_at,
+    pl.kind AS plan_kind,
+    pl.effective_date AS plan_date,
+    pl.id AS plan_id,
+    (EXISTS ( SELECT 1
+           FROM public.oom_planned_change f
+          WHERE ((f.oom_id = o.id) AND (f.status = 'zlyhala'::public.oom_plan_status)))) AS plan_failed
+   FROM ((((((((public.oom o
      JOIN public.org g ON ((g.id = o.org_id)))
      LEFT JOIN public.company c ON ((c.id = o.company_id)))
      LEFT JOIN public.contact p ON ((p.id = o.person_id)))
@@ -4477,7 +4822,8 @@ CREATE VIEW public.oom_v WITH (security_invoker='true') AS
              LEFT JOIN public.contact pp ON ((pp.id = l.person_id)))
           WHERE ((l.oom_id = o.id) AND (l.end_reason = 'prepis'::public.oom_link_end_reason))
           ORDER BY l.valid_to DESC
-         LIMIT 1) prev ON (true));
+         LIMIT 1) prev ON (true))
+     LEFT JOIN public.oom_planned_change pl ON (((pl.oom_id = o.id) AND (pl.status = 'planovana'::public.oom_plan_status))));
 
 
 --
@@ -5433,6 +5779,14 @@ ALTER TABLE ONLY public.oom
 
 
 --
+-- Name: oom_planned_change oom_planned_change_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: org_bank_account org_bank_account_org_id_iban_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6297,6 +6651,20 @@ CREATE INDEX oom_person_id_idx ON public.oom USING btree (person_id);
 
 
 --
+-- Name: oom_planned_change_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_planned_change_due_idx ON public.oom_planned_change USING btree (effective_date) WHERE (status = 'planovana'::public.oom_plan_status);
+
+
+--
+-- Name: oom_planned_change_one_active_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX oom_planned_change_one_active_key ON public.oom_planned_change USING btree (oom_id) WHERE (status = 'planovana'::public.oom_plan_status);
+
+
+--
 -- Name: oom_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6651,6 +7019,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_device F
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_import FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: oom_planned_change trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_planned_change FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -7088,6 +7463,13 @@ CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW
 
 
 --
+-- Name: oom_planned_change trg_row_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_row_guard BEFORE UPDATE ON public.oom_planned_change FOR EACH ROW EXECUTE FUNCTION public.oom_plan_row_guard();
+
+
+--
 -- Name: activity trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -7316,6 +7698,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_customer FOR EACH 
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_device FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: oom_planned_change trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_planned_change FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -8050,6 +8439,54 @@ ALTER TABLE ONLY public.oom
 
 
 --
+-- Name: oom_planned_change oom_planned_change_cancelled_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_cancelled_by_fkey FOREIGN KEY (cancelled_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: oom_planned_change oom_planned_change_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+
+--
+-- Name: oom_planned_change oom_planned_change_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: oom_planned_change oom_planned_change_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id);
+
+
+--
+-- Name: oom_planned_change oom_planned_change_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: oom_planned_change oom_planned_change_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_planned_change
+    ADD CONSTRAINT oom_planned_change_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.contact(id);
+
+
+--
 -- Name: org_bank_account org_bank_account_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8414,6 +8851,19 @@ CREATE POLICY oom_insert ON public.oom_device FOR INSERT WITH CHECK (public.crm_
 
 
 --
+-- Name: oom_planned_change oom_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_insert ON public.oom_planned_change FOR INSERT WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_planned_change; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_planned_change ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: oom oom_select; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -8439,6 +8889,13 @@ CREATE POLICY oom_select ON public.oom_customer FOR SELECT USING ((public.crm_oo
 --
 
 CREATE POLICY oom_select ON public.oom_device FOR SELECT USING (public.crm_oom_access(oom_id, 'view'::text));
+
+
+--
+-- Name: oom_planned_change oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_select ON public.oom_planned_change FOR SELECT USING (public.crm_oom_access(oom_id, 'view'::text));
 
 
 --
@@ -8474,6 +8931,13 @@ CREATE POLICY oom_update ON public.oom_customer FOR UPDATE USING (public.crm_oom
 --
 
 CREATE POLICY oom_update ON public.oom_device FOR UPDATE USING (public.crm_oom_access(oom_id, 'edit'::text)) WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
+
+
+--
+-- Name: oom_planned_change oom_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_update ON public.oom_planned_change FOR UPDATE USING (public.crm_oom_access(oom_id, 'edit'::text)) WITH CHECK (public.crm_oom_access(oom_id, 'edit'::text));
 
 
 --
@@ -9016,4 +9480,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0012'),
     ('0013'),
     ('0014'),
-    ('0015');
+    ('0015'),
+    ('0016');
