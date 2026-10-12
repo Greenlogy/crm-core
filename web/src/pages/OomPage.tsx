@@ -37,7 +37,7 @@ export function OomPage() {
   if (error) return <ErrorState error={error} />;
   if (!o || o.id !== id) return <PageSkeleton />;
 
-  const customerPath = o.company_id ? `/firmy/${o.company_id}` : `/domacnosti/${o.person_id}`;
+  const customerPath = o.company_id ? `/firmy/${o.company_id}` : `/osoby/${o.person_id}`;
   const producer = o.type !== 'spotreba';
   const street = [o.address_street, o.address_number_supisne, o.address_number_orientacne].filter(Boolean).join(' ');
 

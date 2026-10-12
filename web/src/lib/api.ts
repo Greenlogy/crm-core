@@ -9,17 +9,52 @@ export type CustomerListItem = {
   id: string;
   name: string;
   ico: string | null;
-  segment: string | null;
-  hubspot_id: string | null;
+  customer_type: 'B2B' | 'B2C';
+  status: string | null;
+  status_source: string | null;
+  is_former_customer: boolean;
+  is_producer: boolean;
+  segment_label: string;
+  owner_id: string | null;
   owner_name: string | null;
-  oom_count: number;
-  oom_active: number;
-  planned_consumption_mwh: Num;
-  planned_feed_in_mwh: Num;
-  active_contracts: number;
+  active_oom_count: number;
+  annual_mwh: Num;
+  last_activity_at: string | null;
+  archived: boolean;
+  city: string | null;
+  company_count: number;
+  is_statutory: boolean;
+  future_from: string | null;
 };
 
-export type CustomerList = { page: number; pageSize: number; total: number; items: CustomerListItem[] };
+export type CustomerList = {
+  page: number;
+  pageSize: number;
+  total: number;
+  counts: { visible: number; archived: number; all: number; byStatus: Record<string, number> };
+  items: CustomerListItem[];
+};
+
+export type Owner = { id: string; name: string };
+export type MenuCounts = { leads: number; customers: number };
+
+export type ContactListItem = {
+  id: string;
+  name: string;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  is_household: boolean;
+  status: string | null;
+  is_producer: boolean;
+  segment_label: string;
+  marketing_allowed: boolean;
+  marketing_opt_out_at: string | null;
+  companies: { id: string; name: string; roles: string[]; is_main_contact: boolean }[];
+};
+
+export type ContactList = { page: number; pageSize: number; total: number; items: ContactListItem[] };
 
 export type OomRow = {
   id: string;
@@ -89,43 +124,55 @@ export type PriceRow = {
   status: string;
 };
 
-export type CustomerCard = {
-  kind: 'company' | 'person';
+export type StatusChange = { status: string; source: string | null; changed_at: string };
+
+type CardBase = {
   id: string;
   name: string;
   hubspot_id: string | null;
-  segment: string | null;
-  lifecycle_stage: string | null;
   address: string | null;
+  city: string | null;
   owner_name: string | null;
   owner_team: string | null;
-  // firma
-  ico?: string | null;
-  dic?: string | null;
-  ic_dph?: string | null;
-  registry_entry?: string | null;
-  nace?: string | null;
-  statutory?: string | null;
-  bank_account?: string | null;
-  payment_rating?: string | null;
-  debts_note?: string | null;
-  insolvency_note?: string | null;
-  finstat_url?: string | null;
-  // domácnosť
-  title?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  mobile?: string | null;
-  position?: string | null;
-  source?: string | null;
+  status: string | null;
+  status_source: string | null;
+  status_changed_at: string | null;
+  is_former_customer: boolean;
+  is_producer: boolean;
+  segment_label: string;
+  archived: boolean;
   kpi: {
     oom_count: number;
     oom_active: number;
     planned_consumption_mwh: Num;
+    consumption_active: number;
     planned_feed_in_mwh: Num;
     source_power_kw: Num;
+    production_count: number;
     active_contracts: number;
   };
+  ooms: OomRow[];
+  deals: DealRow[];
+  contracts: (ContractRow & { pipeline: string | null })[];
+  history: StatusChange[];
+};
+
+export type CompanyCard = CardBase & {
+  kind: 'company';
+  ico: string | null;
+  dic: string | null;
+  ic_dph: string | null;
+  registry_entry: string | null;
+  nace: string | null;
+  statutory: string | null;
+  bank_account: string | null;
+  payment_rating: string | null;
+  debts_note: string | null;
+  insolvency_note: string | null;
+  finstat_url: string | null;
+  is_customer: boolean;
+  is_partner: boolean;
+  is_supplier: boolean;
   contacts: {
     id: string;
     name: string;
@@ -134,12 +181,37 @@ export type CustomerCard = {
     phone: string | null;
     mobile: string | null;
     position: string | null;
-    is_primary: boolean;
+    is_main_contact: boolean;
+    roles: string[];
+    is_household: boolean;
+    marketing_opt_out_at: string | null;
+    other_companies: number;
   }[];
-  companies: { id: string; name: string; ico: string | null; is_primary: boolean }[];
-  ooms: OomRow[];
-  deals: DealRow[];
-  contracts: ContractRow[];
+};
+
+export type PersonCard = CardBase & {
+  kind: 'person';
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  position: string | null;
+  source: string | null;
+  is_household: boolean;
+  marketing_allowed: boolean;
+  marketing_opt_out_at: string | null;
+  marketing_opt_out_source: string | null;
+  companies: {
+    id: string;
+    name: string;
+    ico: string | null;
+    is_main_contact: boolean;
+    roles: string[];
+    is_customer: boolean;
+    status: string | null;
+    segment_label: string;
+    archived: boolean;
+  }[];
 };
 
 export type OomCard = OomRow & {

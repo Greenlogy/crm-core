@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useApi, type MenuCounts } from '../lib/api';
+import { num } from '../lib/format';
 import { SOURCE_NOTE } from '../lib/labels';
 
 type Theme = 'light' | 'dark';
@@ -23,6 +25,8 @@ const Icon = (props: { d: string }) => (
 );
 
 const ICONS = {
+  company: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1',
+  leads: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
   customers: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   oom: 'M13 2 3 14h9l-1 8 10-12h-9l1-8z',
   deals: 'M3 3h18v4H3zM5 7v14h14V7M9 11h6',
@@ -33,6 +37,8 @@ const ICONS = {
 
 export function Layout() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const { data: counts } = useApi<MenuCounts>('/api/counts');
+  const navClass = ({ isActive }: { isActive: boolean }) => `nav${isActive ? ' active' : ''}`;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -66,9 +72,18 @@ export function Layout() {
         </div>
 
         <div className="group-label t-group-label">Obchod</div>
-        <NavLink to="/zakaznici" className={({ isActive }) => `nav${isActive ? ' active' : ''}`}>
-          <Icon d={ICONS.customers} />
+        <NavLink to="/zakaznici" className={navClass}>
+          <Icon d={ICONS.company} />
           Zákazníci
+        </NavLink>
+        <NavLink to="/leady" className={navClass}>
+          <Icon d={ICONS.leads} />
+          Leady
+          {counts && <span className="nav-count">{num(counts.leads, 0)}</span>}
+        </NavLink>
+        <NavLink to="/kontakty" className={navClass}>
+          <Icon d={ICONS.customers} />
+          Kontakty
         </NavLink>
         {disabled('Odberné miesta', ICONS.oom)}
         {disabled('Dealy', ICONS.deals)}

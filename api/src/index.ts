@@ -3,11 +3,13 @@
 
 import { Hono } from 'hono';
 import { connect, type Env, type Sql } from './db';
+import { listContacts, ROLE_FILTERS } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
   customerCard,
   listCustomers,
   listOwners,
+  menuCounts,
   SEGMENT_FILTERS,
   STATUS_FILTERS,
   type CustomerKind,
@@ -60,6 +62,16 @@ app.get('/customers', async (c) => {
 });
 
 app.get('/owners', async (c) => c.json(await listOwners(c.var.sql)));
+app.get('/counts', async (c) => c.json(await menuCounts(c.var.sql)));
+
+// Kontakty: q (meno, e-mail, telefón), role (rola vo firme), page.
+app.get('/contacts', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const role = c.req.query('role') ?? '';
+  const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
+  if (!ROLE_FILTERS.has(role)) return c.json({ error: 'Neplatná rola.' }, 400);
+  return c.json(await listContacts(c.var.sql, { q, role, page }));
+});
 
 const card = (kind: CustomerKind) =>
   app.get(`/${kind === 'company' ? 'companies' : 'persons'}/:id`, async (c) => {

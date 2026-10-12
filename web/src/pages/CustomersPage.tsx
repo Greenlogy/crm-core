@@ -1,32 +1,54 @@
-// Zoznam zákazníkov: hľadanie podľa názvu a IČO, filter segmentu, stránkovanie po 50.
+// Zoznam zákazníkov podľa docs/dizajn/obrazovky/08-zoznam-zakaznikov.html (modul Zákazníci, čl. 9):
+// firmy a domácnosti, filter stavu s počtami, segment, vlastník; predvolene bez marketingových kontaktov a archívu.
+// Položka menu „Leady“ = tento zoznam s filtrom Záujemca + Ponuka.
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { CustomerStatus } from '../components/customer';
 import { Avatar, Card, ErrorState, Skeleton, Source } from '../components/ui';
-import { useApi, type CustomerList, type CustomerListItem } from '../lib/api';
-import { mwh, num, text } from '../lib/format';
-import { label, SEGMENT } from '../lib/labels';
+import { useApi, type CustomerList, type CustomerListItem, type Owner } from '../lib/api';
+import { date, mwh, num, text } from '../lib/format';
+import { CUSTOMER_STATUS } from '../lib/labels';
+
+const STATUS_CHIPS = ['zaujemca', 'ponuka', 'cakajuci_zakaznik', 'zakaznik', 'byvaly_zakaznik'];
+const HIDDEN_CHIPS = ['marketingovy_kontakt', 'zruseny_zakaznik'];
 
 const SEGMENTS: [string, string][] = [
-  ['', 'Všetci'],
-  ['firma', 'Firmy'],
-  ['domacnost', 'Domácnosti'],
-  ['dodavatel', 'Dodávatelia'],
+  ['', 'Segment: všetky'],
+  ['firma', 'Firma'],
+  ['domacnost', 'Domácnosť'],
+  ['vyrobca', 'Výrobca'],
 ];
 
 export const customerPath = (c: Pick<CustomerListItem, 'kind' | 'id'>) =>
-  c.kind === 'company' ? `/firmy/${c.id}` : `/domacnosti/${c.id}`;
+  c.kind === 'company' ? `/firmy/${c.id}` : `/osoby/${c.id}`;
 
-export function CustomersPage() {
+// IČO po trojiciach ako v dizajne: 36 412 578
+const icoText = (ico: string) => ico.replace(/^(\d{2})(\d{3})(\d{3})$/, '$1 $2 $3');
+
+function subLine(c: CustomerListItem) {
+  if (c.kind === 'company') return [c.ico && `IČO ${icoText(c.ico)}`, c.city].filter(Boolean).join(' · ');
+  const extra = c.is_statutory
+    ? 'aj štatutár firmy'
+    : c.company_count > 0
+      ? `aj kontakt v ${c.company_count} ${c.company_count === 1 ? 'firme' : 'firmách'}`
+      : null;
+  return ['domácnosť', c.city, extra].filter(Boolean).join(' · ');
+}
+
+export function CustomersPage(props: { leads?: boolean }) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const q = params.get('q') ?? '';
+  const chip = props.leads ? 'leady' : (params.get('stav') ?? '');
   const segment = params.get('segment') ?? '';
+  const owner = params.get('obchodnik') ?? '';
+  const showAll = params.get('vsetko') === '1';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
 
   const update = (next: Record<string, string>) => {
-    const merged = { q, segment, page: String(page), ...next };
+    const merged = { q, stav: props.leads ? '' : chip, segment, obchodnik: owner, vsetko: showAll ? '1' : '', page: String(page), ...next };
     const clean = Object.fromEntries(Object.entries(merged).filter(([k, v]) => v && !(k === 'page' && v === '1')));
     setParams(clean, { replace: true });
   };
@@ -38,41 +60,93 @@ export function CustomersPage() {
     return () => clearTimeout(t);
   }, [input]);
 
-  const query = new URLSearchParams({ q, segment, page: String(page) });
+  const status = chip === '' ? (showAll ? 'vsetky' : '') : chip;
+  const query = new URLSearchParams({ q, status, segment, owner, page: String(page) });
   const { data, error, loading } = useApi<CustomerList>(`/api/customers?${query}`);
+  const { data: owners } = useApi<Owner[]>('/api/owners');
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const counts = data?.counts;
+
+  const chipButton = (value: string, name: string, count: number | undefined) => (
+    <button key={value || 'all'} className="chip" type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
+      {name} <span className="cc">{count === undefined ? '' : num(count, 0)}</span>
+    </button>
+  );
 
   return (
     <>
       <header className="page-head">
         <div>
-          <h1 className="t-page-title">Zákazníci</h1>
+          <h1 className="t-page-title">{props.leads ? 'Leady' : 'Zákazníci'}</h1>
           <div className="page-sub">
-            <span>Firmy a domácnosti, ktoré vlastnia OOM, deal alebo zmluvu</span>
+            <span>
+              {props.leads
+                ? 'záujemcovia a firmy či domácnosti s odoslanou ponukou'
+                : `${counts ? num(counts.visible, 0) : '…'} · firmy a domácnosti`}
+            </span>
             <Source />
           </div>
+        </div>
+        <div className="head-actions">
+          <button className="btn" type="button" disabled title="V prototype nie je">
+            Export
+          </button>
+          <button className="btn primary" type="button" disabled title="V prototype nie je">
+            Nový zákazník
+          </button>
         </div>
       </header>
 
       <Card flush label="Zoznam zákazníkov">
         <div className="toolbar">
           <input
-            className="input"
+            className="input grow"
             type="search"
-            placeholder="Hľadať podľa názvu alebo IČO"
-            aria-label="Hľadať podľa názvu alebo IČO"
+            placeholder="Názov, IČO alebo e-mail…"
+            aria-label="Hľadať zákazníka"
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
-          <div className="segmented" role="group" aria-label="Segment">
+          <select className="input select" aria-label="Segment" value={segment} onChange={(e) => update({ segment: e.target.value, page: '1' })}>
             {SEGMENTS.map(([value, name]) => (
-              <button key={value} type="button" aria-pressed={segment === value} onClick={() => update({ segment: value, page: '1' })}>
+              <option key={value} value={value}>
                 {name}
-              </button>
+              </option>
             ))}
-          </div>
-          {data && <span className="caption">{num(data.total, 0)} zákazníkov</span>}
+          </select>
+          <select className="input select" aria-label="Vlastník" value={owner} onChange={(e) => update({ obchodnik: e.target.value, page: '1' })}>
+            <option value="">Vlastník: všetci</option>
+            {owners?.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
         </div>
+
+        {!props.leads && (
+          <div className="toolbar chips-bar">
+            <div className="chips" role="group" aria-label="Filter podľa stavu">
+              {chipButton('', 'Všetci', counts ? (showAll ? counts.all : counts.visible) : undefined)}
+              {STATUS_CHIPS.map((s) => chipButton(s, CUSTOMER_STATUS[s].label, counts?.byStatus[s]))}
+              {showAll &&
+                HIDDEN_CHIPS.map((s) =>
+                  chipButton(s, s === 'zruseny_zakaznik' ? 'Archív' : CUSTOMER_STATUS[s].label, s === 'zruseny_zakaznik' ? counts?.archived : counts?.byStatus[s]),
+                )}
+            </div>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) =>
+                  update({ vsetko: e.target.checked ? '1' : '', stav: !e.target.checked && HIDDEN_CHIPS.includes(chip) ? '' : chip, page: '1' })
+                }
+              />
+              Zobraziť aj marketingové kontakty{counts ? ` (${num(counts.byStatus.marketingovy_kontakt, 0)})` : ''} a archív
+              {counts ? ` (${num(counts.archived, 0)})` : ''}
+            </label>
+          </div>
+        )}
 
         {error ? (
           <div style={{ padding: '0 16px 16px' }}>
@@ -87,23 +161,25 @@ export function CustomersPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Zákazník</th>
-                  <th>Typ</th>
-                  <th>IČO</th>
-                  <th>Segment</th>
-                  <th>Obchodník</th>
-                  <th className="num">OOM</th>
-                  <th className="num">Aktívne OOM</th>
-                  <th className="num">Aktívne zmluvy</th>
-                  <th className="num">Spotreba MWh/rok</th>
-                  <th className="num">Výkup MWh/rok</th>
+                  <th scope="col">Názov</th>
+                  <th scope="col">Typ</th>
+                  <th scope="col">Segment</th>
+                  <th scope="col">Stav</th>
+                  <th scope="col" className="num">
+                    Aktívne OOM
+                  </th>
+                  <th scope="col" className="num">
+                    Ročný objem
+                  </th>
+                  <th scope="col">Vlastník</th>
+                  <th scope="col">Posledná aktivita</th>
                 </tr>
               </thead>
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="muted">
-                      Žiadny zákazník nezodpovedá hľadaniu.
+                    <td colSpan={8} className="muted">
+                      Žiadny zákazník nezodpovedá filtru.
                     </td>
                   </tr>
                 )}
@@ -117,21 +193,28 @@ export function CustomersPage() {
                           e.preventDefault();
                           navigate(customerPath(c));
                         }}
-                        style={{ color: 'inherit' }}
                       >
-                        <Avatar name={c.name} small />
-                        <span title={c.name}>{c.name}</span>
+                        <Avatar name={c.name} small household={c.kind === 'person'} />
+                        <span style={{ minWidth: 0 }}>
+                          <span className="name-link" title={c.name}>
+                            {c.name}
+                          </span>
+                          <div className="sub">{subLine(c)}</div>
+                        </span>
                       </a>
                     </td>
-                    <td>{c.kind === 'company' ? 'Firma' : 'Domácnosť'}</td>
-                    <td className="mono">{text(c.ico)}</td>
-                    <td>{text(label(SEGMENT, c.segment))}</td>
+                    <td className="muted">{c.customer_type}</td>
+                    <td>{c.segment_label}</td>
+                    <td>
+                      <span className="pills">
+                        <CustomerStatus status={c.status} former={c.is_former_customer} archived={c.archived} />
+                        {c.status === 'cakajuci_zakaznik' && c.future_from && <span className="sub">od {date(c.future_from)}</span>}
+                      </span>
+                    </td>
+                    <td className="num">{num(c.active_oom_count, 0)}</td>
+                    <td className={`num${Number(c.annual_mwh) ? '' : ' muted'}`}>{Number(c.annual_mwh) ? mwh(c.annual_mwh) : '–'}</td>
                     <td>{text(c.owner_name)}</td>
-                    <td className="num">{num(c.oom_count, 0)}</td>
-                    <td className="num">{num(c.oom_active, 0)}</td>
-                    <td className="num">{num(c.active_contracts, 0)}</td>
-                    <td className="num">{mwh(c.planned_consumption_mwh).replace(' MWh', '')}</td>
-                    <td className="num">{mwh(c.planned_feed_in_mwh).replace(' MWh', '')}</td>
+                    <td className="muted">{c.last_activity_at ? date(c.last_activity_at) : '–'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -139,17 +222,23 @@ export function CustomersPage() {
           </div>
         )}
 
-        {data && pages > 1 && (
+        {data && (
           <div className="pager">
-            <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
-              ← Predchádzajúca
-            </button>
             <span className="caption">
-              Strana {page} z {pages}
+              {data.total === 0
+                ? '0'
+                : `${num((page - 1) * data.pageSize + 1, 0)}–${num(Math.min(page * data.pageSize, data.total), 0)} z ${num(data.total, 0)}`}
             </span>
-            <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
-              Ďalšia →
-            </button>
+            {pages > 1 && (
+              <>
+                <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
+                  ← Predchádzajúca
+                </button>
+                <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
+                  Ďalšia →
+                </button>
+              </>
+            )}
           </div>
         )}
       </Card>

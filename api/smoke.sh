@@ -42,6 +42,9 @@ echo "obchodníci:  $(call owners /api/owners) $(pick owners 'd.length') s aspo�
 OWNER="$(pick owners 'd[0]?.id')"
 echo "obchodník:   $(call customers-owner "/api/customers?owner=$OWNER") total $(pick customers-owner 'd.total')"
 echo "zlý stav:    $(call bad-status '/api/customers?status=xyz') (čakám 400)"
+echo "menu:        $(call counts /api/counts) leady $(pick counts 'd.leads'), zákazníci $(pick counts 'd.customers')"
+echo "kontakty:    $(call contacts /api/contacts) total $(pick contacts 'd.total')"
+echo "zlá rola:    $(call bad-role '/api/contacts?role=xyz') (čakám 400)"
 
 COMPANY="$(pick customers 'd.items.find(i => i.kind === "company" && i.active_oom_count > 1)?.id')"
 PERSON="$(pick customers 'd.items.find(i => i.kind === "person")?.id')"

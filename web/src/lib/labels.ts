@@ -48,6 +48,35 @@ export const PAYMENT_RATING: Record<string, string> = {
 // Polia z FinStatu v HubSpote nesú text „true“/„false“.
 export const yesNo = (v: string | null | undefined) => (v === 'true' ? 'Áno' : v === 'false' ? 'Nie' : v ?? null);
 
+// Stav zákazníka (zadanie Zákazníci čl. 4); počíta sa, nevyberá sa ručne.
+export const CUSTOMER_STATUS: Record<string, { label: string; tone: Tone; live?: boolean }> = {
+  marketingovy_kontakt: { label: 'Marketingový kontakt', tone: 'neutral' },
+  zaujemca: { label: 'Záujemca', tone: 'neutral', live: true },
+  ponuka: { label: 'Ponuka', tone: 'warning', live: true },
+  cakajuci_zakaznik: { label: 'Čakajúci zákazník', tone: 'info', live: true },
+  zakaznik: { label: 'Zákazník', tone: 'positive', live: true },
+  byvaly_zakaznik: { label: 'Bývalý zákazník', tone: 'negative' },
+  zruseny_zakaznik: { label: 'Zrušený zákazník', tone: 'neutral' },
+};
+// Príznak „bývalý“ sa ukazuje iba pri stavoch, kde nie je zrejmý zo samotného stavu (čl. 12, 13).
+export const showFormer = (status: string | null | undefined, former: boolean) =>
+  former && (status === 'zaujemca' || status === 'ponuka' || status === 'cakajuci_zakaznik');
+
+export const STATUS_SOURCE: Record<string, string> = {
+  hubspot: 'východisková hodnota z HubSpotu',
+  vypocet: 'vypočítané v CRM',
+};
+
+export const COMPANY_ROLE: Record<string, string> = {
+  statutar: 'štatutár',
+  decision_maker: 'decision maker',
+  kontaktna_osoba: 'kontaktná osoba',
+  fakturacia: 'fakturácia',
+  technik: 'technik',
+};
+export const rolesText = (roles: string[] | null | undefined) =>
+  roles && roles.length ? roles.map((r) => COMPANY_ROLE[r] ?? r).join(', ') : null;
+
 export const SEGMENT: Record<string, string> = { domacnost: 'Domácnosť', firma: 'Firma', dodavatel: 'Dodávateľ' };
 export const DIRECTION: Record<string, string> = { odber: 'Odber', dodavka: 'Dodávka' };
 

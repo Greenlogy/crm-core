@@ -81,9 +81,10 @@ export const Empty = (props: { children: ReactNode }) => <div className="empty">
 
 export const NotInPrototype = (props: { what: string }) => <Empty>V prototype nie je – {props.what}</Empty>;
 
-export function Avatar(props: { name: string; small?: boolean }) {
+// Firma sivá, domácnosť zelená (dizajn 08); veľký avatar v hlavičke karty ostáva zelený.
+export function Avatar(props: { name: string; small?: boolean; household?: boolean }) {
   return (
-    <span className={`avatar${props.small ? ' sm' : ''}`} aria-hidden="true">
+    <span className={`avatar${props.small ? ' sm' : ''}${props.small && !props.household ? ' neutral' : ''}`} aria-hidden="true">
       {initials(props.name)}
     </span>
   );

@@ -26,7 +26,7 @@ export function ContractPage() {
   if (error) return <ErrorState error={error} />;
   if (!k || k.id !== id) return <PageSkeleton />;
 
-  const customerPath = k.company_id ? `/firmy/${k.company_id}` : `/domacnosti/${k.person_id}`;
+  const customerPath = k.company_id ? `/firmy/${k.company_id}` : `/osoby/${k.person_id}`;
   const consumption = sumNum(...k.ooms.flatMap((o) => [o.planned_consumption_vt_mwh, o.planned_consumption_nt_mwh]));
   const feedIn = sumNum(...k.ooms.map((o) => o.planned_feed_in_mwh));
   const validPrices = k.prices.filter((p) => p.status === 'platna').length;

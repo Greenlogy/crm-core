@@ -2,6 +2,9 @@
 
 ## 2026-10-11
 
+- Frontend prototypu podľa dizajnu modulu Zákazníci (obrazovky 01, 08–10): menu Zákazníci / Leady (s počtom) / Kontakty; zoznam zákazníkov s filtrom stavu a počtami, segmentom, vlastníkom a prepínačom marketingových kontaktov a archívu; Leady; nový zoznam Kontakty; karta firmy so stavom, označeniami, rolami a hlavným kontaktom; nová karta osoby (domácnosť aj kontakt vo firme) s vývojom stavu z `audit_log`; karty domácností na `/osoby/:id` (staré `/domacnosti/:id` presmeruje); stredný a pravý stĺpec karty užšie, aby sa pri 1 440 px nezalamovali
+- API: `GET /api/contacts` (hľadanie podľa mena, e-mailu, začiatku telefónu), `GET /api/counts`, v zozname počty podľa stavov, mesto a väzby domácnosti na firmy, na kartách vývoj stavu a ďalšie firmy kontaktu
+- Nasadený Worker `crm-core` (verzia `dd5f4185`), Access overený (bez prihlásenia 302)
 - Modul Zákazníci (zadanie v0.3): migrácie `0004_zakaznici.sql` (príznaky firmy, povinné IČO a údaje osoby, `is_household`, stav a jeho výpočet, „nechce marketing“, roly a hlavný kontakt, normalizovaný telefón, ochrana vlastníka, nové `customer_v` a `contact_v`) a `0005_rls_zakaznici.sql` (RLS pre externého obchodníka, kontrola duplicít IČO a osoby) – spustené na Neon `dev` po zmazaní vzorky prototypu, testy prešli (36 kontrol)
 - Testy: `db/test/seed.sql` a `checks.sql` upravené na novú schému, nové `db/test/checks_zakaznici.sql` (22 kontrol vrátane RLS s dočasnou rolou; pridelenie roly kvôli PostgreSQL 16+ bez superusera), `run.sh` ich spúšťa
 - `integrations/hubspot-sync/sample/load.ts` na schému 0004: firma bez IČO a osoba bez mena alebo kontaktu sa nenahrá; označenia firmy zo segmentu HubSpotu (dodávateľ s OOM alebo dealom je aj zákazník); `is_household`; hlavný kontakt iba pri jedinom kontakte firmy; výrobca (OOM výroba alebo pipeline B2B výkup); východiskový stav cez `customer_status_calc` (zdroj `hubspot`); na konci vygeneruje zmazanie cez `delete.ts`

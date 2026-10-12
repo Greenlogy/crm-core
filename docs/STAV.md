@@ -13,7 +13,7 @@ Aktualizované: 11. 10. 2026
 
 ## Prebieha
 
-- Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nasadený prototyp na workers.dev beží so starým kódom a nefunguje – nová vzorka (1 340 riadkov) nahratá na `dev`; API upravené a overené lokálne (`smoke.sh`); ďalej frontend, potom nasadenie Workera.
+- Modul Zákazníci (`docs/moduly/01-zakaznici.md` v0.3): vzorka prototypu zmazaná z `dev` (1 386 riadkov + 2 772 audit + sync_run), migrácie `0004` a `0005` spustené na `dev` (Peter, 11. 10.), testy `db/test/run.sh` prešli (36 kontrol). Na `main` zatiaľ nie. Nová vzorka (1 340 riadkov) na `dev`; API a frontend podľa dizajnu 01, 08–10 nasadené na https://crm-core.peter-700.workers.dev (11. 10.). Ďalej: Peter prezrie obrazovky a zapíše pripomienky.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
