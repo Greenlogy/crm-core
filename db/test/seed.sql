@@ -24,19 +24,44 @@ INSERT INTO company_contact (company_id, contact_id, is_main_contact, roles) VAL
   ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000202', true,  '{statutar,decision_maker}'),
   ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000202', false, '{kontaktna_osoba}');
 
--- OOM všetkých typov
-INSERT INTO oom (id, company_id, person_id, eic, type, status, segment, name,
+-- Pomocná funkcia testov: OOM s povinnými údajmi pre Aktívne. Odídené a Zrušené = Aktívne + uzavretie väzby k p_to.
+CREATE FUNCTION pg_temp.t_oom(p_id uuid, p_company uuid, p_person uuid, p_eic text, p_type oom_type,
+                              p_status oom_status, p_from date DEFAULT '2025-01-01', p_to date DEFAULT '2025-12-31')
+RETURNS uuid LANGUAGE plpgsql AS $f$
+DECLARE
+  v_id uuid := coalesce(p_id, gen_random_uuid());
+BEGIN
+  INSERT INTO oom (id, company_id, person_id, eic, type, status, name, address_city, address_zip,
+                   pds, pds_tariff, voltage_level, supply_from, planned_consumption_vt_mwh, planned_feed_in_mwh)
+  VALUES (v_id, p_company, p_person, p_eic, p_type,
+          CASE WHEN p_status = 'pripravovane' THEN 'pripravovane' ELSE 'aktivne' END::oom_status,
+          'Test', 'Bytča', '01401', 'zsd', 'zsd_d2', 'nn', p_from,
+          CASE WHEN p_type <> 'vyroba' THEN 10 END, CASE WHEN p_type = 'vyroba' THEN 5 END);
+  IF p_status IN ('odidene', 'zrusene') THEN
+    PERFORM oom_set_status(v_id, p_status, p_to);
+  END IF;
+  RETURN v_id;
+END;
+$f$;
+
+-- OOM všetkých typov (Alfa: aktívne, pripravované zdieľanie, zrušené; Testovací: výroba)
+INSERT INTO oom (id, company_id, person_id, eic, type, status, name, address_city, address_zip,
+                 pds, pds_tariff, voltage_level, supply_from,
                  planned_consumption_vt_mwh, planned_consumption_nt_mwh, planned_feed_in_mwh,
-                 source_power_kw, source_kind, source_type) VALUES
+                 source_power_kw, source_kind, source_category) VALUES
   ('00000000-0000-4000-8000-000000000301', '00000000-0000-4000-8000-000000000101', NULL,
-   '24ZZS0000TEST001', 'spotreba', 'aktivne', 'firma', 'Alfa – sklad', 120.000, 30.000, NULL, NULL, NULL, NULL),
+   '24ZZS000TEST001H', 'spotreba', 'aktivne', 'Alfa – sklad', 'Bytča', '01401', 'zsd', 'zsd_d2', 'nn', '2025-01-01',
+   120.000, 30.000, NULL, NULL, NULL, NULL),
   ('00000000-0000-4000-8000-000000000302', NULL, '00000000-0000-4000-8000-000000000201',
-   '24ZZS0000TEST002', 'vyroba', 'aktivne', 'domacnost', 'Testovací – FVE strecha', NULL, NULL, 8.500,
-   10.000, 'fve', 'virtualna_bateria'),
+   '24ZZS000TEST002F', 'vyroba', 'aktivne', 'Testovací – FVE strecha', 'Bytča', '01401', 'zsd', 'zsd_d2', 'nn', '2025-01-01',
+   NULL, NULL, 8.500, 10.000, 'fve', 'lokalny_zdroj'),
   ('00000000-0000-4000-8000-000000000303', '00000000-0000-4000-8000-000000000101', NULL,
-   '24ZZS0000TEST003', 'sharing', 'neaktivne', 'firma', 'Alfa – zdieľanie', 15.000, NULL, 5.000, NULL, NULL, NULL),
+   '24ZZS000TEST003D', 'sharing', 'pripravovane', 'Alfa – zdieľanie', NULL, NULL, NULL, NULL, NULL, NULL,
+   15.000, NULL, 5.000, NULL, NULL, NULL),
   ('00000000-0000-4000-8000-000000000304', '00000000-0000-4000-8000-000000000101', NULL,
-   '24ZZS0000TEST004', 'velkoobchod', 'zrusene', 'firma', 'Alfa – veľkoobchod', 900.000, NULL, NULL, NULL, NULL, NULL);
+   '24ZZS000TEST004B', 'spotreba', 'aktivne', 'Alfa – zbúraná hala', 'Bytča', '01401', 'zsd', 'zsd_d2', 'nn', '2024-01-01',
+   900.000, NULL, NULL, NULL, NULL, NULL);
+SELECT oom_set_status('00000000-0000-4000-8000-000000000304', 'zrusene', '2025-06-30');
 
 -- Produkty
 INSERT INTO product (id, code, name, kind, pricing_model, unit, list_price) VALUES

@@ -1,6 +1,6 @@
 # Stav projektu
 
-Aktualizované: 12. 10. 2026 (večer)
+Aktualizované: 12. 10. 2026 (neskoro večer)
 
 ## Hotové
 
@@ -15,12 +15,15 @@ Aktualizované: 12. 10. 2026 (večer)
 
 - Modul 0 Nastavenia: návrh databázy schválený (v0.2). Test (`dev`) vyprázdnený, rola `crm_prototype_ro` zrušená, migrácie `0006_nastavenia_jadro`, `0007_nastavenia_obsah`, `0008_zakaznici_spolocnost` spustené na `dev` (Peter, 12. 10.), testy `db/test/run.sh` prešli (88 kontrol). Na Teste: 3 spoločnosti, 6 tímov, admini Peter a Eva, kalendár SK 2026–2028, žiadne dáta zákazníkov. Na `main` zatiaľ nie. Prototyp (Worker `crm-core`) po zrušení roly nefunguje – nahradí ho nové API.
 - **Modul 1 Zákazníci uzavretý** (Peter, 12. 10. 2026): F1–F4 na Teste (commity `7b40c4c`, `527992a`), zadanie v0.4 s časťou 15. Na `main` (Ostré) zatiaľ nie.
+- **Modul 2 Odberné miesta – databáza:** návrh v0.2 (`docs/moduly/02-odberne-miesta-navrh-db.md`), migrácia `0013_oom_jadro` na `dev` (Peter, 12. 10.), testy prešli (100 kontrol), práva `crm_app` obnovené. Ďalej `0014` (priebežný prepočet stavu, denná aktivácia, pohľady) a `0015` (RLS, import). Zmena `customers.ts` (bez `oom.segment`) musí ísť na Test s najbližším nasadením – dovtedy karta zákazníka na Teste spadne.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
 
 ## Otvorené
 
+- IČO PDS v číselníku (ZSD, SSD, VSD, SLOVNAFT, JAVYS) doplnené z pamäti – Peter overí vo FinState / ORSR; ostatné miestne DS bez IČO
+- C2-X3 pri miestnych DS (18 OOM) a X3-C2 pri miestnych DS (3 OOM): do číselníka nedané (pravidlo iba ZSD / iba VSD) – potvrdiť pri nahrávaní
 - **Pred Ostrým:** CRM pri pozvaní a deaktivácii externého používateľa samo pridá / odoberie e-mail v skupine Cloudflare Access „CRM externí“ (dovtedy ručne); treba API token s právom iba na skupiny a relácie Access
 - Prototyp (Worker `crm-core`) nefunguje od zrušenia roly `crm_prototype_ro` (12. 10.); Hyperdrive `crm-core-dev` ešte ukazuje na zrušenú rolu – prepojí sa na rolu `crm_app`
 - `db/dbmate.sh`: dbmate vypíše „Applied“ aj pri migrácii, ktorá potom zlyhá a vráti sa – zvážiť kontrolu stavu po migrácii (pred Ostrým)
@@ -42,7 +45,7 @@ Aktualizované: 12. 10. 2026 (večer)
 
 ## Ďalší krok
 
-- Modul 2 Odberné miesta (`docs/moduly/02-odberne-miesta.md` v0.2): v novej session (pravidlo 8) návrh databázy ako pri Nastaveniach – vrátane zrušenia stavu OOM „Neaktívne“ (→ „Pripravované“) vo výpočte stavu zákazníka a obmedzenia „iba svoje“ v databáze pre OOM.
+- Modul 2 Odberné miesta: návrh migrácie `0014_oom_stav_zakaznika` (priebežný prepočet stavu zákazníka, segment „výrobca“, denná aktivácia Pripravovaných OOM cez Cron, pohľady `customer_v`, `contact_oom_v`, `oom_v`), potom `0015` (RLS „iba svoje“, právo importovať, záznam importu).
 - Modul 0 Nastavenia: kroky A–C hotové na Teste (12. 10.): rola `crm_app` (migrácia 0009), Hyperdrive `crm-core-dev` → `crm_app` s vypnutou cache, Worker nasadený s prihlásením (overenie tokenu Access + používateľ CRM); `/api/me` overené (Peter: CEO, admin, 3 spoločnosti). Ďalej: v Access povoliť @greenlogy.com (Google), potom obrazovky Nastavení (11–16) a zápis v API.
 - Obrazovky Nastavení: fáza 1 na Teste (commit `70c2099`). Fázy 2–6 napísané a lokálne overené (API aj obrazovky): Používatelia (pozvanie s textom pozvánky, úprava, deaktivácia s odovzdaním), Tímy a práva (matica, nový tím, archív), Spoločnosť (údaje, logo, bankové účty, pracovný čas, firemné voľno), Číselníky, Vlastné polia (typy, hodnoty výberu, sekcie, tímy, archív), Pipelines a stage (poradie, pravdepodobnosť, typ, povinné polia), Audit (filtre, stránkovanie). Nová migrácia `0010_work_hours_delete`. Na Teste (12. 10.): migrácia 0010, práva roly, nasadenie; Peter overil, všetko funguje.
 - Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. Prototyp beží na https://crm-core.peter-700.workers.dev (Access, iba Peter). Ďalej krok 8: Peter prezrie vzorku a zapíše zistenia.

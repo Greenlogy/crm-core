@@ -16,6 +16,20 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: btree_gist; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION btree_gist; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION btree_gist IS 'support for indexing common datatypes in GiST';
+
+
+--
 -- Name: access_scope; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -319,12 +333,44 @@ CREATE TYPE public.offer_status AS ENUM (
 
 
 --
+-- Name: oom_contact_source; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_contact_source AS ENUM (
+    'rucne',
+    'zmluva'
+);
+
+
+--
+-- Name: oom_link_end_reason; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_link_end_reason AS ENUM (
+    'odchod',
+    'zrusenie',
+    'prepis'
+);
+
+
+--
+-- Name: oom_source_category; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oom_source_category AS ENUM (
+    'maly_zdroj',
+    'lokalny_zdroj',
+    'vyrobny_zdroj'
+);
+
+
+--
 -- Name: oom_status; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.oom_status AS ENUM (
     'aktivne',
-    'neaktivne',
+    'pripravovane',
     'zrusene',
     'odidene',
     'prepisane'
@@ -338,8 +384,7 @@ CREATE TYPE public.oom_status AS ENUM (
 CREATE TYPE public.oom_type AS ENUM (
     'spotreba',
     'vyroba',
-    'sharing',
-    'velkoobchod'
+    'sharing'
 );
 
 
@@ -364,19 +409,6 @@ CREATE TYPE public.payment_rating AS ENUM (
     'D',
     'E',
     'X'
-);
-
-
---
--- Name: previous_supplier_notice; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.previous_supplier_notice AS ENUM (
-    'akceptacia',
-    'bez_akceptacie',
-    'nezasiela_sa',
-    'odoslana',
-    'potvrdena'
 );
 
 
@@ -431,21 +463,10 @@ CREATE TYPE public.source_kind AS ENUM (
     'fve',
     'voda',
     'bioplyn',
+    'biomasa',
     'plyn',
     'vietor',
     'ostatne_oze'
-);
-
-
---
--- Name: source_type; Type: TYPE; Schema: public; Owner: -
---
-
-CREATE TYPE public.source_type AS ENUM (
-    'virtualna_bateria',
-    'lokalny_zdroj',
-    'vyrobny_zdroj',
-    'green_viwa'
 );
 
 
@@ -498,6 +519,17 @@ CREATE TYPE public.user_status AS ENUM (
     'pozvany',
     'aktivny',
     'deaktivovany'
+);
+
+
+--
+-- Name: voltage_level; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.voltage_level AS ENUM (
+    'nn',
+    'vn',
+    'vvn'
 );
 
 
@@ -1327,6 +1359,17 @@ $$;
 
 
 --
+-- Name: crm_today(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_today() RETURNS date
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT (now() AT TIME ZONE 'Europe/Bratislava')::date
+$$;
+
+
+--
 -- Name: crm_user_orgs(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1581,10 +1624,10 @@ $$;
 CREATE FUNCTION public.customer_is_former_calc(p_company_id uuid, p_person_id uuid) RETURNS boolean
     LANGUAGE sql STABLE
     AS $$
-  SELECT EXISTS (SELECT 1 FROM oom o
-                  WHERE o.company_id IS NOT DISTINCT FROM p_company_id
-                    AND o.person_id IS NOT DISTINCT FROM p_person_id
-                    AND o.status = 'odidene')
+  SELECT EXISTS (SELECT 1 FROM oom_customer l
+                  WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                    AND l.person_id IS NOT DISTINCT FROM p_person_id
+                    AND l.end_reason = 'odchod')
 $$;
 
 
@@ -1600,13 +1643,14 @@ BEGIN
   IF NEW.org_id IS DISTINCT FROM OLD.org_id AND (
        (TG_TABLE_NAME = 'company' AND (
           EXISTS (SELECT 1 FROM company_contact WHERE company_id = OLD.id)
-          OR EXISTS (SELECT 1 FROM oom WHERE company_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM oom_customer WHERE company_id = OLD.id)
           OR EXISTS (SELECT 1 FROM deal WHERE company_id = OLD.id)
           OR EXISTS (SELECT 1 FROM contract WHERE company_id = OLD.id)))
     OR (TG_TABLE_NAME = 'contact' AND (
           EXISTS (SELECT 1 FROM company_contact WHERE contact_id = OLD.id)
           OR EXISTS (SELECT 1 FROM deal_contact WHERE contact_id = OLD.id)
-          OR EXISTS (SELECT 1 FROM oom WHERE person_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM oom_customer WHERE person_id = OLD.id)
+          OR EXISTS (SELECT 1 FROM oom_contact WHERE contact_id = OLD.id)
           OR EXISTS (SELECT 1 FROM deal WHERE person_id = OLD.id)
           OR EXISTS (SELECT 1 FROM contract WHERE person_id = OLD.id)))) THEN
     RAISE EXCEPTION 'Spoločnosť sa nedá zmeniť, záznam má väzby (osoby, OOM, dealy, zmluvy).'
@@ -1629,20 +1673,24 @@ BEGIN
     RAISE EXCEPTION 'customer_status_calc: zadaj práve jedno z company_id / person_id';
   END IF;
 
-  -- 1. aspoň jedno OOM Aktívne alebo Neaktívne
-  IF EXISTS (SELECT 1 FROM oom o
-              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
-                AND o.person_id IS NOT DISTINCT FROM p_person_id
-                AND o.status IN ('aktivne', 'neaktivne')) THEN
+  -- 1. aspoň jedno OOM Aktívne
+  IF EXISTS (SELECT 1 FROM oom_customer l
+              WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                AND l.person_id IS NOT DISTINCT FROM p_person_id
+                AND l.status = 'aktivne') THEN
     RETURN 'zakaznik';
   END IF;
 
-  -- 2. podpísaná zmluva s budúcou účinnosťou (aj vracajúci sa zákazník)
-  IF EXISTS (SELECT 1 FROM contract c
-              WHERE c.company_id IS NOT DISTINCT FROM p_company_id
-                AND c.person_id IS NOT DISTINCT FROM p_person_id
-                AND c.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')
-                AND c.valid_from > p_today) THEN
+  -- 2. OOM Pripravované alebo podpísaná zmluva s budúcou účinnosťou (aj vracajúci sa zákazník)
+  IF EXISTS (SELECT 1 FROM oom_customer l
+              WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                AND l.person_id IS NOT DISTINCT FROM p_person_id
+                AND l.status = 'pripravovane')
+     OR EXISTS (SELECT 1 FROM contract c
+                 WHERE c.company_id IS NOT DISTINCT FROM p_company_id
+                   AND c.person_id IS NOT DISTINCT FROM p_person_id
+                   AND c.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')
+                   AND c.valid_from > p_today) THEN
     RETURN 'cakajuci_zakaznik';
   END IF;
 
@@ -1665,17 +1713,17 @@ BEGIN
   END IF;
 
   -- 5. aspoň jedno OOM Odídené
-  IF EXISTS (SELECT 1 FROM oom o
-              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
-                AND o.person_id IS NOT DISTINCT FROM p_person_id
-                AND o.status = 'odidene') THEN
+  IF EXISTS (SELECT 1 FROM oom_customer l
+              WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                AND l.person_id IS NOT DISTINCT FROM p_person_id
+                AND l.status = 'odidene') THEN
     RETURN 'byvaly_zakaznik';
   END IF;
 
   -- 6. má OOM a všetky sú Zrušené alebo Prepísané
-  IF EXISTS (SELECT 1 FROM oom o
-              WHERE o.company_id IS NOT DISTINCT FROM p_company_id
-                AND o.person_id IS NOT DISTINCT FROM p_person_id) THEN
+  IF EXISTS (SELECT 1 FROM oom_customer l
+              WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                AND l.person_id IS NOT DISTINCT FROM p_person_id) THEN
     RETURN 'zruseny_zakaznik';
   END IF;
 
@@ -1737,6 +1785,35 @@ $$;
 
 
 --
+-- Name: eic_is_valid(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.eic_is_valid(p text) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE
+    AS $_$
+DECLARE
+  v_chars constant text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-';
+  v_sum   integer := 0;
+BEGIN
+  IF p IS NULL OR p !~ '^[0-9A-Z-]{15}[0-9A-Z]$' THEN
+    RETURN false;
+  END IF;
+  FOR i IN 1..15 LOOP
+    v_sum := v_sum + (strpos(v_chars, substr(p, i, 1)) - 1) * (17 - i);
+  END LOOP;
+  RETURN substr(v_chars, 36 - (((v_sum - 1) % 37 + 37) % 37) + 1, 1) = substr(p, 16, 1);
+END;
+$_$;
+
+
+--
+-- Name: FUNCTION eic_is_valid(p text); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.eic_is_valid(p text) IS 'formát a kontrolná číslica EIC podľa ENTSO-E';
+
+
+--
 -- Name: inherit_customer_segment(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1790,16 +1867,30 @@ $$;
 CREATE FUNCTION public.lookup_value_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+DECLARE
+  v_parent_list text;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'Hodnota číselníka sa nemaže, iba skryje.' USING ERRCODE = 'check_violation';
   END IF;
   IF TG_OP = 'INSERT' THEN
-    NEW.code := coalesce(NEW.code, crm_slug(NEW.label));
+    SELECT parent_list INTO v_parent_list FROM lookup_list WHERE code = NEW.list_code;
+    IF (v_parent_list IS NULL) <> (NEW.parent_code IS NULL) THEN
+      RAISE EXCEPTION 'Hodnota zoznamu % % nadradenú hodnotu.', NEW.list_code,
+        CASE WHEN v_parent_list IS NULL THEN 'nemá' ELSE 'musí mať' END USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_parent_list IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM lookup_value WHERE list_code = v_parent_list AND code = NEW.parent_code) THEN
+      RAISE EXCEPTION 'Nadradená hodnota „%“ nie je v číselníku %.', NEW.parent_code, v_parent_list
+        USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    NEW.code := coalesce(NEW.code, crm_slug(concat_ws('_', NEW.parent_code, NEW.label)));
     RETURN NEW;
   END IF;
-  IF NEW.code <> OLD.code OR NEW.list_code <> OLD.list_code OR NEW.is_system <> OLD.is_system THEN
-    RAISE EXCEPTION 'Kód, zoznam a systémový príznak hodnoty číselníka sa nemenia.' USING ERRCODE = 'check_violation';
+  IF NEW.code <> OLD.code OR NEW.list_code <> OLD.list_code OR NEW.is_system <> OLD.is_system
+     OR NEW.parent_code IS DISTINCT FROM OLD.parent_code THEN
+    RAISE EXCEPTION 'Kód, zoznam, nadradená hodnota a systémový príznak hodnoty číselníka sa nemenia.'
+      USING ERRCODE = 'check_violation';
   END IF;
   IF OLD.is_system AND (NEW.label <> OLD.label OR NEW.hidden_at IS NOT NULL
                         OR NEW.org_id IS DISTINCT FROM OLD.org_id) THEN
@@ -1843,6 +1934,543 @@ CREATE FUNCTION public.normalize_phone(p text) RETURNS text
            ELSE d
          END
     FROM (SELECT regexp_replace(p, '[^0-9+]', '', 'g') AS d) x
+$$;
+
+
+--
+-- Name: oom_active_required_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_active_required_check() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_missing text[];
+BEGIN
+  IF NEW.status = 'aktivne' AND (TG_OP = 'INSERT' OR OLD.status <> 'aktivne') AND current_user <> 'crm_sync' THEN
+    v_missing := oom_active_required_missing(NEW);
+    IF cardinality(v_missing) > 0 THEN
+      RAISE EXCEPTION 'Odberné miesto nemôže byť Aktívne, chýba: %.', array_to_string(v_missing, ', ')
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    company_id uuid,
+    person_id uuid,
+    eic text NOT NULL,
+    type public.oom_type NOT NULL,
+    status public.oom_status NOT NULL,
+    name text,
+    address_street text,
+    address_number_supisne text,
+    address_number_orientacne text,
+    address_city text,
+    address_zip text,
+    pds text,
+    pds_point_id text,
+    pds_tariff text,
+    voltage_level public.voltage_level,
+    metering_type text,
+    phases smallint,
+    breaker_a numeric(8,2),
+    reserved_capacity_kw numeric(12,3),
+    max_reserved_capacity_kw numeric(12,3),
+    capacity_reservation_method text,
+    price_regulation text,
+    excise_tax text,
+    billing_period text,
+    advance_payment_method text,
+    advance_payment_pct numeric(5,2),
+    planned_consumption_vt_mwh numeric(12,3),
+    planned_consumption_nt_mwh numeric(12,3),
+    planned_feed_in_mwh numeric(12,3),
+    source_power_kw numeric(12,3),
+    source_kind public.source_kind,
+    feed_in_contract_type text,
+    inverter_power_kw numeric(12,3),
+    panels_power_kw numeric(12,3),
+    supply_from date,
+    supply_to date,
+    hubspot_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
+    source_category public.oom_source_category,
+    advance_payment_eur numeric(12,2),
+    previous_supplier text,
+    switch_notice_required boolean DEFAULT true NOT NULL,
+    switch_notice_sent_on date,
+    switch_notice_accepted_on date,
+    switch_confirmed_on date,
+    CONSTRAINT oom_advance_payment_eur_check CHECK ((advance_payment_eur >= (0)::numeric)),
+    CONSTRAINT oom_advance_pct_check CHECK (((advance_payment_pct >= (0)::numeric) AND (advance_payment_pct <= (100)::numeric))),
+    CONSTRAINT oom_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT oom_eic_check CHECK (public.eic_is_valid(eic)),
+    CONSTRAINT oom_phases_check CHECK ((phases = ANY (ARRAY[1, 3]))),
+    CONSTRAINT oom_supply_period_check CHECK (((supply_to IS NULL) OR (supply_from IS NULL) OR (supply_to >= supply_from))),
+    CONSTRAINT oom_switch_steps_check CHECK (((switch_notice_required OR ((switch_notice_sent_on IS NULL) AND (switch_notice_accepted_on IS NULL))) AND ((switch_notice_accepted_on IS NULL) OR ((switch_notice_sent_on IS NOT NULL) AND (switch_notice_accepted_on >= switch_notice_sent_on))) AND ((switch_confirmed_on IS NULL) OR (NOT switch_notice_required) OR ((switch_notice_accepted_on IS NOT NULL) AND (switch_confirmed_on >= switch_notice_accepted_on)))))
+);
+
+
+--
+-- Name: COLUMN oom.company_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.company_id IS 'zákazník poslednej väzby (oom_customer); mení sa iba cez väzbu';
+
+
+--
+-- Name: COLUMN oom.person_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.person_id IS 'zákazník poslednej väzby (oom_customer); mení sa iba cez väzbu';
+
+
+--
+-- Name: COLUMN oom.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.status IS 'stav poslednej väzby (oom_customer); mení sa iba cez väzbu';
+
+
+--
+-- Name: COLUMN oom.pds; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.pds IS 'kód z číselníka pds';
+
+
+--
+-- Name: COLUMN oom.pds_tariff; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.pds_tariff IS 'kód z číselníka sadzba_distribucie (sadzba zvoleného PDS)';
+
+
+--
+-- Name: COLUMN oom.metering_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.metering_type IS 'kód z číselníka typ_merania';
+
+
+--
+-- Name: COLUMN oom.billing_period; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.billing_period IS 'kód z číselníka fakturacne_obdobie';
+
+
+--
+-- Name: COLUMN oom.advance_payment_method; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.advance_payment_method IS 'kód z číselníka sposob_zaloh';
+
+
+--
+-- Name: COLUMN oom.feed_in_contract_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.feed_in_contract_type IS 'kód z číselníka typ_vykupnej_zmluvy';
+
+
+--
+-- Name: COLUMN oom.supply_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.supply_to IS 'NULL = na neurčito';
+
+
+--
+-- Name: COLUMN oom.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN oom.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.org_id IS 'preberá sa od zákazníka';
+
+
+--
+-- Name: COLUMN oom.source_category; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.source_category IS 'kategória zdroja podľa zákona (zadanie OOM čl. 7)';
+
+
+--
+-- Name: COLUMN oom.previous_supplier; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.previous_supplier IS 'kód z číselníka predchadzajuci_dodavatel';
+
+
+--
+-- Name: COLUMN oom.switch_notice_required; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.switch_notice_required IS 'false = výpoveď predošlému dodávateľovi sa nezasiela (napr. nová prípojka)';
+
+
+--
+-- Name: COLUMN oom.switch_notice_sent_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.switch_notice_sent_on IS 'prechod, krok 1: výpoveď predošlému dodávateľovi odoslaná';
+
+
+--
+-- Name: COLUMN oom.switch_notice_accepted_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.switch_notice_accepted_on IS 'prechod, krok 2: výpoveď akceptovaná';
+
+
+--
+-- Name: COLUMN oom.switch_confirmed_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.switch_confirmed_on IS 'prechod, krok 3: zmena dodávateľa potvrdená; krok 4 = supply_from';
+
+
+--
+-- Name: oom_active_required_missing(public.oom); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_active_required_missing(o public.oom) RETURNS text[]
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT array_remove(ARRAY[
+    CASE WHEN nullif(btrim(o.address_street), '') IS NULL AND nullif(btrim(o.address_city), '') IS NULL
+         THEN 'ulica alebo obec' END,
+    CASE WHEN nullif(btrim(o.address_zip), '') IS NULL THEN 'PSČ' END,
+    CASE WHEN o.pds IS NULL THEN 'PDS' END,
+    CASE WHEN o.voltage_level IS NULL THEN 'napäťová úroveň' END,
+    CASE WHEN o.pds_tariff IS NULL THEN 'sadzba distribúcie' END,
+    CASE WHEN o.supply_from IS NULL THEN 'dodávka od' END,
+    CASE WHEN o.type IN ('spotreba', 'sharing')
+          AND o.planned_consumption_vt_mwh IS NULL AND o.planned_consumption_nt_mwh IS NULL
+         THEN 'plánovaná spotreba' END,
+    CASE WHEN o.type = 'vyroba' AND o.planned_feed_in_mwh IS NULL THEN 'plánovaný výkup' END
+  ], NULL)
+$$;
+
+
+--
+-- Name: FUNCTION oom_active_required_missing(o public.oom); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.oom_active_required_missing(o public.oom) IS 'chýbajúce povinné údaje pre stav Aktívne (prázdne pole = OK)';
+
+
+--
+-- Name: oom_contact_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_contact_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_oom oom;
+BEGIN
+  SELECT * INTO v_oom FROM oom WHERE id = NEW.oom_id;
+  IF v_oom.company_id IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM company_contact WHERE company_id = v_oom.company_id AND contact_id = NEW.contact_id) THEN
+      RAISE EXCEPTION 'Kontaktná osoba musí byť osobou vo firme zákazníka.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF (SELECT org_id FROM contact WHERE id = NEW.contact_id) <> v_oom.org_id THEN
+    RAISE EXCEPTION 'Osoba a odberné miesto patria rôznym spoločnostiam.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM lookup_codes_check('rola_pri_oom', v_oom.org_id, NEW.roles,
+                             CASE WHEN TG_OP = 'UPDATE' THEN OLD.roles END);
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_customer_at(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_customer_at(p_oom_id uuid, p_date date) RETURNS TABLE(company_id uuid, person_id uuid, status public.oom_status, valid_from date, valid_to date)
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT l.company_id, l.person_id, l.status, l.valid_from, l.valid_to
+    FROM oom_customer l
+   WHERE l.oom_id = p_oom_id
+     AND daterange(l.valid_from, l.valid_to, '[]') @> p_date
+$$;
+
+
+--
+-- Name: oom_customer_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_customer_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_customer_org uuid;
+BEGIN
+  NEW.org_id := (SELECT org_id FROM oom WHERE id = NEW.oom_id);
+  v_customer_org := coalesce((SELECT org_id FROM company WHERE id = NEW.company_id),
+                             (SELECT org_id FROM contact WHERE id = NEW.person_id));
+  IF v_customer_org IS DISTINCT FROM NEW.org_id THEN
+    RAISE EXCEPTION 'Odberné miesto a zákazník patria rôznym spoločnostiam.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.oom_id <> OLD.oom_id OR NEW.company_id IS DISTINCT FROM OLD.company_id
+       OR NEW.person_id IS DISTINCT FROM OLD.person_id THEN
+      RAISE EXCEPTION 'Odberné miesto ani zákazník väzby sa nemenia (prepis = nová väzba).' USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.valid_to IS NOT NULL AND current_user <> 'crm_sync' THEN
+      RAISE EXCEPTION 'Uzavretá väzba sa nemení.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.status = 'aktivne' AND NEW.status = 'pripravovane' THEN
+      RAISE EXCEPTION 'Aktívne odberné miesto sa nevracia do stavu Pripravované.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_eic_normalize(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_eic_normalize() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.eic := upper(regexp_replace(NEW.eic, '\s', '', 'g'));
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_first_link(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_first_link() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  INSERT INTO oom_customer (oom_id, company_id, person_id, org_id, valid_from, status)
+  VALUES (NEW.id, NEW.company_id, NEW.person_id, NEW.org_id, least(NEW.supply_from, crm_today()), NEW.status);
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: oom_link_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_link_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status NOT IN ('pripravovane', 'aktivne') THEN
+      RAISE EXCEPTION 'Nové odberné miesto je Pripravované alebo Aktívne.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF pg_trigger_depth() < 2
+        AND (NEW.company_id IS DISTINCT FROM OLD.company_id OR NEW.person_id IS DISTINCT FROM OLD.person_id
+             OR NEW.status IS DISTINCT FROM OLD.status) THEN
+    RAISE EXCEPTION 'Zákazník a stav odberného miesta sa menia iba zmenou stavu alebo prepisom.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_link_sync(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_link_sync() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_oom_id uuid := coalesce(NEW.oom_id, OLD.oom_id);
+  v_link   oom_customer;
+BEGIN
+  SELECT * INTO v_link FROM oom_customer WHERE oom_id = v_oom_id ORDER BY valid_from DESC LIMIT 1;
+  IF FOUND THEN
+    UPDATE oom
+       SET company_id = v_link.company_id, person_id = v_link.person_id, status = v_link.status
+     WHERE id = v_oom_id
+       AND (company_id, person_id, status) IS DISTINCT FROM (v_link.company_id, v_link.person_id, v_link.status);
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: oom_lookup_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_lookup_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_old oom;   -- pri INSERT prázdne: každý kód je nový (skrytý sa nedá vybrať)
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    v_old := OLD;
+  END IF;
+  IF NEW.pds IS NOT NULL THEN
+    PERFORM lookup_codes_check('pds', NEW.org_id, ARRAY[NEW.pds], array_remove(ARRAY[v_old.pds], NULL));
+  END IF;
+  IF NEW.pds_tariff IS NOT NULL THEN
+    PERFORM lookup_codes_check('sadzba_distribucie', NEW.org_id, ARRAY[NEW.pds_tariff], array_remove(ARRAY[v_old.pds_tariff], NULL));
+    IF NOT EXISTS (SELECT 1 FROM lookup_value
+                    WHERE list_code = 'sadzba_distribucie' AND code = NEW.pds_tariff
+                      AND parent_code = NEW.pds) THEN
+      RAISE EXCEPTION 'Sadzba distribúcie nepatrí zvolenému PDS.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF NEW.metering_type IS NOT NULL THEN
+    PERFORM lookup_codes_check('typ_merania', NEW.org_id, ARRAY[NEW.metering_type], array_remove(ARRAY[v_old.metering_type], NULL));
+  END IF;
+  IF NEW.billing_period IS NOT NULL THEN
+    PERFORM lookup_codes_check('fakturacne_obdobie', NEW.org_id, ARRAY[NEW.billing_period], array_remove(ARRAY[v_old.billing_period], NULL));
+  END IF;
+  IF NEW.advance_payment_method IS NOT NULL THEN
+    PERFORM lookup_codes_check('sposob_zaloh', NEW.org_id, ARRAY[NEW.advance_payment_method], array_remove(ARRAY[v_old.advance_payment_method], NULL));
+  END IF;
+  IF NEW.feed_in_contract_type IS NOT NULL THEN
+    PERFORM lookup_codes_check('typ_vykupnej_zmluvy', NEW.org_id, ARRAY[NEW.feed_in_contract_type], array_remove(ARRAY[v_old.feed_in_contract_type], NULL));
+  END IF;
+  IF NEW.previous_supplier IS NOT NULL THEN
+    PERFORM lookup_codes_check('predchadzajuci_dodavatel', NEW.org_id, ARRAY[NEW.previous_supplier], array_remove(ARRAY[v_old.previous_supplier], NULL));
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_reconnect(uuid, uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_reconnect(p_oom_id uuid, p_company_id uuid, p_person_id uuid, p_from date DEFAULT public.crm_today()) RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_last date;
+  v_id   uuid;
+BEGIN
+  IF num_nonnulls(p_company_id, p_person_id) <> 1 THEN
+    RAISE EXCEPTION 'oom_reconnect: zadaj práve jedno z company_id / person_id';
+  END IF;
+  IF EXISTS (SELECT 1 FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL) THEN
+    RAISE EXCEPTION 'Odberné miesto už je u nás (Pripravované alebo Aktívne).' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT max(valid_to) INTO v_last FROM oom_customer WHERE oom_id = p_oom_id;
+  IF p_from <= v_last THEN
+    RAISE EXCEPTION 'Nové obdobie musí začať po konci predošlého (%).', v_last USING ERRCODE = 'check_violation';
+  END IF;
+
+  UPDATE oom
+     SET supply_from = NULL, supply_to = NULL, previous_supplier = NULL, switch_notice_required = true,
+         switch_notice_sent_on = NULL, switch_notice_accepted_on = NULL, switch_confirmed_on = NULL
+   WHERE id = p_oom_id;
+  INSERT INTO oom_customer (oom_id, company_id, person_id, org_id, valid_from, status)
+  VALUES (p_oom_id, p_company_id, p_person_id, (SELECT org_id FROM oom WHERE id = p_oom_id), p_from, 'pripravovane')
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: oom_set_status(uuid, public.oom_status, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_set_status(p_oom_id uuid, p_status public.oom_status, p_date date DEFAULT public.crm_today()) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_link oom_customer;
+BEGIN
+  SELECT * INTO v_link FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Odberné miesto nemá otvorenú väzbu (je Odídené, Zrušené alebo Prepísané).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  CASE p_status
+    WHEN 'aktivne' THEN
+      UPDATE oom_customer SET status = 'aktivne' WHERE id = v_link.id;
+    WHEN 'odidene' THEN
+      UPDATE oom_customer SET valid_to = p_date, end_reason = 'odchod', status = 'odidene' WHERE id = v_link.id;
+    WHEN 'zrusene' THEN
+      UPDATE oom_customer SET valid_to = p_date, end_reason = 'zrusenie', status = 'zrusene' WHERE id = v_link.id;
+    WHEN 'prepisane' THEN
+      RAISE EXCEPTION 'Prepis na iného odberateľa: oom_transfer.' USING ERRCODE = 'check_violation';
+    ELSE
+      RAISE EXCEPTION 'Stav % sa takto nenastavuje.', p_status USING ERRCODE = 'check_violation';
+  END CASE;
+END;
+$$;
+
+
+--
+-- Name: oom_transfer(uuid, uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_transfer(p_oom_id uuid, p_company_id uuid, p_person_id uuid, p_date date) RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_link oom_customer;
+  v_id   uuid;
+BEGIN
+  IF num_nonnulls(p_company_id, p_person_id) <> 1 THEN
+    RAISE EXCEPTION 'oom_transfer: zadaj práve jedno z company_id / person_id';
+  END IF;
+  SELECT * INTO v_link FROM oom_customer WHERE oom_id = p_oom_id AND valid_to IS NULL FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Prepísať sa dá iba Pripravované alebo Aktívne odberné miesto.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (v_link.company_id, v_link.person_id) IS NOT DISTINCT FROM (p_company_id, p_person_id) THEN
+    RAISE EXCEPTION 'Nový odberateľ je ten istý zákazník.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_date <= v_link.valid_from THEN
+    RAISE EXCEPTION 'Dátum prepisu musí byť po začiatku väzby (%).', v_link.valid_from USING ERRCODE = 'check_violation';
+  END IF;
+
+  UPDATE oom_customer SET valid_to = p_date - 1, end_reason = 'prepis', status = 'prepisane' WHERE id = v_link.id;
+  DELETE FROM oom_contact WHERE oom_id = p_oom_id;
+  INSERT INTO oom_customer (oom_id, company_id, person_id, org_id, valid_from, status)
+  VALUES (p_oom_id, p_company_id, p_person_id, v_link.org_id, p_date, v_link.status)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
 $$;
 
 
@@ -2394,83 +3022,6 @@ CREATE TABLE public.deal_oom (
 
 
 --
--- Name: oom; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.oom (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    company_id uuid,
-    person_id uuid,
-    eic text NOT NULL,
-    type public.oom_type NOT NULL,
-    status public.oom_status NOT NULL,
-    segment public.customer_segment,
-    name text,
-    address_street text,
-    address_number_supisne text,
-    address_number_orientacne text,
-    address_city text,
-    address_zip text,
-    pds text,
-    pds_point_id text,
-    pds_tariff text,
-    voltage_level text,
-    metering_type text,
-    phases smallint,
-    breaker_a numeric(8,2),
-    reserved_capacity_kw numeric(12,3),
-    max_reserved_capacity_kw numeric(12,3),
-    capacity_reservation_method text,
-    price_regulation text,
-    excise_tax text,
-    billing_period text,
-    advance_payment_method text,
-    advance_payment_pct numeric(5,2),
-    planned_consumption_vt_mwh numeric(12,3),
-    planned_consumption_nt_mwh numeric(12,3),
-    planned_feed_in_mwh numeric(12,3),
-    source_power_kw numeric(12,3),
-    source_kind public.source_kind,
-    source_type public.source_type,
-    feed_in_contract_type text,
-    inverter_power_kw numeric(12,3),
-    panels_power_kw numeric(12,3),
-    supply_from date,
-    supply_to date,
-    previous_supplier_notice public.previous_supplier_notice,
-    previous_supplier_notice_accepted_at timestamp with time zone,
-    hubspot_id text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
-    org_id uuid NOT NULL,
-    CONSTRAINT oom_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
-    CONSTRAINT oom_supply_period_check CHECK (((supply_to IS NULL) OR (supply_from IS NULL) OR (supply_to >= supply_from)))
-);
-
-
---
--- Name: COLUMN oom.supply_to; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom.supply_to IS 'NULL = na neurčito';
-
-
---
--- Name: COLUMN oom.custom; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
-
-
---
--- Name: COLUMN oom.org_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom.org_id IS 'preberá sa od zákazníka';
-
-
---
 -- Name: contact_oom_v; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -2482,7 +3033,7 @@ CREATE VIEW public.contact_oom_v AS
    FROM ((public.deal_contact dc
      JOIN public.deal_oom dom ON ((dom.deal_id = dc.deal_id)))
      JOIN public.oom o ON ((o.id = dom.oom_id)))
-  WHERE (o.status = ANY (ARRAY['aktivne'::public.oom_status, 'neaktivne'::public.oom_status]))
+  WHERE (o.status = ANY (ARRAY['aktivne'::public.oom_status, 'pripravovane'::public.oom_status]))
   GROUP BY dc.contact_id, dom.oom_id, o.status;
 
 
@@ -3023,6 +3574,7 @@ CREATE TABLE public.lookup_list (
     used_on text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    parent_list text,
     CONSTRAINT lookup_list_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,62}$'::text))
 );
 
@@ -3032,6 +3584,13 @@ CREATE TABLE public.lookup_list (
 --
 
 COMMENT ON TABLE public.lookup_list IS 'zoznamy číselníkov; zakladá ich iba migrácia (jadro)';
+
+
+--
+-- Name: COLUMN lookup_list.parent_list; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_list.parent_list IS 'zoznam nadradených hodnôt (napr. sadzby distribúcie → pds)';
 
 
 --
@@ -3050,8 +3609,11 @@ CREATE TABLE public.lookup_value (
     hubspot_value text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    parent_code text,
+    reg_no text,
     CONSTRAINT lookup_value_code_check CHECK ((code ~ '^[a-z0-9][a-z0-9_]{0,62}$'::text)),
     CONSTRAINT lookup_value_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT lookup_value_reg_no_check CHECK ((reg_no ~ '^[0-9]{8}$'::text)),
     CONSTRAINT lookup_value_system_visible_check CHECK ((NOT (is_system AND (hidden_at IS NOT NULL))))
 );
 
@@ -3082,6 +3644,20 @@ COMMENT ON COLUMN public.lookup_value.is_system IS 'hodnota, na ktorej stojí lo
 --
 
 COMMENT ON COLUMN public.lookup_value.hidden_at IS 'skrytá hodnota sa nedá vybrať pri novom zadaní, staré záznamy ju zobrazujú ďalej';
+
+
+--
+-- Name: COLUMN lookup_value.parent_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.parent_code IS 'kód nadradenej hodnoty zo zoznamu lookup_list.parent_list; nemení sa';
+
+
+--
+-- Name: COLUMN lookup_value.reg_no; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.lookup_value.reg_no IS 'IČO (pri PDS – prevádzkovateľ distribučnej sústavy)';
 
 
 --
@@ -3139,6 +3715,88 @@ CREATE TABLE public.offer_item (
 
 
 --
+-- Name: oom_contact; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_contact (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    contact_id uuid NOT NULL,
+    roles text[] DEFAULT '{}'::text[] NOT NULL,
+    source public.oom_contact_source DEFAULT 'rucne'::public.oom_contact_source NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE oom_contact; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_contact IS 'kontaktné osoby pri OOM; rucne = pridal používateľ, zmluva = prenesené zo zmluvy (modul 4), ručné sa pri zmene zmluvy neodoberajú';
+
+
+--
+-- Name: COLUMN oom_contact.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_contact.roles IS 'kódy z číselníka rola_pri_oom (aj viac naraz)';
+
+
+--
+-- Name: oom_customer; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_customer (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    company_id uuid,
+    person_id uuid,
+    org_id uuid NOT NULL,
+    valid_from date NOT NULL,
+    valid_to date,
+    status public.oom_status NOT NULL,
+    end_reason public.oom_link_end_reason,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oom_customer_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT oom_customer_period_check CHECK (((valid_to IS NULL) OR (valid_to >= valid_from))),
+    CONSTRAINT oom_customer_status_check CHECK (
+CASE
+    WHEN (valid_to IS NULL) THEN ((end_reason IS NULL) AND (status = ANY (ARRAY['pripravovane'::public.oom_status, 'aktivne'::public.oom_status])))
+    ELSE ((end_reason IS NOT NULL) AND (status =
+    CASE end_reason
+        WHEN 'odchod'::public.oom_link_end_reason THEN 'odidene'::public.oom_status
+        WHEN 'zrusenie'::public.oom_link_end_reason THEN 'zrusene'::public.oom_status
+        WHEN 'prepis'::public.oom_link_end_reason THEN 'prepisane'::public.oom_status
+        ELSE NULL::public.oom_status
+    END))
+END)
+);
+
+
+--
+-- Name: TABLE oom_customer; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_customer IS 'komu OOM patrilo v ktorom období a v akom stave (zadanie OOM čl. 3–4); odchod, zrušenie a prepis väzbu uzavrú, prepis a návrat založia novú';
+
+
+--
+-- Name: COLUMN oom_customer.valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_customer.valid_to IS 'NULL = väzba trvá (Pripravované alebo Aktívne)';
+
+
+--
+-- Name: COLUMN oom_customer.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_customer.status IS 'stav OOM pre tohto zákazníka v tomto období';
+
+
+--
 -- Name: oom_device; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3184,9 +3842,13 @@ CREATE TABLE public.org (
     logo_updated_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    oom_switch_accept_days smallint DEFAULT 14 NOT NULL,
+    oom_switch_confirm_days smallint DEFAULT 14 NOT NULL,
     CONSTRAINT org_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,40}$'::text)),
     CONSTRAINT org_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT org_legal_name_check CHECK ((btrim(legal_name) <> ''::text))
+    CONSTRAINT org_legal_name_check CHECK ((btrim(legal_name) <> ''::text)),
+    CONSTRAINT org_oom_switch_accept_days_check CHECK (((oom_switch_accept_days >= 1) AND (oom_switch_accept_days <= 365))),
+    CONSTRAINT org_oom_switch_confirm_days_check CHECK (((oom_switch_confirm_days >= 1) AND (oom_switch_confirm_days <= 365)))
 );
 
 
@@ -3209,6 +3871,20 @@ COMMENT ON COLUMN public.org.reg_no IS 'IČO (SK, CZ) alebo OIB (HR) spoločnost
 --
 
 COMMENT ON COLUMN public.org.regulator_license IS 'číslo povolenia regulátora: SK ÚRSO, CZ ERÚ, HR HERA';
+
+
+--
+-- Name: COLUMN org.oom_switch_accept_days; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.org.oom_switch_accept_days IS 'prechod sa zasekol: dni od odoslania výpovede bez akceptácie';
+
+
+--
+-- Name: COLUMN org.oom_switch_confirm_days; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.org.oom_switch_confirm_days IS 'prechod sa zasekol: dni od akceptácie výpovede bez potvrdenia zmeny dodávateľa';
 
 
 --
@@ -4052,6 +4728,38 @@ ALTER TABLE ONLY public.offer
 
 
 --
+-- Name: oom_contact oom_contact_oom_id_contact_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_contact
+    ADD CONSTRAINT oom_contact_oom_id_contact_id_key UNIQUE (oom_id, contact_id);
+
+
+--
+-- Name: oom_contact oom_contact_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_contact
+    ADD CONSTRAINT oom_contact_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oom_customer oom_customer_no_overlap; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_no_overlap EXCLUDE USING gist (oom_id WITH =, daterange(valid_from, valid_to, '[]'::text) WITH &&);
+
+
+--
+-- Name: oom_customer oom_customer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: oom_device oom_device_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4825,7 +5533,7 @@ CREATE INDEX fve_project_deal_id_idx ON public.fve_project USING btree (deal_id)
 -- Name: lookup_value_label_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX lookup_value_label_key ON public.lookup_value USING btree (list_code, org_id, lower(label)) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX lookup_value_label_key ON public.lookup_value USING btree (list_code, org_id, parent_code, lower(label)) NULLS NOT DISTINCT;
 
 
 --
@@ -4871,10 +5579,45 @@ CREATE INDEX oom_company_id_idx ON public.oom USING btree (company_id);
 
 
 --
+-- Name: oom_contact_contact_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_contact_contact_id_idx ON public.oom_contact USING btree (contact_id);
+
+
+--
 -- Name: oom_custom_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX oom_custom_idx ON public.oom USING gin (custom jsonb_path_ops);
+
+
+--
+-- Name: oom_customer_company_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_customer_company_id_idx ON public.oom_customer USING btree (company_id);
+
+
+--
+-- Name: oom_customer_one_open_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX oom_customer_one_open_key ON public.oom_customer USING btree (oom_id) WHERE (valid_to IS NULL);
+
+
+--
+-- Name: oom_customer_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_customer_org_id_idx ON public.oom_customer USING btree (org_id);
+
+
+--
+-- Name: oom_customer_person_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_customer_person_id_idx ON public.oom_customer USING btree (person_id);
 
 
 --
@@ -5207,6 +5950,20 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom FOR EACH
 
 
 --
+-- Name: oom_contact trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_contact FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: oom_customer trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: oom_device trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5340,6 +6097,20 @@ CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.company_contact FOR E
 
 
 --
+-- Name: oom_contact trg_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.oom_contact FOR EACH ROW EXECUTE FUNCTION public.oom_contact_check();
+
+
+--
+-- Name: oom_customer trg_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.oom_customer_check();
+
+
+--
 -- Name: company trg_country_default; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5452,6 +6223,13 @@ CREATE TRIGGER trg_inherit_segment BEFORE INSERT ON public.deal FOR EACH ROW EXE
 
 
 --
+-- Name: oom_customer trg_link_sync; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_link_sync AFTER INSERT OR DELETE OR UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.oom_link_sync();
+
+
+--
 -- Name: contract trg_mark_household; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5491,6 +6269,41 @@ CREATE TRIGGER trg_no_delete BEFORE DELETE ON public.pipeline_stage FOR EACH ROW
 --
 
 CREATE TRIGGER trg_normalize BEFORE INSERT OR UPDATE OF iban ON public.org_bank_account FOR EACH ROW EXECUTE FUNCTION public.org_bank_account_normalize();
+
+
+--
+-- Name: oom trg_oom_active_required; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_active_required BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_active_required_check();
+
+
+--
+-- Name: oom trg_oom_eic; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_eic BEFORE INSERT OR UPDATE OF eic ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_eic_normalize();
+
+
+--
+-- Name: oom trg_oom_first_link; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_first_link AFTER INSERT ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_first_link();
+
+
+--
+-- Name: oom trg_oom_link_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_link_guard BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_link_guard();
+
+
+--
+-- Name: oom trg_oom_lookup; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_lookup BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_lookup_check();
 
 
 --
@@ -5757,6 +6570,20 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_item FOR EACH RO
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: oom_contact trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_contact FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: oom_customer trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -6330,6 +7157,14 @@ ALTER TABLE ONLY public.fve_project
 
 
 --
+-- Name: lookup_list lookup_list_parent_list_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.lookup_list
+    ADD CONSTRAINT lookup_list_parent_list_fkey FOREIGN KEY (parent_list) REFERENCES public.lookup_list(code);
+
+
+--
 -- Name: lookup_value lookup_value_list_code_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6391,6 +7226,54 @@ ALTER TABLE ONLY public.offer
 
 ALTER TABLE ONLY public.oom
     ADD CONSTRAINT oom_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+
+--
+-- Name: oom_contact oom_contact_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_contact
+    ADD CONSTRAINT oom_contact_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contact(id);
+
+
+--
+-- Name: oom_contact oom_contact_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_contact
+    ADD CONSTRAINT oom_contact_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id) ON DELETE CASCADE;
+
+
+--
+-- Name: oom_customer oom_customer_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+
+--
+-- Name: oom_customer oom_customer_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id);
+
+
+--
+-- Name: oom_customer oom_customer_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: oom_customer oom_customer_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_customer
+    ADD CONSTRAINT oom_customer_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.contact(id);
 
 
 --
@@ -7213,4 +8096,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0009'),
     ('0010'),
     ('0011'),
-    ('0012');
+    ('0012'),
+    ('0013');

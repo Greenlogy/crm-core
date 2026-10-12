@@ -8,7 +8,7 @@ BEGIN
   BEGIN
     INSERT INTO oom (company_id, person_id, eic, type, status)
     VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000201',
-            '24ZZS0000TEST900', 'spotreba', 'aktivne');
+            '24ZZS000TEST900K', 'spotreba', 'aktivne');
     RAISE EXCEPTION 'CHYBA: OOM s firmou aj kontaktom prešlo';
   EXCEPTION WHEN check_violation THEN
     RAISE NOTICE 'OK: OOM s firmou aj kontaktom odmietnuté';
@@ -108,7 +108,7 @@ EXCEPTION WHEN unique_violation THEN
 END;
 $$;
 
--- 7. contact_oom_v: iba OOM v stave Aktívne alebo Neaktívne
+-- 7. contact_oom_v: iba OOM v stave Aktívne alebo Pripravované
 DO $$
 DECLARE
   v_eva  text;
@@ -120,8 +120,8 @@ BEGIN
   SELECT string_agg(o.eic, ',' ORDER BY o.eic) INTO v_jan
     FROM contact_oom_v v JOIN oom o ON o.id = v.oom_id
    WHERE v.contact_id = '00000000-0000-4000-8000-000000000201';
-  ASSERT v_eva = '24ZZS0000TEST001,24ZZS0000TEST003', format('Eva: očakávané OOM 001,003, je %s', v_eva);
-  ASSERT v_jan = '24ZZS0000TEST002', format('Ján: očakávané OOM 002, je %s', v_jan);
+  ASSERT v_eva = '24ZZS000TEST001H,24ZZS000TEST003D', format('Eva: očakávané OOM 001,003, je %s', v_eva);
+  ASSERT v_jan = '24ZZS000TEST002F', format('Ján: očakávané OOM 002, je %s', v_jan);
   RAISE NOTICE 'OK: contact_oom_v vynecháva zrušené OOM (Eva 2 z 3, Ján 1)';
 END;
 $$;

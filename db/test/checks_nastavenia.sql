@@ -234,7 +234,7 @@ BEGIN
   -- OOM, deal a zmluva preberajú spoločnosť od zákazníka
   ASSERT (SELECT org_id FROM deal WHERE id = '00000000-0000-4000-8000-000000000601') = crm_default_org(), 'deal';
   INSERT INTO oom (id, company_id, eic, type, status) VALUES
-    ('00000000-0000-4000-8000-000000002301', '00000000-0000-4000-8000-000000002203', '24ZZS0000TEST901', 'spotreba', 'aktivne');
+    ('00000000-0000-4000-8000-000000002301', '00000000-0000-4000-8000-000000002203', '24ZZS000TEST901I', 'spotreba', 'pripravovane');
   ASSERT (SELECT org_id FROM oom WHERE id = '00000000-0000-4000-8000-000000002301') = v_cz, 'OOM českej firmy';
   BEGIN
     INSERT INTO deal (company_id, org_id, pipeline_id, stage_id, name) VALUES

@@ -35,10 +35,10 @@ REVOKE UPDATE ON audit_log, export_log FROM crm_app;
 REVOKE INSERT, UPDATE ON sync_run FROM crm_app;
 REVOKE INSERT, UPDATE ON lookup_list FROM crm_app;
 
--- Mazať: väzby (osoba vo firme, na deale, OOM na deale, položka ponuky, zariadenie OOM)
+-- Mazať: väzby (osoba vo firme, na deale, OOM na deale, položka ponuky, zariadenie OOM, kontaktná osoba pri OOM – 0013)
 -- a nastavenia, ktoré sa dajú odobrať (prístup k spoločnosti, voľný deň, logo, tímy poľa,
 -- povinné pole pri prechode, prázdna sekcia, pracovný deň – 0010). Ostatné sa nemaže, iba archivuje.
-GRANT DELETE ON company_contact, deal_contact, deal_oom, offer_item, oom_device,
+GRANT DELETE ON company_contact, deal_contact, deal_oom, offer_item, oom_device, oom_contact,
   app_user_org, org_day_off, org_logo, org_work_hours, custom_field_team, pipeline_stage_required_field,
   custom_field_section TO crm_app;
 

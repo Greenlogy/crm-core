@@ -11,7 +11,8 @@ Nerieši ceny a zmluvy (modul 4), produkty (modul 3) ani správy XML z OKTE a PD
 ## 2. OOM a EIC
 
 - **Jedno EIC = jeden záznam OOM navždy.** EIC je unikátne v celej skupine.
-- OOM má **práve jeden typ**: spotreba, výroba, sharing, veľkoobchod. Spotreba a výroba nikdy nemajú spoločné EIC – každá strana má vlastné EIC, teda vlastné OOM.
+- OOM má **práve jeden typ**: spotreba, výroba, sharing. Spotreba a výroba nikdy nemajú spoločné EIC – každá strana má vlastné EIC, teda vlastné OOM.
+- **Typ veľkoobchod sa ruší** (Peter 12. 10. 2026): v HubSpote to boli virtuálne OOM bez skutočného EIC, aby deal vedel spočítať maržu. Veľkoobchod budú v novom CRM **položky zmluvy bez OOM** (produkt, obdobie, objem MWh, cena) – rieši modul 4 (Zmluvy) a 5.
 - Pri zadaní CRM overí formát a kontrolnú číslicu slovenského EIC. CZ a HR sa doplnia s pobočkami.
 - OOM patrí jednej spoločnosti skupiny (Nastavenia, časť 2).
 
@@ -98,7 +99,18 @@ CRM ukáže, kde sa proces zasekol (napr. výpoveď odoslaná pred 30 dňami a s
 
 ## 12. Nahrávanie dát z HubSpotu
 
-Zatiaľ sa nič nenahráva (rozhodnutie 12. 10. 2026). Plán nahrávania sa určí neskôr.
+Zatiaľ sa nič nenahráva (rozhodnutie 12. 10. 2026). Plán nahrávania sa určí neskôr. Už rozhodnuté:
+
+- **Virtuálne veľkoobchodné OOM sa neprenesú** (v HubSpote 13: typ „Veľkoobchod“ alebo stav „Veľkoobchod“). Ich objemy a ceny prejdú ako položky zmluvy v module 4.
+- HubSpot stav „Neaktívne“ → Pripravované.
+- **Sadzba distribúcie:** ~3 200 OOM (3 232) má v HubSpote namiesto sadzby program virtuálnej batérie (VBATTERY-MAX, -PREMIUM, -V, -STANDARD, -AKU, -ECO). Program patrí do modulov 3/4; skutočnú sadzbu bude treba pri prenose doplniť.
+- **LZ_NN, LZ_VN, VZ_NN, VZ_VN, VN** (416 OOM) nie sú sadzby: rozdeliť na kategóriu zdroja (LZ = lokálny, VZ = výrobný zdroj) a napäťovú úroveň; sadzbu doplniť.
+- Ďalšie zápisy sadzby mimo číselníka (81 OOM): predpona `465_` (napr. 465_C1 → C1), C9a, C11, X2-N, X2-S, X3-C9a, X4-D1 až X4-D3, „AB&B C2-X3“, „-“ – rozhodnúť pri prenose. C2-X3 pri miestnych DS (18 OOM) a X3-C2 pri miestnych DS (3 OOM) sa do číselníka nedostali (C2-X3 iba ZSD, X3-C2 iba VSD).
+- **PDS:** duplicitné zápisy sa zlúčia (PPA POWER DS / PPA Power DS, UR P6 a.s. / UR P6 s. r. o.).
+- **Druh zdroja:** 9 záznamov s internou hodnotou „Biomasa“ (popis v HubSpote „Bioplyn“) sa zapíše ako **Bioplyn**.
+- **Fakturačné obdobie:** „Mesiac“ → Mesačne, „Rok“ → Ročne, „Ročne (s odkladom k termínu odpočtu)“ → Ročne s odkladom; „Ročne (s odkladom)“ (52) a „0“ rozhodnúť pri prenose.
+- **Spôsob záloh:** „Kvartálne“ → Štvrťročné zálohy; „0“ (19) rozhodnúť pri prenose.
+- Napäťová úroveň „NN“ / „nn“ → NN; typ merania „Typ merania A“ → A, „N - Nemerané“ → N.
 
 ## 13. Odložené
 

@@ -9,12 +9,11 @@ export const OOM_TYPE: Record<string, string> = {
   spotreba: 'Spotreba',
   vyroba: 'Výroba',
   sharing: 'Sharing',
-  velkoobchod: 'Veľkoobchod',
 };
 
 export const OOM_STATUS: Record<string, { label: string; tone: Tone; live?: boolean }> = {
   aktivne: { label: 'Aktívne', tone: 'positive', live: true },
-  neaktivne: { label: 'Neaktívne', tone: 'neutral' },
+  pripravovane: { label: 'Pripravované', tone: 'info' },
   zrusene: { label: 'Zrušené', tone: 'negative' },
   odidene: { label: 'Odídené', tone: 'negative' },
   prepisane: { label: 'Prepísané', tone: 'neutral' },

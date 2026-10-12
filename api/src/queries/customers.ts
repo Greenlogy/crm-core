@@ -225,7 +225,7 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
            ORDER BY cc.is_main_contact DESC, c.name`
       : sql`SELECT NULL LIMIT 0`,
     sql`
-      SELECT id, eic, type, status, segment, address_street, address_city, address_zip,
+      SELECT id, eic, type, status, address_street, address_city, address_zip,
              planned_consumption_vt_mwh, planned_consumption_nt_mwh, planned_feed_in_mwh, source_power_kw,
              supply_from, supply_to
         FROM oom WHERE ${owner}

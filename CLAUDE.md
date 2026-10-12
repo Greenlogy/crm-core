@@ -67,8 +67,9 @@ crm-core/
 
 ## Doménové pravidlá
 
-- OOM (odberné miesto) má jedinečný EIC kód. Typ: spotreba, výroba, sharing alebo veľkoobchod. Stav: Aktívne, Neaktívne, Zrušené, Odídené, Prepísané.
-- Kontakt sa s OOM prepája cez dealy: OOM sa priraďuje všetkým kontaktom na jeho dealoch, iba pri stave Aktívne alebo Neaktívne.
+- OOM (odberné miesto) má jedinečný EIC kód. Typ: spotreba, výroba alebo sharing (veľkoobchod nie je OOM – sú to položky zmluvy bez OOM). Stav: Pripravované, Aktívne, Zrušené, Odídené, Prepísané (stav „Neaktívne“ z HubSpotu = Pripravované).
+- OOM patrí v čase vždy práve jednému zákazníkovi; väzba má obdobie od – do. Odchod, zrušenie a prepis väzbu uzavrú, prepis a návrat založia novú.
+- Kontakt sa s OOM prepája priamo (kontaktné osoby pri OOM, neskôr automaticky zo zmluvy) a cez dealy: OOM sa priraďuje všetkým kontaktom na jeho dealoch, iba pri stave Aktívne alebo Pripravované.
 - Jeden zákazník môže mať viac OOM, vrátane FVE (výroba).
 - SLA servisu na všetkých kanáloch: prvá reakcia do 8 pracovných hodín, odpoveď do 24 pracovných hodín. Počíta sa iba v pracovnom čase v pracovných dňoch podľa slovenského kalendára sviatkov. Pracovný čas: Po–Pi 7:30–15:30 (Europe/Bratislava). Príklad: správa prijatá v piatok o 15:00 má termín prvej reakcie v pondelok o 15:00.
 - B2C zákazník je kontakt bez firmy. Zákazník (vlastník OOM, dealu, zmluvy) je teda buď firma, alebo kontakt – vždy práve jedno z nich.

@@ -194,11 +194,12 @@ BEGIN
   ASSERT customer_status_calc(NULL, n, t) = 'cakajuci_zakaznik', 'podpísaná zmluva od 1. 1. 2027';
   ASSERT customer_status_calc(NULL, n, '2027-01-01') <> 'cakajuci_zakaznik', 'od účinnosti už nie čakajúci';
 
-  INSERT INTO oom (id, person_id, eic, type, status) VALUES
-    ('00000000-0000-4000-8000-000000001414', n, '24ZZS0000TEST401', 'spotreba', 'aktivne');
+  PERFORM pg_temp.t_oom('00000000-0000-4000-8000-000000001414', NULL, n, '24ZZS000TEST4011', 'spotreba', 'pripravovane');
+  ASSERT customer_status_calc(NULL, n, t) = 'cakajuci_zakaznik', 'pripravované OOM';
+  PERFORM oom_set_status('00000000-0000-4000-8000-000000001414', 'aktivne');
   ASSERT customer_status_calc(NULL, n, t) = 'zakaznik', 'aktívne OOM';
   ASSERT NOT customer_is_former_calc(NULL, n), 'Nováková nie je bývalá';
-  RAISE NOTICE 'OK: Nováková: marketingový kontakt → záujemca → ponuka → čakajúci → zákazník';
+  RAISE NOTICE 'OK: Nováková: marketingový kontakt → záujemca → ponuka → čakajúci (zmluva, OOM Pripravované) → zákazník';
 END;
 $$;
 
@@ -206,17 +207,19 @@ $$;
 DO $$
 DECLARE
   h   constant uuid := '00000000-0000-4000-8000-000000001501';  -- Horváth, odišiel
+  k   constant uuid := '00000000-0000-4000-8000-000000001504';  -- nový odberateľ po prepise
   l   constant uuid := '00000000-0000-4000-8000-000000001502';  -- Lukáč, prepadnutý deal
   z   constant uuid := '00000000-0000-4000-8000-000000001503';  -- zrušená firma
   t   constant date := '2026-10-11';
 BEGIN
   INSERT INTO contact (id, first_name, last_name, email, is_household) VALUES
     (h, 'Peter', 'Horváth', 'peter.horvath@example.test', true),
-    (l, 'Lukáš', 'Lukáč', 'lukas.lukac@example.test', true);
+    (l, 'Lukáš', 'Lukáč', 'lukas.lukac@example.test', true),
+    (k, 'Klára', 'Nová', 'klara.nova@example.test', true);
   INSERT INTO company (id, name, ico) VALUES (z, 'Zbúraná s.r.o.', '22222222');
 
   -- bývalý: jediné OOM odídené
-  INSERT INTO oom (person_id, eic, type, status) VALUES (h, '24ZZS0000TEST501', 'spotreba', 'odidene');
+  PERFORM pg_temp.t_oom(NULL, NULL, h, '24ZZS000TEST501Y', 'spotreba', 'odidene');
   ASSERT customer_status_calc(NULL, h, t) = 'byvaly_zakaznik', 'odídené OOM';
   ASSERT customer_is_former_calc(NULL, h), 'Horváth je bývalý';
 
@@ -239,9 +242,8 @@ BEGIN
   ASSERT customer_status_calc(NULL, l, t) = 'marketingovy_kontakt', 'prepadnutý deal';
 
   -- zrušený: všetky OOM zrušené alebo prepísané
-  INSERT INTO oom (company_id, eic, type, status) VALUES
-    (z, '24ZZS0000TEST502', 'spotreba', 'zrusene'),
-    (z, '24ZZS0000TEST503', 'spotreba', 'prepisane');
+  PERFORM pg_temp.t_oom(NULL, z, NULL, '24ZZS000TEST502W', 'spotreba', 'zrusene');
+  PERFORM oom_transfer(pg_temp.t_oom(NULL, z, NULL, '24ZZS000TEST503U', 'spotreba', 'aktivne'), NULL, k, '2026-01-01');
   ASSERT customer_status_calc(z, NULL, t) = 'zruseny_zakaznik', 'všetky OOM zrušené/prepísané';
 
   -- súbeh: Alfa má aktívne OOM aj zmluvu od 2027 → ostáva Zákazník (príklad 10.2)
