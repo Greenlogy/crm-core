@@ -1,4 +1,5 @@
-// Nastavenia – Tímy a práva (dizajn 13): tímy hore, matica modul × vidieť / upravovať / archivovať / exportovať.
+// Nastavenia – Tímy a práva (dizajn 13): tímy hore, matica modul × vidieť / upravovať / archivovať / exportovať;
+// pri Odberných miestach navyše importovať a upravovať Aktívne OOM (0015).
 // Poistky (externý tím bez „všetko“, upravovať najviac toľko ako vidieť) stráži databáza; obrazovka ich
 // navyše ukazuje vopred.
 
@@ -10,7 +11,9 @@ import { MODULES, SCOPES, type SettingsTeam } from '../../lib/settings';
 import { SettingsHead } from './SettingsLayout';
 
 const RANK: Record<Scope, number> = { nic: 0, iba_svoje: 1, vsetko: 2 };
-const NONE: Permission = { view: 'nic', edit: 'nic', archive: false, export: false };
+const NONE: Permission = { view: 'nic', edit: 'nic', archive: false, export: false, import: false, edit_active: false };
+/** Moduly s importom a s právom upravovať Aktívne záznamy (zatiaľ iba OOM). */
+const OOM_ONLY: ModuleCode = 'odberne_miesta';
 
 export function TeamsPage() {
   const teams = useApi<{ items: SettingsTeam[] }>('/api/settings/teams');
@@ -164,6 +167,8 @@ function TeamDetail(props: { team: SettingsTeam; onSaved: () => void }) {
               <th>Upravovať</th>
               <th>Archivovať</th>
               <th>Exportovať</th>
+              <th>Importovať</th>
+              <th>Upravovať Aktívne</th>
             </tr>
           </thead>
           <tbody>
@@ -186,13 +191,35 @@ function TeamDetail(props: { team: SettingsTeam; onSaved: () => void }) {
                     <span className="sr-only">{m.label} – exportovať</span>
                   </Check>
                 </td>
+                {m.code === OOM_ONLY ? (
+                  <>
+                    <td>
+                      <Check checked={perms[m.code].import} onChange={(v) => set(m.code, { import: v })}>
+                        <span className="sr-only">{m.label} – importovať z Excelu</span>
+                      </Check>
+                    </td>
+                    <td>
+                      <Check checked={perms[m.code].edit_active} onChange={(v) => set(m.code, { edit_active: v })}>
+                        <span className="sr-only">{m.label} – upravovať Aktívne odberné miesta</span>
+                      </Check>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="muted" aria-label="nepoužíva sa">–</td>
+                    <td className="muted" aria-label="nepoužíva sa">–</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="card-foot team-foot">
-        <span className="caption">„Iba svoje“ = záznamy, kde je používateľ vlastníkom. Zmena platí pre všetkých členov tímu naraz.</span>
+        <span className="caption">
+          „Iba svoje“ = záznamy, kde je používateľ vlastníkom. „Upravovať Aktívne“ = smie meniť Aktívne odberné miesto,
+          jeho zariadenia a kontaktné osoby (bez neho iba Pripravované). Zmena platí pre všetkých členov tímu naraz.
+        </span>
         {t.archived_at ? (
           <button type="button" className="btn" onClick={() => archive(false)} disabled={save.busy}>
             Obnoviť tím

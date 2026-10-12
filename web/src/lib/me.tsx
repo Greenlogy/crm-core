@@ -13,7 +13,7 @@ export function useMe(): Me {
 }
 
 export function permission(me: Me, module: ModuleCode): Permission {
-  return me.permissions[module] ?? { view: 'nic', edit: 'nic', archive: false, export: false };
+  return me.permissions[module] ?? { view: 'nic', edit: 'nic', archive: false, export: false, import: false, edit_active: false };
 }
 
 export const ENVIRONMENT_LABEL: Record<string, string> = { test: 'Test', ostre: 'Ostré' };

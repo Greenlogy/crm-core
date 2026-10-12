@@ -149,7 +149,8 @@ settings.get('/teams', async (c) => {
               SELECT u.name FROM app_user u WHERE u.team_id = t.id AND u.status <> 'deaktivovany'
                ORDER BY lower(u.name) LIMIT 3) x) AS member_names,
            coalesce((SELECT json_object_agg(p.module, json_build_object('view', p.view_scope, 'edit', p.edit_scope,
-                                                                        'archive', p.can_archive, 'export', p.can_export))
+                                                                        'archive', p.can_archive, 'export', p.can_export,
+                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom))
                        FROM team_permission p WHERE p.team_id = t.id), '{}') AS permissions
       FROM team t
      ORDER BY t.archived_at IS NOT NULL,
@@ -196,7 +197,8 @@ settings.patch('/teams/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Celá matica práv tímu naraz: { permissions: { zakaznici: { view, edit, archive, export }, … } }
+// Celá matica práv tímu naraz: { permissions: { zakaznici: { view, edit, archive, export, import, edit_active }, … } }
+// import a edit_active sú nepovinné (staršia obrazovka ich neposiela → bez zmeny); edit_active iba pri OOM.
 settings.patch('/teams/:id/permissions', async (c) => {
   const id = c.req.param('id');
   if (!UUID.test(id)) throw new BadRequest('Neplatné ID.');
@@ -210,11 +212,15 @@ settings.patch('/teams/:id/permissions', async (c) => {
     const edit = oneOf(pb, 'edit', 'Upravovať', SCOPES)!;
     const archive = bool(pb, 'archive', 'Archivovať')!;
     const exp = bool(pb, 'export', 'Exportovať')!;
+    const imp = bool(pb, 'import', 'Importovať');
+    const editActive = module === 'odberne_miesta' ? bool(pb, 'edit_active', 'Upravovať Aktívne OOM') : undefined;
     if ([view, edit, archive, exp].some((v) => v === undefined)) throw new BadRequest('Neúplné práva modulu.');
     await c.var.sql`
       UPDATE team_permission
          SET view_scope = ${view}::access_scope, edit_scope = ${edit}::access_scope,
-             can_archive = ${archive}, can_export = ${exp}
+             can_archive = ${archive}, can_export = ${exp},
+             can_import = coalesce(${imp ?? null}::boolean, can_import),
+             can_edit_active_oom = coalesce(${editActive ?? null}::boolean, can_edit_active_oom)
        WHERE team_id = ${id} AND module = ${module}::crm_module`;
   }
   return c.json({ ok: true });

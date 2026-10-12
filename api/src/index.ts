@@ -100,7 +100,8 @@ app.get('/me', async (c) => {
                                      ORDER BY o.is_default DESC, o.legal_name)
                        FROM org o WHERE o.id = ANY (crm_user_orgs())), '[]') AS orgs,
            coalesce((SELECT json_object_agg(p.module, json_build_object('view', p.view_scope, 'edit', p.edit_scope,
-                                                                        'archive', p.can_archive, 'export', p.can_export))
+                                                                        'archive', p.can_archive, 'export', p.can_export,
+                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom))
                        FROM team_permission p WHERE p.team_id = u.team_id), '{}') AS permissions
       FROM app_user u
       JOIN team t ON t.id = u.team_id

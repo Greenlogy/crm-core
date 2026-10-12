@@ -312,6 +312,8 @@ export const COLUMN_LABEL: Record<string, string> = {
   edit_scope: 'Upravovať',
   can_archive: 'Archivovať',
   can_export: 'Exportovať',
+  can_import: 'Importovať',
+  can_edit_active_oom: 'Upravovať Aktívne OOM',
   all_orgs: 'Všetky spoločnosti',
   hidden_at: 'Skryté',
   archived_at: 'Archivované',

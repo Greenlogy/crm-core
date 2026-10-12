@@ -357,7 +357,8 @@ export function useApi<T>(path: string): Loadable<T> {
 
 export type Scope = 'nic' | 'iba_svoje' | 'vsetko';
 export type ModuleCode = 'zakaznici' | 'odberne_miesta' | 'obchod' | 'zmluvy' | 'provizie' | 'servis' | 'marketing';
-export type Permission = { view: Scope; edit: Scope; archive: boolean; export: boolean };
+/** import a edit_active (upravovať Aktívne OOM) majú zmysel iba pri module odberne_miesta (0015). */
+export type Permission = { view: Scope; edit: Scope; archive: boolean; export: boolean; import: boolean; edit_active: boolean };
 export type OrgRef = { id: string; name: string; country: string; currency: string; status: string; default: boolean };
 
 export type Me = {
