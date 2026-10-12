@@ -141,8 +141,11 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
                  c.status, c.status_source, c.status_changed_at, c.is_former_customer, c.is_producer,
                  CASE WHEN c.is_producer THEN 'Firma · výrobca' ELSE 'Firma' END AS segment_label,
                  company_is_archived(c) AS archived, ${sql.unsafe(CITY('c.address'))} AS city,
-                 c.hubspot_id, c.created_at, c.updated_at, u.name AS owner_name, t.name AS owner_team
+                 c.hubspot_id, c.created_at, c.updated_at, u.name AS owner_name, t.name AS owner_team,
+                 c.owner_id, c.org_id, o.legal_name AS org_name, c.country, c.custom,
+                 crm_company_access(c.id, 'edit') AS can_edit
             FROM company c
+            JOIN org o ON o.id = c.org_id
             LEFT JOIN app_user u ON u.id = c.owner_id
             LEFT JOIN team t ON t.id = u.team_id
            WHERE c.id = ${id}`
@@ -153,8 +156,11 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
                  CASE WHEN p.is_producer THEN 'Domácnosť · výrobca' ELSE 'Domácnosť' END AS segment_label,
                  p.archived, p.marketing_allowed, p.marketing_opt_out_at, p.marketing_opt_out_source,
                  ${sql.unsafe(CITY('p.address'))} AS city,
-                 p.hubspot_id, p.created_at, p.updated_at, u.name AS owner_name, t.name AS owner_team
+                 p.hubspot_id, p.created_at, p.updated_at, u.name AS owner_name, t.name AS owner_team,
+                 p.owner_id, p.org_id, o.legal_name AS org_name, p.custom,
+                 crm_contact_access(p.id, 'edit') AS can_edit
             FROM contact_v p
+            JOIN org o ON o.id = p.org_id
             LEFT JOIN app_user u ON u.id = p.owner_id
             LEFT JOIN team t ON t.id = u.team_id
            WHERE p.id = ${id}`;

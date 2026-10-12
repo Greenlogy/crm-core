@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
 import { Avatar, Card, ErrorState, Pill, Skeleton, Source } from '../components/ui';
 import { useApi, type ContactList } from '../lib/api';
 import { date, num } from '../lib/format';
@@ -16,6 +17,8 @@ export function ContactsPage() {
   const role = params.get('rola') ?? '';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
+  const canCreate = useCanCreateCustomers();
+  const [creating, setCreating] = useState(false);
 
   const update = (next: Record<string, string>) => {
     const merged = { q, rola: role, page: String(page), ...next };
@@ -43,11 +46,13 @@ export function ContactsPage() {
             <Source />
           </div>
         </div>
-        <div className="head-actions">
-          <button className="btn primary" type="button" disabled title="V prototype nie je">
-            Nová osoba
-          </button>
-        </div>
+        {canCreate && (
+          <div className="head-actions">
+            <button className="btn primary" type="button" onClick={() => setCreating(true)}>
+              Nová osoba
+            </button>
+          </div>
+        )}
       </header>
 
       <Card flush label="Zoznam osôb">
@@ -176,6 +181,7 @@ export function ContactsPage() {
           </div>
         )}
       </Card>
+      {creating && <PersonFormPanel household={false} onClose={() => setCreating(false)} />}
     </>
   );
 }

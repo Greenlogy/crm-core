@@ -1,7 +1,9 @@
 // Karta firmy podľa docs/dizajn/obrazovky/01-karta-firmy.html (variant B, modul Zákazníci):
 // KPI v jednom rade; vľavo údaje, FinStat a vývoj stavu, v strede časová os, vpravo kontakty, OOM, dealy, zmluvy.
 
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CompanyFormPanel } from '../components/customer-forms';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -18,12 +20,15 @@ import {
   Source,
 } from '../components/ui';
 import { useApi, type CompanyCard } from '../lib/api';
+import { useMe } from '../lib/me';
 import { kw, mwh, num, text } from '../lib/format';
 import { label, PAYMENT_RATING, rolesText, yesNo } from '../lib/labels';
 
 export function CustomerPage() {
   const { id = '' } = useParams();
-  const { data: c, error } = useApi<CompanyCard>(`/api/companies/${id}`);
+  const { data: c, error, reload } = useApi<CompanyCard>(`/api/companies/${id}`);
+  const me = useMe();
+  const [editing, setEditing] = useState(false);
 
   if (error) return <ErrorState error={error} />;
   if (!c || c.id !== id) return <PageSkeleton />;
@@ -51,14 +56,23 @@ export function CustomerPage() {
               {c.is_supplier && <Pill tone="info">Dodávateľ</Pill>}
             </div>
             <div className="page-sub">
-              {c.ico && <span className="mono">IČO {c.ico}</span>}
+              {c.ico && <span className="mono">{c.country === 'HR' ? 'OIB' : 'IČO'} {c.ico}</span>}
+              {me.orgs.length > 1 && <span>{c.org_name}</span>}
               {c.city && <span>{c.city}</span>}
               {c.owner_name && <span>{c.owner_name}</span>}
               <HubSpotLink object="company" id={c.hubspot_id} />
             </div>
           </div>
         </div>
+        {c.can_edit && me.team_code !== 'servis' && (
+          <div className="head-actions">
+            <button type="button" className="btn" onClick={() => setEditing(true)}>
+              Upraviť
+            </button>
+          </div>
+        )}
       </header>
+      {editing && <CompanyFormPanel company={c} onClose={() => setEditing(false)} onSaved={reload} />}
 
       <section className="kpis" aria-label="Ukazovatele">
         <Kpi label="Odberné miesta" value={num(k.oom_count, 0)} sub={`aktívne ${num(k.oom_active, 0)}`} />
@@ -76,7 +90,7 @@ export function CustomerPage() {
               rows={[
                 ['Obchodník', owner],
                 ['Označenie', text(marks)],
-                ['IČO', <span className="mono">{text(c.ico)}</span>],
+                [c.country === 'HR' ? 'OIB' : 'IČO', <span className="mono">{text(c.ico)}</span>],
                 ['DIČ', text(c.dic)],
                 ['IČ DPH', text(c.ic_dph)],
                 ['Bankový účet', <span className="mono">{text(c.bank_account)}</span>],

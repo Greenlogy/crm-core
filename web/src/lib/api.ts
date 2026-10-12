@@ -155,9 +155,17 @@ type CardBase = {
   deals: DealRow[];
   contracts: (ContractRow & { pipeline: string | null })[];
   history: StatusChange[];
+  // úpravy (modul Zákazníci F1)
+  owner_id: string | null;
+  org_id: string;
+  org_name: string;
+  can_edit: boolean;
+  custom: Record<string, unknown>;
 };
 
 export type CompanyCard = CardBase & {
+  country: 'SK' | 'CZ' | 'HR';
+  legal_form: string | null;
   kind: 'company';
   ico: string | null;
   dic: string | null;
@@ -191,6 +199,8 @@ export type CompanyCard = CardBase & {
 
 export type PersonCard = CardBase & {
   kind: 'person';
+  first_name: string;
+  last_name: string;
   title: string | null;
   email: string | null;
   phone: string | null;

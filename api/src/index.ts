@@ -7,9 +7,10 @@ import { Hono } from 'hono';
 import { accessEmail } from './auth';
 import { asUser, connect } from './db';
 import { dbErrorResponse } from './errors';
+import { customersWrite } from './routes/customers-write';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
-import { BadRequest } from './validate';
+import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTERS } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
@@ -105,6 +106,9 @@ app.get('/me', async (c) => {
   return me ? c.json(me) : c.json({ error: 'Nemáte prístup do CRM.' }, 403);
 });
 
+// Zákazníci – zakladanie, úpravy, duplicity (pred kartami: /companies/search nie je id)
+app.route('/', customersWrite);
+
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
 app.get('/customers', async (c) => {
@@ -161,6 +165,7 @@ app.notFound((c) => c.json({ error: 'Neznáma cesta.' }, 404));
 
 app.onError((err, c) => {
   if (err instanceof BadRequest) return c.json({ error: err.message }, 400);
+  if (err instanceof Forbidden) return c.json({ error: err.message }, 403);
   const known = dbErrorResponse(err);
   if (known) return c.json(known.body, known.status);
   // Bez správy chyby: môže obsahovať hodnoty z databázy.

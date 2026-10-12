@@ -4,6 +4,8 @@
 import { UUID } from './types';
 
 export class BadRequest extends Error {}
+/** Na zmenu nemá právo (odpoveď 403). */
+export class Forbidden extends Error {}
 
 export type Body = Record<string, unknown>;
 

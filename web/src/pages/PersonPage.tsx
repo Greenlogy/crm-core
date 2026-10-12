@@ -1,7 +1,9 @@
 // Karta osoby podľa docs/dizajn/obrazovky/10-karta-osoby.html (modul Zákazníci):
 // domácnosť aj kontakt vo firme. Vľavo údaje, firmy a vývoj stavu, v strede časová os, vpravo OOM, dealy, zmluvy.
 
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { PersonFormPanel } from '../components/customer-forms';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -24,7 +26,8 @@ import { CUSTOMER_STATUS, rolesText } from '../lib/labels';
 
 export function PersonPage() {
   const { id = '' } = useParams();
-  const { data: p, error } = useApi<PersonCard>(`/api/persons/${id}`);
+  const { data: p, error, reload } = useApi<PersonCard>(`/api/persons/${id}`);
+  const [editing, setEditing] = useState(false);
 
   if (error) return <ErrorState error={error} />;
   if (!p || p.id !== id) return <PageSkeleton />;
@@ -66,7 +69,15 @@ export function PersonPage() {
             </div>
           </div>
         </div>
+        {p.can_edit && (
+          <div className="head-actions">
+            <button type="button" className="btn" onClick={() => setEditing(true)}>
+              Upraviť
+            </button>
+          </div>
+        )}
       </header>
+      {editing && <PersonFormPanel person={p} onClose={() => setEditing(false)} onSaved={reload} />}
 
       {p.is_household && (
         <section className="kpis" aria-label="Kľúčové čísla">

@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CustomerStatus } from '../components/customer';
+import { CompanyFormPanel, PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
 import { Avatar, Card, ErrorState, Skeleton, Source } from '../components/ui';
 import { useApi, type CustomerList, type CustomerListItem, type Owner } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
@@ -46,6 +47,8 @@ export function CustomersPage(props: { leads?: boolean }) {
   const showAll = params.get('vsetko') === '1';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
   const [input, setInput] = useState(q);
+  const canCreate = useCanCreateCustomers();
+  const [creating, setCreating] = useState<'company' | 'person' | null>(null);
 
   const update = (next: Record<string, string>) => {
     const merged = { q, stav: props.leads ? '' : chip, segment, obchodnik: owner, vsetko: showAll ? '1' : '', page: String(page), ...next };
@@ -88,12 +91,19 @@ export function CustomersPage(props: { leads?: boolean }) {
           </div>
         </div>
         <div className="head-actions">
-          <button className="btn" type="button" disabled title="V prototype nie je">
+          <button className="btn" type="button" disabled title="Pripravuje sa (F4)">
             Export
           </button>
-          <button className="btn primary" type="button" disabled title="V prototype nie je">
-            Nový zákazník
-          </button>
+          {canCreate && (
+            <>
+              <button className="btn" type="button" onClick={() => setCreating('person')}>
+                Nová domácnosť
+              </button>
+              <button className="btn primary" type="button" onClick={() => setCreating('company')}>
+                Nová firma
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -242,6 +252,8 @@ export function CustomersPage(props: { leads?: boolean }) {
           </div>
         )}
       </Card>
+      {creating === 'company' && <CompanyFormPanel onClose={() => setCreating(null)} />}
+      {creating === 'person' && <PersonFormPanel household onClose={() => setCreating(null)} />}
     </>
   );
 }

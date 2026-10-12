@@ -35,10 +35,12 @@ const HIDDEN_COLUMNS = new Set(['id', 'created_at', 'updated_at', 'hubspot_id', 
 
 function changes(row: AuditRow): { field: string; old: string; new: string }[] {
   if (row.action === 'update') {
-    return Object.entries(row.diff).map(([k, v]) => {
+    return Object.entries(row.diff)
+      .filter(([k]) => !HIDDEN_COLUMNS.has(k))
+      .map(([k, v]) => {
       const d = v as { old: unknown; new: unknown };
-      return { field: k, old: show(d.old), new: show(d.new) };
-    });
+        return { field: k, old: show(d.old), new: show(d.new) };
+      });
   }
   const verb = row.action === 'insert' ? 'vytvorené' : 'zmazané';
   const summary = Object.entries(row.diff)

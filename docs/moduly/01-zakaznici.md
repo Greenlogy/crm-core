@@ -130,3 +130,21 @@ Zobrazenie: „Domácnosť“, „Domácnosť · výrobca“, „Firma“, „Fi
 - **Kontakt zrušenej firmy.** Osoba, ktorá je iba kontaktom firmy v archíve (nemá inú aktívnu firmu a nie je sama zákazníkom), sa skryje z Kontaktov aj z marketingu.
 - **Ochrana prístupu v databáze.** Obmedzenie externého obchodníka (čl. 6) platí priamo v databáze (Row Level Security), nie iba v API. Nahrádza skoršie rozhodnutie „externý má rovnaké práva ako interný, RLS sa nerobí“.
 - **Zmena vlastníka** mimo vedenia je povolená iba jednej určenej databázovej role pre synchronizáciu, nie každému spojeniu bez prihláseného používateľa.
+
+## 14. Dokončenie modulu nad Nastaveniami (schválené 12. 10. 2026)
+
+Plán (fázy, každá s testovacím scenárom pre Petra; nasadenie na Test robí Peter, commit až po jeho vyskúšaní):
+
+- **F1 – Nová firma, nová osoba, úprava:** spoločnosť, krajina a IČO/OIB, označenia, vlastník; kontrola duplicít (IČO; e-mail a telefón iba upozornenie); úprava podľa práv tímu.
+- **F2 – Firma – osoba, vlastník, marketing, časová os:** pridanie a odobratie osoby vo firme, roly z číselníka, hlavný kontakt; zmena vlastníka (CEO a admin); „nechce marketing“ (dátum a zdroj); poznámka na časovej osi firmy a osoby (autor a čas); „Vývoj stavu“ na karte firmy aj osoby z auditu.
+- **F3 – Vlastné polia** na kartách (po sekciách), v zoznamoch ako stĺpce a filtre.
+- **F4 – Zoznamy a export:** zoznam Zákazníci predvolene bez marketingových kontaktov a archívu (prepínač „zobraziť aj…“); Leady = filter Záujemca + Ponuka; hľadanie podľa názvu, IČO/OIB, e-mailu a telefónu; filter a stĺpec Spoločnosť pre tímy so všetkými spoločnosťami; export do .xlsx s právom „exportovať“ a záznamom exportu.
+
+Rozhodnuté:
+
+1. **FinStat:** v F1 ručné vyplnenie; napojenie podľa IČO neskôr ako samostatný krok, API kľúč iba cez `wrangler secret`.
+2. **Servis** mení e-mail, telefón, mobil, adresu, „nechce marketing“, pridáva a odoberá osobu vo firme a mení jej roly. Nemení názov, IČO, označenia ani vlastníka.
+3. **Mazanie:** admin smie zmazať firmu alebo osobu bez väzieb (deal, odberné miesto, zmluva, osoba vo firme, aktivita); audit zapíše kto, kedy a celý obsah záznamu. Inak iba archív.
+4. **Export:** súbor .xlsx; IČO/OIB, telefóny a EIC ako text (bez straty úvodných núl).
+
+Stav: F1 na Teste, Peter vyskúšal 12. 10. 2026 (scenár 10 krokov vrátane práv Marketing a Servis).

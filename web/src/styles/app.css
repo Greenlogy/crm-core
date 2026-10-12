@@ -1377,3 +1377,44 @@ textarea.inp {
 .audit-cont td {
   border-top: 0;
 }
+
+/* --- Formuláre zákazníkov --- */
+
+.pick-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.pick-item {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  border: 0;
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 7px 10px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pick-item:hover {
+  background: var(--surface-muted);
+}
+.picked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.delete-error {
+  font-size: 12px;
+  color: var(--negative);
+  max-width: 220px;
+}

@@ -68,7 +68,8 @@ auditSettings.get('/audit', async (c) => {
                                                 JOIN custom_field f ON f.id = x.field_id JOIN team t ON t.id = x.team_id
                                                WHERE x.id = a.record_id)
              END,
-             a.diff ->> 'name', a.diff ->> 'label', a.diff ->> 'legal_name', a.diff ->> 'email') AS record_label
+             a.diff ->> 'name', a.diff ->> 'label', a.diff ->> 'legal_name',
+             nullif(concat_ws(' ', a.diff ->> 'first_name', a.diff ->> 'last_name'), ''), a.diff ->> 'email') AS record_label
         FROM audit_log a
        WHERE (${user} = '' OR (${user} = 'system' AND a.changed_by IS NULL)
               OR (${user} NOT IN ('', 'system') AND a.changed_by::text = ${user}))
