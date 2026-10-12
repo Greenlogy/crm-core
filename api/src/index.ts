@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import { accessEmail } from './auth';
-import { asUser, connect } from './db';
+import { asUser, connect, type Env } from './db';
 import { dbErrorResponse } from './errors';
 import { customersWrite } from './routes/customers-write';
 import { exportRoutes } from './routes/export';
@@ -24,6 +24,7 @@ import {
   type CustomerKind,
 } from './queries/customers';
 import { oomCard } from './queries/oom';
+import { dailyOomActivation } from './jobs';
 
 const app = new Hono<AppEnv>().basePath('/api');
 
@@ -178,4 +179,10 @@ app.onError((err, c) => {
   return c.json({ error: 'Chyba servera.' }, 500);
 });
 
-export default app;
+// Worker: API (fetch) a naplánované úlohy (scheduled, Cron v wrangler.toml).
+export default {
+  fetch: app.fetch,
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(dailyOomActivation(env));
+  },
+} satisfies ExportedHandler<Env>;
