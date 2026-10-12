@@ -42,6 +42,6 @@ Aktualizované: 12. 10. 2026
 
 ## Ďalší krok
 
-- Modul 0 Nastavenia: commit migrácií 0006–0008 (po súhlase); potom rola aplikácie `crm_app`, overenie prihlásenia (Access) v API a obrazovky Nastavení.
+- Modul 0 Nastavenia: kroky A–C hotové na Teste (12. 10.): rola `crm_app` (migrácia 0009), Hyperdrive `crm-core-dev` → `crm_app` s vypnutou cache, Worker nasadený s prihlásením (overenie tokenu Access + používateľ CRM); `/api/me` overené (Peter: CEO, admin, 3 spoločnosti). Ďalej: v Access povoliť @greenlogy.com (Google), potom obrazovky Nastavení (11–16) a zápis v API.
 - Modul 2 – prototyp (`docs/moduly/02-prototyp.md`): vzorka 44 zákazníkov nahratá na `dev`. Rola `crm_prototype_ro` hotová. Prototyp beží na https://crm-core.peter-700.workers.dev (Access, iba Peter). Ďalej krok 8: Peter prezrie vzorku a zapíše zistenia.
 - Nasadenie modulu 1 na `main` po Petrovom pokyne.

@@ -1,5 +1,6 @@
 # Greenlogy CRM – jeden Worker pre API (/api/*) aj frontend (statické súbory z web/dist).
-# Prototyp iba na čítanie (modul 2). Prístup chráni Cloudflare Access na Workeri (All traffic).
+# Prístup chráni Cloudflare Access na Workeri (All traffic); Worker navyše overí token Access
+# a pustí iba aktívnych používateľov CRM (api/src/auth.ts).
 name = "crm-core"
 main = "src/index.ts"
 compatibility_date = "2026-09-15"
@@ -15,11 +16,16 @@ directory = "../web/dist"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*"]
 
-# Hyperdrive na Neon vetvu dev s rolou crm_prototype_ro.
+# Hyperdrive na Neon vetvu dev s rolou aplikácie crm_app (bez prihláseného používateľa nevidí nič).
 # Lokálne (wrangler dev) sa použije CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE z ./dev.sh.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "c7a47fba727d45ec83565393f125c9d0"
+
+# Cloudflare Access (nie sú tajné): tím a AUD aplikácie crm-core (rozhodnutie 2026-10-12).
+[vars]
+ACCESS_TEAM_DOMAIN = "https://greenlogy.cloudflareaccess.com"
+ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 
 [observability]
 enabled = true

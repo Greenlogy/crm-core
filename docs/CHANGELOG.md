@@ -2,6 +2,11 @@
 
 ## 2026-10-12
 
+- Test: cache Hyperdrive vypnutá, Worker nasadený s prihlásením (Peter); `/api/me` vracia Petra (CEO, admin, 3 spoločnosti, plné práva)
+- Krok C (lokálne overené, nenasadené): API overí token Cloudflare Access (`api/src/auth.ts`, `jose` 6.2.12), pustí iba aktívneho používateľa CRM (`app_user_login`, inak 403), každá požiadavka v transakcii s `app.user_id` (`asUser`); nový `GET /api/me` (tím, admin, spoločnosti, práva); `wrangler.toml` s tímom a AUD Access; `dev.sh` s `CRM_DEV_EMAIL`; `smoke.sh` volá `/api/me`; `update-hyperdrive.sh` vypína cache
+- Krok B: `api/db/update-hyperdrive.sh` a `api/dev.sh` používajú `DATABASE_URL_DEV_APP` (rola `crm_app`); rola `crm_app` na `dev` vytvorená skriptom (Peter), predtým zmazaná rola z Neon Console (obchádzala RLS)
+- Rola aplikácie `crm_app`: `api/db/app-role.sql` (práva), `api/db/create-app-role.sh` (vytvorenie, heslo do `.dev.vars` ako `DATABASE_URL_DEV_APP`, overenie); migrácia `0009_app_role_require_user` (rola crm_app vždy potrebuje prihláseného používateľa). Lokálne overené, na Neone nespustené
+- Commit `384c639`: Modul 0 Nastavenia, migrácie 0006–0008, testy, vyprázdnenie Testu
 - Test (`dev`): vyprázdnený skriptom `db/empty-test.sh`, rola `crm_prototype_ro` zrušená, migrácie 0006–0008 spustené (Peter), testy prešli (88 kontrol), `db/schema.sql` aktualizovaný
 - Modul 0 Nastavenia: návrh databázy schválený, odpovede a odchýlky zapísané (`00-nastavenia-navrh-db.md` v0.2, `rozhodnutia.md`)
 - Migrácie (nespustené na Neone): `0006_nastavenia_jadro` (spoločnosti, logo, bankové účty, tímy a práva, používatelia so stavom a adminom, prístup k spoločnostiam, funkcie práv, prihlásenie a deaktivácia s odovzdaním, pracovný čas a voľné dni podľa spoločnosti s prepočtom kalendára, audit so zdrojom a vlastnými poliami po kľúčoch, nemenný audit, záznam exportov, RLS Nastavení, východiskové údaje), `0007_nastavenia_obsah` (číselníky so systémovými hodnotami, vlastné polia s kontrolou hodnôt, pipelines a stage s výsledkom a povinnými poliami), `0008_zakaznici_spolocnost` (spoločnosť na záznamoch, krajina a IČO/OIB, roly a zdroj z číselníka, RLS podľa tímu a spoločnosti namiesto 0005, kontrola duplicít)

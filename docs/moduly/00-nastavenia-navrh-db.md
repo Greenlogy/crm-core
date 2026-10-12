@@ -468,7 +468,7 @@ Pozvánka e-mailom: v prvej verzii CRM pozvánku neposiela, admin pošle odkaz s
 
 **Neon**
 7. Súhlas s vyprázdnením `dev` (vzorka prototypu podľa manifestu) a zrušením roly `crm_prototype_ro`.
-8. Vytvoriť rolu `crm_app` (heslo) s `app.require_user = on`; neskôr rolu `crm_sync`. Príkazy pripravím.
+8. Rolu `crm_app` vytvára **iba skript** `api/db/create-app-role.sh` (SQL), **nikdy Neon Console** – rola z Console je členom `neon_superuser` a obchádza RLS. „Bez používateľa nič“ zabezpečuje migrácia 0009 podľa mena roly. Neskôr rola `crm_sync` rovnakým spôsobom.
 9. Súhlas so spustením migrácií `0006`–`0008` na `dev` (každú zvlášť, po kontrole).
 
 **Tajomstvá**

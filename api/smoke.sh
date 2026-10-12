@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Skúšobné volanie všetkých endpointov bežiaceho API (./dev.sh). Iba čítanie.
+# Skúšobné volanie všetkých endpointov bežiaceho API (./dev.sh, prihlásený CRM_DEV_EMAIL). Iba čítanie.
 # Použitie: cd ~/projects/greenlogy/crm-core/api && ./smoke.sh [http://localhost:8787]
 # Odpovede ukladá do exports/prototyp/api/, do terminálu iba stavové kódy a počty.
 
@@ -33,6 +33,7 @@ pick() { # súbor výraz – vyberie ID bez vypisovania dát
 }
 
 echo "health:      $(call health /api/health) $(summary health)"
+echo "me:          $(call me /api/me) tím $(pick me 'd.team_code'), spoločností $(pick me 'd.orgs?.length')"
 echo "customers:   $(call customers '/api/customers') total $(pick customers 'd.total'), $(summary customers)"
 echo "hľadanie:    $(call customers-q '/api/customers?q=a&segment=firma') total $(pick customers-q 'd.total')"
 echo "všetky:      $(call customers-all '/api/customers?status=vsetky') total $(pick customers-all 'd.total') (aj marketingové kontakty a archív)"

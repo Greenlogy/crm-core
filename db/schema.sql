@@ -1250,8 +1250,16 @@ $$;
 CREATE FUNCTION public.crm_require_user() RETURNS boolean
     LANGUAGE sql STABLE
     AS $$
-  SELECT coalesce(current_setting('app.require_user', true), '') = 'on'
+  SELECT current_user = 'crm_app' OR session_user = 'crm_app'
+      OR coalesce(current_setting('app.require_user', true), '') = 'on'
 $$;
+
+
+--
+-- Name: FUNCTION crm_require_user(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_require_user() IS 'true = spojenie aplikácie: bez prihláseného používateľa nevidí nič (rola crm_app vždy, testy cez app.require_user)';
 
 
 --
@@ -7118,4 +7126,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0005'),
     ('0006'),
     ('0007'),
-    ('0008');
+    ('0008'),
+    ('0009');

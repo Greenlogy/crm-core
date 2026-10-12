@@ -1,8 +1,11 @@
-// API jadra Greenlogy CRM – prototyp iba na čítanie (modul 2, krok 4; zoznam a karty podľa modulu Zákazníci).
-// Iba GET. Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
+// API jadra Greenlogy CRM. Zatiaľ iba čítanie (GET); zápis príde s obrazovkami Nastavení.
+// Každá požiadavka: overenie prihlásenia (Cloudflare Access) → používateľ z CRM (app_user_login)
+// → transakcia s app.user_id, takže platia práva tímu a spoločností priamo v databáze.
+// Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
 
 import { Hono } from 'hono';
-import { connect, type Env, type Sql } from './db';
+import { accessEmail } from './auth';
+import { asUser, connect, type Env, type Sql } from './db';
 import { listContacts, ROLE_FILTERS } from './queries/contacts';
 import { contractCard } from './queries/contracts';
 import {
@@ -16,7 +19,7 @@ import {
 } from './queries/customers';
 import { oomCard } from './queries/oom';
 
-type Vars = { sql: Sql };
+type Vars = { sql: Sql; userId: string };
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
@@ -39,12 +42,53 @@ app.use('*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
 });
 
+// Prihlásenie: kto nie je aktívny používateľ CRM, nedostane nič (návrh Nastavení, časť 5).
+app.use('*', async (c, next) => {
+  if (c.req.path === '/api/health') return next();
+  const email = await accessEmail(c.req.raw, c.env);
+  if (!email) return c.json({ error: 'Neprihlásený.' }, 401);
+  const [login] = await c.var.sql<{ user_id: string | null }[]>`
+    SELECT user_id FROM app_user_login(${email})`;
+  if (!login?.user_id) return c.json({ error: 'Nemáte prístup do CRM. Obráťte sa na administrátora.' }, 403);
+  c.set('userId', login.user_id);
+
+  // Celá požiadavka v jednej transakcii s používateľom; chyba v obsluhe ju vráti späť.
+  try {
+    await asUser(c.var.sql, login.user_id, async (tx) => {
+      c.set('sql', tx);
+      await next();
+      if (c.error) throw c.error;
+    });
+  } catch (err) {
+    if (err !== c.error) throw err;
+  }
+});
+
 const notFound = (c: { json: (b: unknown, s: 404) => Response }) => c.json({ error: 'Záznam neexistuje.' }, 404);
 const badId = (c: { json: (b: unknown, s: 400) => Response }) => c.json({ error: 'Neplatné ID.' }, 400);
 
 app.get('/health', async (c) => {
   await c.var.sql`SELECT 1`;
   return c.json({ ok: true });
+});
+
+// Prihlásený používateľ: tím, admin, spoločnosti a práva po moduloch (frontend podľa nich skryje,
+// čo používateľ nesmie; skutočné obmedzenie je v databáze).
+app.get('/me', async (c) => {
+  const [me] = await c.var.sql`
+    SELECT u.id, u.name, u.email, u.is_admin, t.code AS team_code, t.name AS team_name,
+           t.can_change_owner OR u.is_admin AS can_change_owner,
+           coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
+                                                       'currency', o.currency, 'status', o.status, 'default', o.is_default)
+                                     ORDER BY o.is_default DESC, o.legal_name)
+                       FROM org o WHERE o.id = ANY (crm_user_orgs())), '[]') AS orgs,
+           coalesce((SELECT json_object_agg(p.module, json_build_object('view', p.view_scope, 'edit', p.edit_scope,
+                                                                        'archive', p.can_archive, 'export', p.can_export))
+                       FROM team_permission p WHERE p.team_id = u.team_id), '{}') AS permissions
+      FROM app_user u
+      JOIN team t ON t.id = u.team_id
+     WHERE u.id = ${c.var.userId}`;
+  return me ? c.json(me) : c.json({ error: 'Nemáte prístup do CRM.' }, 403);
 });
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),

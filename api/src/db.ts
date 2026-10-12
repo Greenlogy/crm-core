@@ -1,8 +1,10 @@
 // Pripojenie na databázu cez Hyperdrive (postgres.js). Jedno pripojenie na požiadavku.
+// Rola crm_app bez prihláseného používateľa nevidí nič; používateľa nastavuje asUser() v transakcii.
 
 import postgres from 'postgres';
+import type { AuthEnv } from './auth';
 
-export type Env = {
+export type Env = AuthEnv & {
   HYPERDRIVE: Hyperdrive;
 };
 
@@ -19,4 +21,16 @@ export function connect(env: Env): Sql {
       date: { to: DATE_OID, from: [DATE_OID], serialize: (v: string) => v, parse: (v: string) => v },
     },
   });
+}
+
+/**
+ * Spustí fn v transakcii s prihláseným používateľom (SET LOCAL app.user_id): platia práva tímu (RLS)
+ * a audit zapíše, kto zmenu urobil. Nastavenie sa končí s transakciou, takže sa nedostane
+ * k inej požiadavke cez spoločné pripojenia Hyperdrive.
+ */
+export async function asUser<T>(sql: Sql, userId: string, fn: (tx: Sql) => Promise<T>): Promise<T> {
+  return (await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.user_id', ${userId}, true)`;
+    return fn(tx as unknown as Sql);
+  })) as T;
 }
