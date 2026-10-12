@@ -2,6 +2,10 @@
 -- Spúšťa sa iba na vetve dev cez db/test/run.sh (v transakcii, ktorá sa na konci vráti).
 -- Pevné uuid (prefix 00000000-0000-4000-8000-) uľahčujú odkazy v checks.sql.
 
+-- Prepočet stavu zákazníka (0014) je v testoch vypnutý, kým ho checks_oom.sql nezapne
+-- (na dev môže byť zapnutý; transakcia testov sa na konci vráti).
+UPDATE app_setting SET value = 'false' WHERE key = 'customer_status_auto';
+
 -- Používateľ: tím Sales_internal z východiskových údajov (0006)
 INSERT INTO app_user (id, email, name, team_id, status)
 SELECT '00000000-0000-4000-8000-000000000011', 'obchodnik@example.test', 'Testovací Obchodník', t.id, 'aktivny'

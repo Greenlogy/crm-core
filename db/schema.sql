@@ -1076,6 +1076,22 @@ $$;
 
 
 --
+-- Name: crm_as_system(boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_as_system(p_on boolean) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_prev text := current_setting('app.change_source', true);
+BEGIN
+  PERFORM set_config('app.change_source', CASE WHEN p_on THEN 'system' ELSE '' END, true);
+  RETURN coalesce(v_prev, '');
+END;
+$$;
+
+
+--
 -- Name: crm_can_change_owner(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1330,6 +1346,18 @@ CREATE FUNCTION public.crm_session_ok() RETURNS boolean
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT crm_is_service() OR crm_active_user_id() IS NOT NULL
+$$;
+
+
+--
+-- Name: crm_setting_on(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_setting_on(p_key text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce((SELECT value = 'true'::jsonb FROM app_setting WHERE key = p_key), false)
 $$;
 
 
@@ -1632,6 +1660,28 @@ $$;
 
 
 --
+-- Name: customer_is_producer_calc(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_is_producer_calc(p_company_id uuid, p_person_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM oom_customer l JOIN oom o ON o.id = l.oom_id
+                  WHERE l.company_id IS NOT DISTINCT FROM p_company_id
+                    AND l.person_id IS NOT DISTINCT FROM p_person_id
+                    AND o.type = 'vyroba'
+                    AND l.status IN ('aktivne', 'pripravovane', 'odidene'))
+      OR EXISTS (SELECT 1 FROM deal d
+                   JOIN pipeline pl ON pl.id = d.pipeline_id
+                   JOIN pipeline_stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+                  WHERE d.company_id IS NOT DISTINCT FROM p_company_id
+                    AND d.person_id IS NOT DISTINCT FROM p_person_id
+                    AND pl.kind = 'b2b_vykup'
+                    AND s.outcome IN ('otvoreny', 'vyhrany'))
+$$;
+
+
+--
 -- Name: customer_org_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1657,6 +1707,75 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: customer_refresh(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_refresh(p_company_id uuid, p_person_id uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_status   customer_status;
+  v_former   boolean;
+  v_producer boolean;
+  v_prev     text;
+  v_changed  boolean;
+BEGIN
+  IF num_nonnulls(p_company_id, p_person_id) <> 1 THEN
+    RAISE EXCEPTION 'customer_refresh: zadaj práve jedno z company_id / person_id';
+  END IF;
+  v_status   := customer_status_calc(p_company_id, p_person_id);
+  v_former   := customer_is_former_calc(p_company_id, p_person_id);
+  v_producer := customer_is_producer_calc(p_company_id, p_person_id);
+  v_prev     := crm_as_system(true);
+
+  IF p_company_id IS NOT NULL THEN
+    UPDATE company c
+       SET status = v_status, status_source = 'vypocet',
+           is_former_customer = c.is_former_customer OR v_former, is_producer = v_producer
+     WHERE c.id = p_company_id AND c.is_customer
+       AND (c.status, c.status_source, c.is_former_customer, c.is_producer)
+           IS DISTINCT FROM (v_status, 'vypocet'::status_source, c.is_former_customer OR v_former, v_producer);
+  ELSE
+    UPDATE contact p
+       SET status = v_status, status_source = 'vypocet',
+           is_former_customer = p.is_former_customer OR v_former, is_producer = v_producer
+     WHERE p.id = p_person_id AND p.is_household
+       AND (p.status, p.status_source, p.is_former_customer, p.is_producer)
+           IS DISTINCT FROM (v_status, 'vypocet'::status_source, p.is_former_customer OR v_former, v_producer);
+  END IF;
+  v_changed := FOUND;
+
+  PERFORM set_config('app.change_source', v_prev, true);
+  RETURN v_changed;
+END;
+$$;
+
+
+--
+-- Name: customer_refresh_all(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customer_refresh_all() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_id uuid;
+  v_n  integer := 0;
+BEGIN
+  FOR v_id IN SELECT id FROM company WHERE is_customer LOOP
+    IF customer_refresh(v_id, NULL) THEN v_n := v_n + 1; END IF;
+  END LOOP;
+  FOR v_id IN SELECT id FROM contact WHERE is_household LOOP
+    IF customer_refresh(NULL, v_id) THEN v_n := v_n + 1; END IF;
+  END LOOP;
+  RETURN v_n;
 END;
 $$;
 
@@ -1938,23 +2057,57 @@ $$;
 
 
 --
--- Name: oom_active_required_check(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: oom_activate_due(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.oom_active_required_check() RETURNS trigger
-    LANGUAGE plpgsql
+CREATE FUNCTION public.oom_activate_due() RETURNS integer
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT oom_activate_due_at(crm_today())
+$$;
+
+
+--
+-- Name: oom_activate_due_at(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_activate_due_at(p_today date) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
     AS $$
 DECLARE
-  v_missing text[];
+  v_id   uuid;
+  v_n    integer := 0;
+  v_prev text := crm_as_system(true);
 BEGIN
-  IF NEW.status = 'aktivne' AND (TG_OP = 'INSERT' OR OLD.status <> 'aktivne') AND current_user <> 'crm_sync' THEN
-    v_missing := oom_active_required_missing(NEW);
-    IF cardinality(v_missing) > 0 THEN
-      RAISE EXCEPTION 'Odberné miesto nemôže byť Aktívne, chýba: %.', array_to_string(v_missing, ', ')
-        USING ERRCODE = 'check_violation';
-    END IF;
+  FOR v_id IN SELECT o.id FROM oom o WHERE oom_activation_ready(o, p_today) ORDER BY o.id LOOP
+    PERFORM oom_set_status(v_id, 'aktivne');
+    v_n := v_n + 1;
+  END LOOP;
+  PERFORM set_config('app.change_source', v_prev, true);
+  RETURN v_n;
+END;
+$$;
+
+
+--
+-- Name: oom_activate_on_save(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_activate_on_save() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_prev text;
+BEGIN
+  IF oom_activation_ready(NEW, crm_today()) THEN
+    v_prev := crm_as_system(true);
+    PERFORM oom_set_status(NEW.id, 'aktivne');
+    PERFORM set_config('app.change_source', v_prev, true);
   END IF;
-  RETURN NEW;
+  RETURN NULL;
 END;
 $$;
 
@@ -2150,6 +2303,42 @@ COMMENT ON COLUMN public.oom.switch_confirmed_on IS 'prechod, krok 3: zmena dod�
 
 
 --
+-- Name: oom_activation_ready(public.oom, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_activation_ready(o public.oom, p_today date) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT o.status = 'pripravovane'
+     AND o.switch_confirmed_on IS NOT NULL
+     AND o.supply_from <= p_today
+     AND cardinality(oom_active_required_missing(o)) = 0
+$$;
+
+
+--
+-- Name: oom_active_required_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_active_required_check() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_missing text[];
+BEGIN
+  IF NEW.status = 'aktivne' AND (TG_OP = 'INSERT' OR OLD.status <> 'aktivne') AND current_user <> 'crm_sync' THEN
+    v_missing := oom_active_required_missing(NEW);
+    IF cardinality(v_missing) > 0 THEN
+      RAISE EXCEPTION 'Odberné miesto nemôže byť Aktívne, chýba: %.', array_to_string(v_missing, ', ')
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: oom_active_required_missing(public.oom); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2250,6 +2439,48 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_customer_mark(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_customer_mark() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_prev text := crm_as_system(true);
+BEGIN
+  UPDATE company SET is_customer = true WHERE id = NEW.company_id AND NOT is_customer;
+  UPDATE contact SET is_household = true WHERE id = NEW.person_id AND NOT is_household;
+  PERFORM set_config('app.change_source', v_prev, true);
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: oom_customer_refresh(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_customer_refresh() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT crm_setting_on('customer_status_auto') THEN
+    RETURN NULL;
+  END IF;
+  IF TG_OP <> 'DELETE' THEN
+    PERFORM customer_refresh(NEW.company_id, NEW.person_id);
+  END IF;
+  IF TG_OP <> 'INSERT' AND (TG_OP = 'DELETE' OR (OLD.company_id, OLD.person_id) IS DISTINCT FROM (NEW.company_id, NEW.person_id)) THEN
+    PERFORM customer_refresh(OLD.company_id, OLD.person_id);
+  END IF;
+  RETURN NULL;
 END;
 $$;
 
@@ -2475,6 +2706,27 @@ $$;
 
 
 --
+-- Name: oom_type_refresh(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_type_refresh() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_link record;
+BEGIN
+  IF crm_setting_on('customer_status_auto') THEN
+    FOR v_link IN SELECT DISTINCT company_id, person_id FROM oom_customer WHERE oom_id = NEW.id LOOP
+      PERFORM customer_refresh(v_link.company_id, v_link.person_id);
+    END LOOP;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
 -- Name: org_bank_account_normalize(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2646,6 +2898,28 @@ CREATE TABLE public.activity (
 --
 
 COMMENT ON COLUMN public.activity.body IS 'celý text (poznámka z CRM); body_preview je náhľad z HubSpotu';
+
+
+--
+-- Name: app_setting; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_setting (
+    key text NOT NULL,
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    value jsonb NOT NULL,
+    description text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_setting_key_check CHECK ((key ~ '^[a-z][a-z0-9_]{1,62}$'::text))
+);
+
+
+--
+-- Name: TABLE app_setting; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.app_setting IS 'nastavenia systému podľa prostredia (Test / Ostré); mení ich iba vlastník databázy (db/app-setting.sh)';
 
 
 --
@@ -3022,19 +3296,71 @@ CREATE TABLE public.deal_oom (
 
 
 --
+-- Name: oom_contact; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_contact (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    contact_id uuid NOT NULL,
+    roles text[] DEFAULT '{}'::text[] NOT NULL,
+    source public.oom_contact_source DEFAULT 'rucne'::public.oom_contact_source NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE oom_contact; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_contact IS 'kontaktné osoby pri OOM; rucne = pridal používateľ, zmluva = prenesené zo zmluvy (modul 4), ručné sa pri zmene zmluvy neodoberajú';
+
+
+--
+-- Name: COLUMN oom_contact.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_contact.roles IS 'kódy z číselníka rola_pri_oom (aj viac naraz)';
+
+
+--
 -- Name: contact_oom_v; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE VIEW public.contact_oom_v AS
- SELECT dc.contact_id,
-    dom.oom_id,
+CREATE VIEW public.contact_oom_v WITH (security_invoker='true') AS
+ WITH links AS (
+         SELECT oc_1.contact_id,
+            oc_1.oom_id,
+            NULL::uuid AS deal_id,
+            (oc_1.source)::text AS source
+           FROM public.oom_contact oc_1
+        UNION ALL
+         SELECT dc.contact_id,
+            dom.oom_id,
+            dc.deal_id,
+            'deal'::text
+           FROM (public.deal_contact dc
+             JOIN public.deal_oom dom ON ((dom.deal_id = dc.deal_id)))
+        )
+ SELECT l.contact_id,
+    l.oom_id,
     o.status AS oom_status,
-    array_agg(DISTINCT dc.deal_id) AS deal_ids
-   FROM ((public.deal_contact dc
-     JOIN public.deal_oom dom ON ((dom.deal_id = dc.deal_id)))
-     JOIN public.oom o ON ((o.id = dom.oom_id)))
+    COALESCE(array_agg(DISTINCT l.deal_id) FILTER (WHERE (l.deal_id IS NOT NULL)), '{}'::uuid[]) AS deal_ids,
+    COALESCE(max(oc.roles), '{}'::text[]) AS roles,
+    array_agg(DISTINCT l.source ORDER BY l.source) AS sources
+   FROM ((links l
+     JOIN public.oom o ON ((o.id = l.oom_id)))
+     LEFT JOIN public.oom_contact oc ON (((oc.oom_id = l.oom_id) AND (oc.contact_id = l.contact_id))))
   WHERE (o.status = ANY (ARRAY['aktivne'::public.oom_status, 'pripravovane'::public.oom_status]))
-  GROUP BY dc.contact_id, dom.oom_id, o.status;
+  GROUP BY l.contact_id, l.oom_id, o.status;
+
+
+--
+-- Name: VIEW contact_oom_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.contact_oom_v IS 'osoba ↔ OOM: sources = rucne, zmluva (oom_contact) a deal (osoba na deale s OOM); iba Aktívne a Pripravované';
 
 
 --
@@ -3335,17 +3661,72 @@ COMMENT ON TABLE public.custom_field_team IS 'tímy, ktoré smú pole meniť (pr
 
 
 --
+-- Name: oom_customer; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_customer (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    company_id uuid,
+    person_id uuid,
+    org_id uuid NOT NULL,
+    valid_from date NOT NULL,
+    valid_to date,
+    status public.oom_status NOT NULL,
+    end_reason public.oom_link_end_reason,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oom_customer_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT oom_customer_period_check CHECK (((valid_to IS NULL) OR (valid_to >= valid_from))),
+    CONSTRAINT oom_customer_status_check CHECK (
+CASE
+    WHEN (valid_to IS NULL) THEN ((end_reason IS NULL) AND (status = ANY (ARRAY['pripravovane'::public.oom_status, 'aktivne'::public.oom_status])))
+    ELSE ((end_reason IS NOT NULL) AND (status =
+    CASE end_reason
+        WHEN 'odchod'::public.oom_link_end_reason THEN 'odidene'::public.oom_status
+        WHEN 'zrusenie'::public.oom_link_end_reason THEN 'zrusene'::public.oom_status
+        WHEN 'prepis'::public.oom_link_end_reason THEN 'prepisane'::public.oom_status
+        ELSE NULL::public.oom_status
+    END))
+END)
+);
+
+
+--
+-- Name: TABLE oom_customer; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_customer IS 'komu OOM patrilo v ktorom období a v akom stave (zadanie OOM čl. 3–4); odchod, zrušenie a prepis väzbu uzavrú, prepis a návrat založia novú';
+
+
+--
+-- Name: COLUMN oom_customer.valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_customer.valid_to IS 'NULL = väzba trvá (Pripravované alebo Aktívne)';
+
+
+--
+-- Name: COLUMN oom_customer.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_customer.status IS 'stav OOM pre tohto zákazníka v tomto období';
+
+
+--
 -- Name: customer_v; Type: VIEW; Schema: public; Owner: -
 --
 
 CREATE VIEW public.customer_v WITH (security_invoker='true') AS
  WITH oom_sum AS (
-         SELECT o.company_id,
-            o.person_id,
-            count(*) FILTER (WHERE (o.status = 'aktivne'::public.oom_status)) AS active_oom_count,
-            sum((COALESCE(o.planned_consumption_vt_mwh, (0)::numeric) + COALESCE(o.planned_consumption_nt_mwh, (0)::numeric))) FILTER (WHERE (o.status = 'aktivne'::public.oom_status)) AS annual_mwh
-           FROM public.oom o
-          GROUP BY o.company_id, o.person_id
+         SELECT l.company_id,
+            l.person_id,
+            count(*) AS active_oom_count,
+            sum((COALESCE(o.planned_consumption_vt_mwh, (0)::numeric) + COALESCE(o.planned_consumption_nt_mwh, (0)::numeric))) AS annual_mwh
+           FROM (public.oom_customer l
+             JOIN public.oom o ON ((o.id = l.oom_id)))
+          WHERE ((l.valid_to IS NULL) AND (l.status = 'aktivne'::public.oom_status))
+          GROUP BY l.company_id, l.person_id
         ), last_activity AS (
          SELECT a.company_id,
             a.contact_id,
@@ -3715,88 +4096,6 @@ CREATE TABLE public.offer_item (
 
 
 --
--- Name: oom_contact; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.oom_contact (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    oom_id uuid NOT NULL,
-    contact_id uuid NOT NULL,
-    roles text[] DEFAULT '{}'::text[] NOT NULL,
-    source public.oom_contact_source DEFAULT 'rucne'::public.oom_contact_source NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: TABLE oom_contact; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.oom_contact IS 'kontaktné osoby pri OOM; rucne = pridal používateľ, zmluva = prenesené zo zmluvy (modul 4), ručné sa pri zmene zmluvy neodoberajú';
-
-
---
--- Name: COLUMN oom_contact.roles; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom_contact.roles IS 'kódy z číselníka rola_pri_oom (aj viac naraz)';
-
-
---
--- Name: oom_customer; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.oom_customer (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    oom_id uuid NOT NULL,
-    company_id uuid,
-    person_id uuid,
-    org_id uuid NOT NULL,
-    valid_from date NOT NULL,
-    valid_to date,
-    status public.oom_status NOT NULL,
-    end_reason public.oom_link_end_reason,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT oom_customer_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
-    CONSTRAINT oom_customer_period_check CHECK (((valid_to IS NULL) OR (valid_to >= valid_from))),
-    CONSTRAINT oom_customer_status_check CHECK (
-CASE
-    WHEN (valid_to IS NULL) THEN ((end_reason IS NULL) AND (status = ANY (ARRAY['pripravovane'::public.oom_status, 'aktivne'::public.oom_status])))
-    ELSE ((end_reason IS NOT NULL) AND (status =
-    CASE end_reason
-        WHEN 'odchod'::public.oom_link_end_reason THEN 'odidene'::public.oom_status
-        WHEN 'zrusenie'::public.oom_link_end_reason THEN 'zrusene'::public.oom_status
-        WHEN 'prepis'::public.oom_link_end_reason THEN 'prepisane'::public.oom_status
-        ELSE NULL::public.oom_status
-    END))
-END)
-);
-
-
---
--- Name: TABLE oom_customer; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.oom_customer IS 'komu OOM patrilo v ktorom období a v akom stave (zadanie OOM čl. 3–4); odchod, zrušenie a prepis väzbu uzavrú, prepis a návrat založia novú';
-
-
---
--- Name: COLUMN oom_customer.valid_to; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom_customer.valid_to IS 'NULL = väzba trvá (Pripravované alebo Aktívne)';
-
-
---
--- Name: COLUMN oom_customer.status; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.oom_customer.status IS 'stav OOM pre tohto zákazníka v tomto období';
-
-
---
 -- Name: oom_device; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3885,6 +4184,81 @@ COMMENT ON COLUMN public.org.oom_switch_accept_days IS 'prechod sa zasekol: dni 
 --
 
 COMMENT ON COLUMN public.org.oom_switch_confirm_days IS 'prechod sa zasekol: dni od akceptácie výpovede bez potvrdenia zmeny dodávateľa';
+
+
+--
+-- Name: oom_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.oom_v WITH (security_invoker='true') AS
+ SELECT o.id,
+    o.eic,
+    o.name,
+    o.address_street,
+    o.address_number_supisne,
+    o.address_number_orientacne,
+    o.address_city,
+    o.address_zip,
+    o.type,
+    o.status,
+    o.company_id,
+    o.person_id,
+        CASE
+            WHEN (o.company_id IS NOT NULL) THEN 'B2B'::text
+            ELSE 'B2C'::text
+        END AS customer_type,
+    COALESCE(c.name, NULLIF(concat_ws(' '::text, p.first_name, p.last_name), ''::text)) AS customer_name,
+    COALESCE(c.owner_id, p.owner_id) AS owner_id,
+    u.name AS owner_name,
+    o.org_id,
+    o.pds,
+    pv.label AS pds_label,
+    o.pds_tariff,
+    tv.label AS pds_tariff_label,
+    o.voltage_level,
+        CASE
+            WHEN (o.type = 'vyroba'::public.oom_type) THEN o.planned_feed_in_mwh
+            WHEN ((o.planned_consumption_vt_mwh IS NULL) AND (o.planned_consumption_nt_mwh IS NULL)) THEN NULL::numeric
+            ELSE (COALESCE(o.planned_consumption_vt_mwh, (0)::numeric) + COALESCE(o.planned_consumption_nt_mwh, (0)::numeric))
+        END AS planned_mwh,
+    o.supply_from,
+    o.supply_to,
+    o.switch_notice_required,
+    o.switch_notice_sent_on,
+    o.switch_notice_accepted_on,
+    o.switch_confirmed_on,
+    ((o.status = 'pripravovane'::public.oom_status) AND (((o.switch_notice_sent_on IS NOT NULL) AND (o.switch_notice_accepted_on IS NULL) AND ((o.switch_notice_sent_on + (g.oom_switch_accept_days)::integer) < public.crm_today())) OR ((o.switch_notice_accepted_on IS NOT NULL) AND (o.switch_confirmed_on IS NULL) AND ((o.switch_notice_accepted_on + (g.oom_switch_confirm_days)::integer) < public.crm_today())))) AS switch_stuck,
+        CASE
+            WHEN (o.status = 'pripravovane'::public.oom_status) THEN public.oom_active_required_missing(o.*)
+            ELSE NULL::text[]
+        END AS active_missing,
+    prev.customer_name AS transferred_from_name,
+    (prev.valid_to + 1) AS transferred_on,
+    o.custom,
+    o.created_at,
+    o.updated_at
+   FROM (((((((public.oom o
+     JOIN public.org g ON ((g.id = o.org_id)))
+     LEFT JOIN public.company c ON ((c.id = o.company_id)))
+     LEFT JOIN public.contact p ON ((p.id = o.person_id)))
+     LEFT JOIN public.app_user u ON ((u.id = COALESCE(c.owner_id, p.owner_id))))
+     LEFT JOIN public.lookup_value pv ON (((pv.list_code = 'pds'::text) AND (pv.code = o.pds))))
+     LEFT JOIN public.lookup_value tv ON (((tv.list_code = 'sadzba_distribucie'::text) AND (tv.code = o.pds_tariff))))
+     LEFT JOIN LATERAL ( SELECT COALESCE(pc.name, NULLIF(concat_ws(' '::text, pp.first_name, pp.last_name), ''::text)) AS customer_name,
+            l.valid_to
+           FROM ((public.oom_customer l
+             LEFT JOIN public.company pc ON ((pc.id = l.company_id)))
+             LEFT JOIN public.contact pp ON ((pp.id = l.person_id)))
+          WHERE ((l.oom_id = o.id) AND (l.end_reason = 'prepis'::public.oom_link_end_reason))
+          ORDER BY l.valid_to DESC
+         LIMIT 1) prev ON (true));
+
+
+--
+-- Name: VIEW oom_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.oom_v IS 'zoznam OOM (obrazovka 17): zákazník a vlastník poslednej väzby, prechod sa zasekol (lehoty spoločnosti), chýbajúce údaje pre Aktívne, prepis od';
 
 
 --
@@ -4309,6 +4683,22 @@ ALTER TABLE ONLY public.activity
 
 ALTER TABLE ONLY public.activity
     ADD CONSTRAINT activity_source_source_id_key UNIQUE (source, source_id);
+
+
+--
+-- Name: app_setting app_setting_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_setting
+    ADD CONSTRAINT app_setting_id_key UNIQUE (id);
+
+
+--
+-- Name: app_setting app_setting_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_setting
+    ADD CONSTRAINT app_setting_pkey PRIMARY KEY (key);
 
 
 --
@@ -5768,6 +6158,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.activity FOR
 
 
 --
+-- Name: app_setting trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_setting FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: app_user trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6160,6 +6557,13 @@ CREATE TRIGGER trg_custom_values BEFORE INSERT OR UPDATE ON public.oom FOR EACH 
 
 
 --
+-- Name: oom_customer trg_customer_mark; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_mark AFTER INSERT ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.oom_customer_mark();
+
+
+--
 -- Name: company trg_customer_org_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6171,6 +6575,13 @@ CREATE TRIGGER trg_customer_org_guard BEFORE UPDATE OF org_id ON public.company 
 --
 
 CREATE TRIGGER trg_customer_org_guard BEFORE UPDATE OF org_id ON public.contact FOR EACH ROW EXECUTE FUNCTION public.customer_org_guard();
+
+
+--
+-- Name: oom_customer trg_customer_refresh; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_customer_refresh AFTER INSERT OR DELETE OR UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.oom_customer_refresh();
 
 
 --
@@ -6307,6 +6718,20 @@ CREATE TRIGGER trg_oom_lookup BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW
 
 
 --
+-- Name: oom trg_oom_prechod_aktivacia; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_prechod_aktivacia AFTER INSERT OR UPDATE ON public.oom FOR EACH ROW WHEN (((new.status = 'pripravovane'::public.oom_status) AND (new.switch_confirmed_on IS NOT NULL))) EXECUTE FUNCTION public.oom_activate_on_save();
+
+
+--
+-- Name: oom trg_oom_type_refresh; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_oom_type_refresh AFTER UPDATE OF type ON public.oom FOR EACH ROW WHEN ((new.type IS DISTINCT FROM old.type)) EXECUTE FUNCTION public.oom_type_refresh();
+
+
+--
 -- Name: deal_contact trg_org_check; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6374,6 +6799,13 @@ CREATE TRIGGER trg_record_org BEFORE INSERT OR UPDATE ON public.oom FOR EACH ROW
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.activity FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: app_setting trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.app_setting FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -7437,6 +7869,12 @@ ALTER TABLE ONLY public.web_event
 
 
 --
+-- Name: app_setting; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.app_setting ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: app_user; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7817,6 +8255,13 @@ CREATE POLICY settings_no_system ON public.lookup_value AS RESTRICTIVE FOR INSER
 
 
 --
+-- Name: app_setting settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.app_setting FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
 -- Name: app_user settings_read; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -8097,4 +8542,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0010'),
     ('0011'),
     ('0012'),
-    ('0013');
+    ('0013'),
+    ('0014');

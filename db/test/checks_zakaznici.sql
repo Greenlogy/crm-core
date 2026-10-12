@@ -389,7 +389,7 @@ CREATE ROLE crm_rls_test NOLOGIN;
 -- PostgreSQL 16+: tvorca roly do nej môže prepnúť, iba ak si ju pridelí s voľbou SET (Neon nie je superuser).
 GRANT crm_rls_test TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
 GRANT SELECT, INSERT, UPDATE ON company, contact, company_contact TO crm_rls_test;
-GRANT SELECT ON oom, activity, app_user, customer_v, contact_v, custom_field TO crm_rls_test;
+GRANT SELECT ON oom, oom_customer, activity, app_user, customer_v, contact_v, custom_field TO crm_rls_test;
 GRANT INSERT ON audit_log TO crm_rls_test;
 SET LOCAL ROLE crm_rls_test;
 

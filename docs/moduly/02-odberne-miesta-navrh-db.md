@@ -1,7 +1,7 @@
 # Modul 2 – Odberné miesta: návrh databázy
 
-Verzia 0.2 · 12. 10. 2026 · **odpovede zapracované** (v0.1 = návrh; v0.2 = Petrove odpovede a uzavreté otázky, časť 11).
-Implementácia: migrácia `0013_oom_jadro` (napísaná, nespustená); `0014`, `0015` nasledujú.
+Verzia 0.3 · 12. 10. 2026 · **odpovede zapracované** (v0.1 = návrh; v0.2 = Petrove odpovede a uzavreté otázky, časť 11; v0.3 = plán `0014` schválený, časti 3.2, 3.3, 4.4).
+Implementácia: `0013_oom_jadro` na `dev` (12. 10.); `0014_oom_stav_zakaznika` napísaná a overená nanečisto; `0015` nasleduje.
 Vychádza zo zadania `02-odberne-miesta.md` v0.2, zadania `01-zakaznici.md` v0.4 (časti 4 a 14),
 návrhu Nastavení `00-nastavenia-navrh-db.md` v0.2, migrácií `0001`–`0012` a obrazoviek 17–19.
 
@@ -130,32 +130,41 @@ vidí svoje OOM ako „Prepísané“, hoci OOM samo je „Aktívne“ u Kováč
 Nové: `customer_is_producer_calc` = má väzbu na OOM typu `vyroba` v stave aktívne alebo pripravované,
 alebo deal v pipeline druhu `b2b_vykup` (segment „· výrobca“, zadanie Zákazníci čl. 5).
 
-### 3.2 Priebežný prepočet (zapína sa týmto modulom)
+### 3.2 Priebežný prepočet (`0014`)
+
+**Prepínač** – tabuľka `app_setting` (nastavenia podľa prostredia), kľúč `customer_status_auto`:
+- predvolene **vypnutý**; na `dev` sa zapne hneď po migrácii, na `main` až s modulom Zmluvy (Peter 12. 10., odpoveď 4),
+- mení ho iba vlastník databázy skriptom `db/app-setting.sh dev|main customer_status_auto on|off`
+  (pri zapnutí hneď `customer_refresh_all()`); aplikácia ho iba číta; zmena je v audite („Systém“).
+
+**Funkcie:**
 
 ```sql
-customer_refresh(p_company_id, p_person_id)   -- SECURITY DEFINER: vidí všetky OOM, deal, zmluvy bez ohľadu na RLS
-  -- nastaví status, status_source = 'vypocet', is_former_customer, is_producer; audit so zdrojom 'system'
+customer_is_producer_calc(firma, osoba)  -- OOM výroba v stave Aktívne, Pripravované alebo Odídené,
+                                         -- alebo deal v pipeline b2b_vykup, ktorý je otvorený alebo vyhraný
+customer_refresh(firma, osoba) → boolean -- SECURITY DEFINER: stav (zdroj „výpočet“), príznak „bývalý“
+                                         -- (nikdy sa automaticky nezruší), segment „výrobca“; audit „Systém“
+customer_refresh_all() → integer         -- všetci zákazníci; iba vlastník databázy
 ```
 
-- Volá ho spúšťač **AFTER INSERT/UPDATE/DELETE na `oom_customer`** (stav, zákazník, obdobie) a zmena typu OOM.
-  Pri prepise sa prepočítajú obaja zákazníci.
-- Zmena stavu zákazníka sa v audite označí ako „Systém“ (vypočítaná zmena), aj keď ju vyvolal používateľ
-  zmenou OOM – na karte vidno „Vývoj stavu“ a pri ňom zmenu OOM, ktorá ho spôsobila.
-- Dealy a zmluvy (moduly 3–4) zapnú ten istý prepočet vo svojich migráciách.
-- Stav prevzatý z HubSpotu (`status_source = 'hubspot'`) sa prepíše výpočtom pri prvej zmene OOM daného
-  zákazníka. **Na Teste hneď, na Ostrom sa prepočet zapne až s modulom Zmluvy** (odpoveď 4) – prepínač
-  v databáze (`crm_setting`/spúšťač vypnutý na `main`), spresní sa v `0014`.
+**Spúšťače:**
+- `oom_customer` AFTER INSERT: firma s OOM dostane označenie **zákazník**, osoba je **domácnosť** – vždy,
+  aj pri vypnutom prepínači (Peter 12. 10., odpoveď 2).
+- `oom_customer` AFTER INSERT/UPDATE/DELETE: prepočet zákazníka väzby (pri prepise starého aj nového).
+- `oom` AFTER UPDATE OF type: prepočet všetkých zákazníkov OOM (segment „výrobca“).
+- Dealy a zmluvy (moduly 3–4) pripoja ten istý `customer_refresh`.
 
-### 3.3 Pohľady
+### 3.3 Pohľady (`0014`, všetky `security_invoker` – „iba svoje“ z `0015` na ne dopadne samo)
 
-- **`customer_v`**: počet aktívnych OOM a ročný objem z aktuálnych väzieb v stave `aktivne`; inak bez zmeny.
-- **`contact_oom_v`** (osoba ↔ OOM): spojenie dvoch zdrojov, stav `aktivne` alebo `pripravovane`
-  (**predtým `neaktivne`**), `security_invoker`:
-  - `rucne` – kontaktné osoby pri OOM (`oom_contact`, časť 5),
-  - `deal` – osoby na dealoch s OOM (ako dnes; v module 4 pribudne `zmluva`).
-- **`oom_v`** (zoznam OOM, obrazovka 17): EIC, názov, adresa, aktuálny zákazník (meno, B2B/B2C), typ, stav,
-  PDS, plánovaný objem (spotreba VT+NT alebo výkup), dodávka od – do, vlastník (= vlastník zákazníka),
-  spoločnosť, príznak „prechod sa zasekol“, „prepis od“ (meno predošlého zákazníka, iba ak ho používateľ vidí).
+- **`customer_v`**: počet aktívnych OOM a ročný objem z otvorených väzieb v stave Aktívne; stĺpce bez zmeny.
+- **`contact_oom_v`** (osoba ↔ OOM): kontaktné osoby pri OOM (`rucne`, neskôr `zmluva`) a osoby na dealoch
+  s OOM (`deal`), iba OOM Aktívne alebo Pripravované. Pôvodné stĺpce ostávajú (`deal_ids` môže byť prázdne),
+  nové `roles` (roly pri OOM) a `sources`.
+- **`oom_v`** (zoznam OOM, obrazovka 17): EIC, názov, adresa, typ, stav, zákazník (B2B/B2C, meno), vlastník
+  (= vlastník zákazníka), spoločnosť, PDS a sadzba s názvom, napäťová úroveň, plánovaný objem (spotreba VT+NT,
+  pri výrobe výkup), dodávka od – do, kroky prechodu, `switch_stuck` (lehoty spoločnosti), `active_missing`
+  (chýbajúce údaje pri Pripravovanom), `transferred_from_name` a `transferred_on` (prepis od – meno iba tomu,
+  kto smie predošlého zákazníka vidieť), vlastné polia.
 
 Pravidlo v `CLAUDE.md` je upravené (odpoveď 7): kontaktné osoby priamo pri OOM, neskôr automaticky zo zmluvy;
 cez dealy iba pri stave Aktívne alebo Pripravované.
@@ -222,19 +231,24 @@ ALTER TABLE oom
 - Pri návrate bývalého OOM sa kroky prepíšu novými dátumami; predošlé ostávajú v audite a na časovej osi.
 - Tabuľka `supplier_switch` (správy XML433 / XML43D) ostáva bez zmeny pre neskorší krok s OKTE.
 
-### 4.4 Pripravované → Aktívne (automaticky)
+### 4.4 Pripravované → Aktívne (automaticky, `0014`)
 
-Zadanie čl. 4 a 14: stačí „zmena dodávateľa potvrdená“ a dátum začiatku dodávky.
+Zadanie čl. 4 a 14: stačí „zmena dodávateľa potvrdená“ a dátum začiatku dodávky; navyše musia byť vyplnené
+povinné údaje (4.5).
 
 ```sql
-oom_activate_due(p_today date) → integer   -- aktivuje všetky Pripravované OOM so switch_confirmed_on
-                                           --   a supply_from <= p_today, ktoré majú povinné údaje
+oom_activation_ready(oom, dátum) → boolean  -- Pripravované, switch_confirmed_on, supply_from <= dátum, povinné údaje
+oom_activate_due() → integer                -- denná aktivácia k dnešku (Europe/Bratislava); volá Cron
+oom_activate_due_at(dátum) → integer        -- k zadanému dátumu: iba testy a údržba, aplikácia ju volať nesmie
 ```
 
-- Volá ju **raz denne Cloudflare Cron Trigger** na Workeri (odpoveď 6). Cron beží v UTC, preto dva časy
-  (22:05 a 23:05 UTC = 0:05 v zime aj v lete); funkcia počíta s dátumom v Europe/Bratislava a druhé spustenie
-  nič nezmení. Tiež hneď pri uložení OOM, ak je dátum už v minulosti. Audit: zdroj „Systém“.
-- OOM bez povinných údajov sa neaktivuje – ostane Pripravované so značkou „chýbajú údaje“ v zozname.
+- **Hneď pri uložení** (Peter 12. 10., odpoveď 3): spúšťač na `oom` aktivuje OOM, len čo je pripravené
+  (napr. servis zapíše potvrdenie zmeny a začiatok dodávky už nastal).
+- **Denne cez Cloudflare Cron Trigger** na Workeri (odpoveď 6) – samostatný krok po migrácii (`wrangler.toml`,
+  obsluha `scheduled` v API, nasadzuje Peter). Cron beží v UTC, preto dva časy (22:05 a 23:05 UTC = 0:05
+  v zime aj v lete); druhé spustenie nič nezmení. Do logu ide iba počet aktivovaných OOM.
+- Audit: zdroj „Systém“ (zmena väzby aj vypočítaný stav zákazníka).
+- OOM bez povinných údajov sa neaktivuje – ostane Pripravované a `oom_v.active_missing` ukáže, čo chýba.
 
 ### 4.5 Povinné pre Aktívne (zadanie čl. 6)
 

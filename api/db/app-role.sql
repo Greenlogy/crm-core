@@ -34,6 +34,7 @@ REVOKE INSERT, UPDATE ON business_calendar FROM crm_app;
 REVOKE UPDATE ON audit_log, export_log FROM crm_app;
 REVOKE INSERT, UPDATE ON sync_run FROM crm_app;
 REVOKE INSERT, UPDATE ON lookup_list FROM crm_app;
+REVOKE INSERT, UPDATE ON app_setting FROM crm_app;     -- nastavenia systému mení iba vlastník (db/app-setting.sh, 0014)
 
 -- Mazať: väzby (osoba vo firme, na deale, OOM na deale, položka ponuky, zariadenie OOM, kontaktná osoba pri OOM – 0013)
 -- a nastavenia, ktoré sa dajú odobrať (prístup k spoločnosti, voľný deň, logo, tímy poľa,
