@@ -8,11 +8,17 @@ DO $$
 BEGIN
   ASSERT (SELECT legal_name || '/' || country || '/' || currency || '/' || status FROM org WHERE is_default)
        = 'Greenlogy a.s./SK/EUR/aktivna', 'predvolená spoločnosť';
-  ASSERT (SELECT count(*) FROM org) = 3, '3 spoločnosti (SK aktívna, CZ a HR pripravované)';
-  ASSERT (SELECT array_agg(code ORDER BY code) FROM team)
+  -- východiskové údaje z 0006 (admin môže na Teste pridať ďalšie tímy – tie sa nepočítajú)
+  ASSERT (SELECT count(*) FROM org WHERE code IN ('greenlogy_sk', 'greenlogy_cz', 'greenlogy_hr')) = 3,
+         '3 spoločnosti (SK aktívna, CZ a HR pripravované)';
+  ASSERT (SELECT array_agg(code ORDER BY code) FROM team
+           WHERE code IN ('ceo', 'marketing', 'nakup', 'sales_external', 'sales_internal', 'servis'))
        = '{ceo,marketing,nakup,sales_external,sales_internal,servis}', 'tímy';
-  ASSERT (SELECT array_agg(code ORDER BY code) FROM team WHERE all_orgs) = '{ceo,marketing,nakup}', 'všetky spoločnosti';
-  ASSERT (SELECT count(*) FROM team_permission) = 42, '6 tímov × 7 modulov';
+  ASSERT (SELECT array_agg(code ORDER BY code) FROM team WHERE all_orgs
+           AND code IN ('ceo', 'marketing', 'nakup', 'sales_external', 'sales_internal', 'servis')) = '{ceo,marketing,nakup}',
+         'všetky spoločnosti';
+  ASSERT (SELECT count(*) FROM team_permission p JOIN team t ON t.id = p.team_id
+           WHERE t.code IN ('ceo', 'marketing', 'nakup', 'sales_external', 'sales_internal', 'servis')) = 42, '6 tímov × 7 modulov';
   ASSERT NOT EXISTS (SELECT 1 FROM team_permission p JOIN team t ON t.id = p.team_id
                       WHERE t.code = 'ceo' AND NOT (p.view_scope = 'vsetko' AND p.edit_scope = 'vsetko'
                                                     AND p.can_archive AND p.can_export)), 'CEO má všetko';
@@ -23,11 +29,11 @@ BEGIN
   ASSERT (SELECT edit_scope FROM team_permission p JOIN team t ON t.id = p.team_id
            WHERE t.code = 'nakup' AND p.module = 'zmluvy') = 'vsetko', 'Nákup upravuje zmluvy a ceny';
   ASSERT (SELECT string_agg(t.code || '=' || p.view_scope, ',' ORDER BY t.code)
-            FROM team_permission p JOIN team t ON t.id = p.team_id WHERE p.module = 'provizie')
+            FROM team_permission p JOIN team t ON t.id = p.team_id WHERE p.module = 'provizie' AND t.code IN ('ceo', 'marketing', 'nakup', 'sales_external', 'sales_internal', 'servis'))
        = 'ceo=vsetko,marketing=nic,nakup=nic,sales_external=iba_svoje,sales_internal=iba_svoje,servis=nic',
          'Provízie: CEO všetko, obchodníci iba svoje, ostatní nič';
   ASSERT (SELECT count(*) FROM team_permission p JOIN team t ON t.id = p.team_id
-           WHERE t.code <> 'ceo' AND (p.can_archive OR p.can_export)) = 0, 'archivovať a exportovať iba CEO';
+           WHERE t.code <> 'ceo' AND t.code IN ('ceo', 'marketing', 'nakup', 'sales_external', 'sales_internal', 'servis') AND (p.can_archive OR p.can_export)) = 0, 'archivovať a exportovať iba CEO';
   ASSERT (SELECT t.code || '/' || u.is_admin || '/' || u.status FROM app_user u JOIN team t ON t.id = u.team_id
            WHERE lower(u.email) = 'peter@greenlogy.com') = 'ceo/true/aktivny', 'Peter: CEO, admin, aktívny';
   ASSERT (SELECT t.code || '/' || u.is_admin || '/' || u.status FROM app_user u JOIN team t ON t.id = u.team_id

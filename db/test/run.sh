@@ -3,6 +3,8 @@
 # + checks_zakaznici_zapis.sql + checks_oom.sql + checks_produkty.sql
 # + checks_cenniky.sql
 # v jednej transakcii, ktorá sa na konci vráti (na dev neostanú testovacie dáta).
+# Testy počítajú iba vlastné záznamy (pevné id 00000000-0000-4000-8000-…, východiskové tímy) – prejdú aj na databáze
+# s inými dátami (testovacie OOM, cenníky 2026, zmeny admina v Nastaveniach).
 # Použitie: ./db/test/run.sh
 # Na main sa testy nespúšťajú.
 

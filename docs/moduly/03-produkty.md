@@ -1,6 +1,8 @@
 # Modul 3 – Produkty a cenníky: zadanie
 
-Verzia 0.3 · 13. 10. 2026 · **schválené Petrom** (v0.2 = odpovede O0–O6, v0.3 = O7). **Modul uzavretý 13. 10. 2026** (F1–F3 na Teste, časť 16).
+Verzia 0.3 · 13. 10. 2026 · **schválené Petrom** (v0.2 = odpovede O0–O6, v0.3 = O7).
+**Stav: hotové** – modul uzavretý 13. 10. 2026; fázy F1 (čítanie), F2 (úpravy cenníkov), F3 (produkty a párovanie) na Teste,
+migrácie `0019`–`0022` na `dev`, cenníky 2026 nahraté (časť 16). Na Ostrom (`main`) zatiaľ nie.
 Vychádza z odpovedí v `03-produkty-otazky.md` (verzia 2, 13. 10. 2026) a z cenníkov 2026. Stavia na moduloch 0 (Nastavenia), 1 (Zákazníci) a 2 (OOM).
 
 ## 1. Čo modul rieši
@@ -211,7 +213,7 @@ Otvorené: žiadne.
 - VIWA pre domácnosti ako náhrada VBattery.
 - Import príznaku energopomoci z XM Trade.
 
-## 16. Fázy (Peter, 13. 10. 2026)
+## 16. Fázy (Peter, 13. 10. 2026) – všetky hotové
 
 Databáza: `0019_produkty`, `0020_cenniky` a naplnenie cenníkov 2026 (`db/seed/cenniky-2026.sh`) na Teste.
 

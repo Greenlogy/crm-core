@@ -321,9 +321,12 @@ RESET ROLE;
 
 DO $$
 BEGIN
+  -- iba záznamy testovacieho produktu t_admin (audit môže mať aj iné zmeny)
   ASSERT (SELECT count(*) FROM audit_log WHERE table_name = 'product_tariff' AND action = 'delete'
+           AND diff ->> 'product_id' = (SELECT id::text FROM product WHERE code = 't_admin')
            AND changed_by = (SELECT id FROM app_user WHERE lower(email) = 'peter@greenlogy.com')) = 1, 'audit párovania';
-  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'product' AND action = 'update' AND diff ? 'status'), 'audit produktu';
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'product' AND action = 'update' AND diff ? 'status'
+                   AND record_id = (SELECT id FROM product WHERE code = 't_admin')), 'audit produktu';
   RAISE NOTICE 'OK: práva (čítajú aktívni svojej spoločnosti, zapisuje admin, nemaže nikto), audit produktu a párovania';
 END;
 $$;

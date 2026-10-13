@@ -305,8 +305,10 @@ BEGIN
   UPDATE oom SET switch_notice_sent_on = '2026-09-01', switch_notice_accepted_on = '2026-09-15',
                  switch_confirmed_on = '2026-10-01' WHERE id = o;
   ASSERT (SELECT status FROM oom WHERE id = o) = 'pripravovane', 'dodávka ešte nezačala';
-  ASSERT oom_activate_due_at('2026-12-31') = 0, 'k 31. 12. 2026 nič';
-  ASSERT oom_activate_due_at('2027-01-01') = 1, 'k 1. 1. 2027 jedno OOM';
+  -- aktivácia k dátumu zaberie všetky splatné OOM v databáze (aj iné dáta) – kontroluje sa stav vlastného OOM
+  PERFORM oom_activate_due_at('2026-12-31');
+  ASSERT (SELECT status FROM oom WHERE id = o) = 'pripravovane', 'k 31. 12. 2026 ešte nie';
+  ASSERT oom_activate_due_at('2027-01-01') >= 1, 'k 1. 1. 2027 aspoň jedno OOM';
   ASSERT (SELECT status FROM oom WHERE id = o) = 'aktivne', 'Nováková: OOM Aktívne';
   ASSERT (SELECT status FROM contact WHERE id = n) = 'zakaznik', 'Nováková: Zákazník automaticky';
   ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'oom_customer' AND source = 'system'
@@ -322,7 +324,8 @@ BEGIN
   VALUES ('00000000-0000-4000-8000-000000003305', f, '24ZZS000TEST707E', 'spotreba', 'pripravovane',
           '2025-01-01', false, '2024-12-01');
   ASSERT (SELECT status FROM oom WHERE id = '00000000-0000-4000-8000-000000003305') = 'pripravovane', 'bez údajov ostáva Pripravované';
-  ASSERT oom_activate_due_at('2027-06-01') = 0, 'denná aktivácia ho preskočí';
+  PERFORM oom_activate_due_at('2027-06-01');
+  ASSERT (SELECT status FROM oom WHERE id = '00000000-0000-4000-8000-000000003305') = 'pripravovane', 'denná aktivácia ho preskočí';
   ASSERT (SELECT 'PDS' = ANY (active_missing) FROM oom_v WHERE id = '00000000-0000-4000-8000-000000003305'),
          'oom_v: chýbajúce údaje';
 
@@ -429,6 +432,14 @@ SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003921', '00000000-0000-4000
                      '24ZZS000TEST720M', 'spotreba', 'aktivne');
 SELECT pg_temp.t_oom('00000000-0000-4000-8000-000000003922', NULL, '00000000-0000-4000-8000-000000001802',
                      '24ZZS000TEST721K', 'spotreba', 'aktivne');
+
+-- Testy počítajú s východiskovými právami modulu Odberné miesta z 0015 (admin ich na Teste môže meniť):
+-- nastavia sa iba v transakcii testu, ktorá sa na konci vráti.
+UPDATE team_permission p
+   SET view_scope = 'vsetko', edit_scope = CASE t.code WHEN 'servis' THEN 'vsetko' ELSE 'nic' END::access_scope,
+       can_import = (t.code = 'servis'), can_edit_active_oom = (t.code = 'servis')
+  FROM team t
+ WHERE t.id = p.team_id AND p.module = 'odberne_miesta' AND t.code IN ('servis', 'marketing');
 
 GRANT SELECT, INSERT, UPDATE ON oom, oom_customer, oom_device, oom_contact, oom_import, oom_planned_change TO crm_rls_test;
 GRANT DELETE ON oom_device, oom_contact TO crm_rls_test;
@@ -581,7 +592,7 @@ BEGIN
   PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003902', true);
   ASSERT (SELECT count(*) FROM oom_import) = 0, 'marketing nevidí importy';
   PERFORM set_config('app.user_id', v_admin::text, true);
-  ASSERT (SELECT count(*) FROM oom_import) = 1, 'admin vidí importy';
+  ASSERT (SELECT count(*) FROM oom_import WHERE id = v_import) = 1, 'admin vidí importy (aj tento z testu)';
 
   -- mazanie: Servis nie, admin iba bez väzieb
   PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003901', true);

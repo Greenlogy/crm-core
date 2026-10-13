@@ -129,9 +129,10 @@ $$;
 -- 8. customer_v: 2 firmy so zákazníckym označením (B2B) + 1 domácnosť (B2C); dodávateľ nie
 DO $$
 BEGIN
-  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2B') = 2, 'B2B zákazníci';
-  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2C') = 1, 'B2C zákazníci';
-  ASSERT (SELECT name FROM customer_v WHERE customer_type = 'B2C') = 'Ján Testovací', 'B2C meno';
+  -- iba vlastné testovacie záznamy (pevné id zo seed.sql); databáza môže mať aj iné dáta
+  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2B' AND id::text LIKE '00000000-0000-4000-8000-%') = 2, 'B2B zákazníci';
+  ASSERT (SELECT count(*) FROM customer_v WHERE customer_type = 'B2C' AND id::text LIKE '00000000-0000-4000-8000-%') = 1, 'B2C zákazníci';
+  ASSERT (SELECT name FROM customer_v WHERE customer_type = 'B2C' AND id::text LIKE '00000000-0000-4000-8000-%') = 'Ján Testovací', 'B2C meno';
   RAISE NOTICE 'OK: customer_v má 2 B2B a 1 B2C zákazníka (dodávateľ vynechaný)';
 END;
 $$;
