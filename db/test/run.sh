@@ -5,7 +5,8 @@
 # v jednej transakcii, ktorá sa na konci vráti (na dev neostanú testovacie dáta).
 # Testy počítajú iba vlastné záznamy (pevné id 00000000-0000-4000-8000-…, východiskové tímy) – prejdú aj na databáze
 # s inými dátami (testovacie OOM, cenníky 2026, zmeny admina v Nastaveniach).
-# Použitie: ./db/test/run.sh
+# Použitie: ./db/test/run.sh            (dev)
+#           ./db/test/run.sh skuska     (dočasná skúšobná vetva z main, DATABASE_URL_SKUSKA)
 # Na main sa testy nespúšťajú.
 
 set -euo pipefail
@@ -14,9 +15,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VARS_FILE="$ROOT/.dev.vars"
 export PATH="/Applications/Postgres.app/Contents/Versions/latest/bin:$PATH"
 
-URL="$(grep -E '^DATABASE_URL_DEV=' "$VARS_FILE" | head -n 1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//')"
+case "${1:-dev}" in
+  dev)    VAR_NAME="DATABASE_URL_DEV" ;;
+  skuska) VAR_NAME="DATABASE_URL_SKUSKA" ;;
+  *)      echo "Testy iba na dev alebo skuska (nikdy na main)." >&2; exit 1 ;;
+esac
+URL="$(grep -E "^${VAR_NAME}=" "$VARS_FILE" | head -n 1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true)"
 if [[ -z "$URL" ]]; then
-  echo "V .dev.vars chýba DATABASE_URL_DEV." >&2
+  echo "V .dev.vars chýba $VAR_NAME." >&2
   exit 1
 fi
 
@@ -49,5 +55,5 @@ BEGIN;
 \i $ROOT/db/test/checks_produkty.sql
 \i $ROOT/db/test/checks_cenniky.sql
 ROLLBACK;
-\echo 'Všetky kontroly prešli. Transakcia vrátená, na dev neostali testovacie dáta.'
+\echo 'Všetky kontroly prešli. Transakcia vrátená, neostali testovacie dáta.'
 SQL

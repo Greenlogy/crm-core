@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Spúšťač dbmate pre Neon vetvy dev a main.
-# Použitie: ./db/dbmate.sh dev|main <príkaz dbmate> [parametre]
+# Použitie: ./db/dbmate.sh dev|main|skuska <príkaz dbmate> [parametre]
+#   skuska = dočasná skúšobná vetva z main (DATABASE_URL_SKUSKA) na overenie migrácií; schéma sa zapíše do
+#   exports/skuska-main/schema.sql (db/schema.sql ostáva stav dev / main)
 # Príklady: ./db/dbmate.sh dev status
 #           ./db/dbmate.sh dev up
 #           ./db/dbmate.sh main up
@@ -17,7 +19,7 @@ DBMATE="$ROOT/node_modules/.bin/dbmate"
 export PATH="/Applications/Postgres.app/Contents/Versions/latest/bin:$PATH"
 
 usage() {
-  echo "Použitie: ./db/dbmate.sh dev|main <príkaz dbmate> [parametre]" >&2
+  echo "Použitie: ./db/dbmate.sh dev|main|skuska <príkaz dbmate> [parametre]" >&2
   exit 1
 }
 
@@ -28,6 +30,7 @@ shift
 case "$TARGET" in
   dev)  VAR_NAME="DATABASE_URL_DEV" ;;
   main) VAR_NAME="DATABASE_URL_MAIN" ;;
+  skuska) VAR_NAME="DATABASE_URL_SKUSKA" ;;
   *)    usage ;;
 esac
 
@@ -42,7 +45,7 @@ if [[ ! -f "$VARS_FILE" ]]; then
 fi
 
 # Načíta iba jednu premennú, bez spúšťania obsahu súboru.
-URL="$(grep -E "^${VAR_NAME}=" "$VARS_FILE" | head -n 1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//')"
+URL="$(grep -E "^${VAR_NAME}=" "$VARS_FILE" | head -n 1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true)"
 if [[ -z "$URL" ]]; then
   echo "V .dev.vars chýba $VAR_NAME." >&2
   exit 1
@@ -68,9 +71,15 @@ case "$CMD" in
     CMD="migrate" ;;  # up = create + migrate; create nechceme
 esac
 
+SCHEMA_FILE="$ROOT/db/schema.sql"
+if [[ "$TARGET" == "skuska" ]]; then
+  mkdir -p "$ROOT/exports/skuska-main"
+  SCHEMA_FILE="$ROOT/exports/skuska-main/schema.sql"
+fi
+
 export DATABASE_URL="$URL"
 exec "$DBMATE" \
   --env DATABASE_URL \
   --migrations-dir "$ROOT/db/migrations" \
-  --schema-file "$ROOT/db/schema.sql" \
+  --schema-file "$SCHEMA_FILE" \
   "$CMD" "$@"
