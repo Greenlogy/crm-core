@@ -457,6 +457,17 @@ CREATE TYPE public.price_direction AS ENUM (
 
 
 --
+-- Name: price_list_version_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.price_list_version_status AS ENUM (
+    'navrh',
+    'schvalena',
+    'nahradena'
+);
+
+
+--
 -- Name: price_model; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -1391,6 +1402,17 @@ $$;
 
 
 --
+-- Name: crm_local_date(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_local_date(p_at timestamp with time zone) RETURNS date
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT (p_at AT TIME ZONE 'Europe/Bratislava')::date
+$$;
+
+
+--
 -- Name: crm_oom_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1415,6 +1437,31 @@ CREATE FUNCTION public.crm_oom_system_step() RETURNS boolean
     LANGUAGE sql STABLE
     AS $$
   SELECT coalesce(current_setting('crm.oom_system', true), '') = 'on'
+$$;
+
+
+--
+-- Name: crm_owner_session(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_owner_session() RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT session_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'product'::regclass)
+     AND current_setting('role') = 'none'
+     AND NOT crm_require_user()
+$$;
+
+
+--
+-- Name: crm_price_list_writer(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_price_list_writer() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_admin() OR crm_owner_session()
 $$;
 
 
@@ -3656,6 +3703,356 @@ $$;
 
 
 --
+-- Name: price_list_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM price_list_version WHERE price_list_id = OLD.id AND status <> 'navrh') THEN
+      RAISE EXCEPTION 'Cenník so schválenou verziou sa nemaže.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF NEW.code <> OLD.code OR NEW.org_id <> OLD.org_id THEN
+    RAISE EXCEPTION 'Kód a spoločnosť cenníka sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: price_list_item_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_item_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_status price_list_version_status;
+  v_list   price_list;
+  v_prod   product;
+BEGIN
+  SELECT v.status INTO v_status FROM price_list_version v
+   WHERE v.id = CASE WHEN TG_OP = 'DELETE' THEN OLD.version_id ELSE NEW.version_id END;
+  -- pri zmazaní Návrhu (kaskáda) už verzia nemusí byť viditeľná – schválená sa zmazať nedá
+  IF v_status IS NOT NULL AND v_status <> 'navrh' THEN
+    RAISE EXCEPTION 'Schválený cenník sa nedá meniť. Vytvor novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.version_id <> OLD.version_id THEN
+    RAISE EXCEPTION 'Položka sa nepresúva do inej verzie.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' OR NEW.product_id <> OLD.product_id THEN
+    SELECT l.* INTO v_list FROM price_list l JOIN price_list_version v ON v.price_list_id = l.id WHERE v.id = NEW.version_id;
+    SELECT * INTO v_prod FROM product WHERE id = NEW.product_id;
+    IF v_prod.org_id <> v_list.org_id OR v_prod.segment <> v_list.segment THEN
+      RAISE EXCEPTION 'Produkt „%“ nepatrí do spoločnosti a segmentu cenníka.', v_prod.name USING ERRCODE = 'check_violation';
+    END IF;
+    IF NOT 'cennik' = ANY (v_prod.price_models) THEN
+      RAISE EXCEPTION 'Produkt „%“ nemá cenový model cenník.', v_prod.name USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_prod.status = 'ukonceny' THEN
+      RAISE EXCEPTION 'Produkt „%“ je ukončený.', v_prod.name USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: price_list_item_program_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_item_program_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_status   price_list_version_status;
+  v_category product_category;
+BEGIN
+  SELECT v.status, p.category INTO v_status, v_category
+    FROM price_list_item i
+    JOIN price_list_version v ON v.id = i.version_id
+    JOIN product p ON p.id = i.product_id
+   WHERE i.id = CASE WHEN TG_OP = 'DELETE' THEN OLD.item_id ELSE NEW.item_id END;
+  IF v_status IS NOT NULL AND v_status <> 'navrh' THEN
+    RAISE EXCEPTION 'Schválený cenník sa nedá meniť. Vytvor novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  IF NEW.item_id <> coalesce(OLD.item_id, NEW.item_id) THEN
+    RAISE EXCEPTION 'Parametre sa nepresúvajú k inej položke.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_category NOT IN ('vbattery', 'viwa') THEN
+    RAISE EXCEPTION 'Parametre programu má iba VBattery alebo VIWA.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_category <> 'viwa' AND num_nonnulls(NEW.viwa_conversion_factor, NEW.viwa_activation_bonus,
+                                           NEW.viwa_credit_expiry_months) > 0 THEN
+    RAISE EXCEPTION 'Parametre VIWA má iba program VIWA.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: price_list_version_approve(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_approve(p_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v      price_list_version;
+  v_next date;
+BEGIN
+  PERFORM price_list_writer_check();
+  SELECT * INTO v FROM price_list_version WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND OR NOT (SELECT org_id FROM price_list WHERE id = v.price_list_id) = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Verzia cenníka neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v.status <> 'navrh' THEN
+    RAISE EXCEPTION 'Schváliť sa dá iba návrh.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM price_list_item WHERE version_id = p_id) THEN
+    RAISE EXCEPTION 'Návrh nemá žiadnu položku.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v.valid_from < crm_today() AND NOT crm_owner_session() THEN
+    RAISE EXCEPTION 'Schváliť sa dá iba verzia s účinnosťou od dnes (%) alebo neskôr.', to_char(crm_today(), 'FMDD. FMMM. YYYY')
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  UPDATE price_list_item i SET vat_rate = p.vat_rate FROM product p WHERE p.id = i.product_id AND i.version_id = p_id;
+
+  -- oprava budúceho cenníka: verzia s rovnakým dátumom účinnosti, ktorá ešte neplatí
+  UPDATE price_list_version SET status = 'nahradena'
+   WHERE price_list_id = v.price_list_id AND status = 'schvalena' AND valid_from = v.valid_from;
+  -- predošlá verzia platí do dňa pred novou
+  UPDATE price_list_version SET valid_to = v.valid_from - 1
+   WHERE price_list_id = v.price_list_id AND status = 'schvalena' AND valid_from < v.valid_from
+     AND (valid_to IS NULL OR valid_to >= v.valid_from);
+  -- neskoršia schválená verzia: nová platí najdlhšie do dňa pred ňou
+  SELECT min(valid_from) INTO v_next FROM price_list_version
+   WHERE price_list_id = v.price_list_id AND status = 'schvalena' AND valid_from > v.valid_from;
+  UPDATE price_list_version
+     SET status = 'schvalena', approved_at = now(), approved_by = crm_active_user_id(),
+         valid_to = CASE WHEN v_next IS NULL THEN valid_to ELSE least(coalesce(valid_to, v_next - 1), v_next - 1) END
+   WHERE id = p_id;
+END;
+$$;
+
+
+--
+-- Name: price_list_version_close(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_close(p_id uuid, p_valid_to date) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v price_list_version;
+BEGIN
+  PERFORM price_list_writer_check();
+  SELECT * INTO v FROM price_list_version WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND OR NOT (SELECT org_id FROM price_list WHERE id = v.price_list_id) = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Verzia cenníka neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v.status <> 'schvalena' THEN
+    RAISE EXCEPTION 'Ukončiť sa dá iba schválená verzia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_valid_to IS NULL OR p_valid_to < crm_today() OR p_valid_to < v.valid_from THEN
+    RAISE EXCEPTION 'Dátum ukončenia musí byť dnes alebo neskôr a po začiatku platnosti.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE price_list_version SET valid_to = p_valid_to WHERE id = p_id;
+END;
+$$;
+
+
+--
+-- Name: price_list_version_copy(uuid, text, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_copy(p_source_id uuid, p_name text, p_valid_from date) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_src     price_list_version;
+  v_new     uuid;
+  v_item    uuid;
+  r         record;
+  v_skipped jsonb := '[]';
+BEGIN
+  PERFORM price_list_writer_check();
+  SELECT * INTO v_src FROM price_list_version WHERE id = p_source_id;
+  IF NOT FOUND OR NOT (SELECT org_id FROM price_list WHERE id = v_src.price_list_id) = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Verzia cenníka neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF EXISTS (SELECT 1 FROM price_list_version WHERE price_list_id = v_src.price_list_id AND status = 'navrh') THEN
+    RAISE EXCEPTION 'Cenník už má rozpracovaný návrh – dokonči ho alebo zmaž.' USING ERRCODE = 'unique_violation';
+  END IF;
+  INSERT INTO price_list_version (price_list_id, name, valid_from, copied_from_id, note)
+  VALUES (v_src.price_list_id, p_name, p_valid_from, v_src.id, NULL)
+  RETURNING id INTO v_new;
+
+  FOR r IN SELECT i.*, p.status AS product_status, p.name AS product_name
+             FROM price_list_item i JOIN product p ON p.id = i.product_id
+            WHERE i.version_id = v_src.id ORDER BY i.sort_order, p.name LOOP
+    IF r.product_status = 'ukonceny' THEN
+      v_skipped := v_skipped || to_jsonb(r.product_name);
+      CONTINUE;
+    END IF;
+    INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, price_nt_eur_mwh, fee_oom_eur_month,
+                                 fee_program_eur_month, fee_kw_eur_month, sort_order)
+    VALUES (v_new, r.product_id, r.price_vt_eur_mwh, r.price_nt_eur_mwh, r.fee_oom_eur_month,
+            r.fee_program_eur_month, r.fee_kw_eur_month, r.sort_order)
+    RETURNING id INTO v_item;
+    INSERT INTO price_list_item_program (item_id, greencar, greencar_kwh_per_voucher, greencar_voucher_eur, greenshare,
+                                         greenshare_fee_pct, viwa_conversion_factor, viwa_activation_bonus,
+                                         viwa_credit_expiry_months)
+    SELECT v_item, greencar, greencar_kwh_per_voucher, greencar_voucher_eur, greenshare, greenshare_fee_pct,
+           viwa_conversion_factor, viwa_activation_bonus, viwa_credit_expiry_months
+      FROM price_list_item_program WHERE item_id = r.id;
+  END LOOP;
+  RETURN jsonb_build_object('version_id', v_new, 'skipped', v_skipped);
+END;
+$$;
+
+
+--
+-- Name: price_list_version_delete(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_delete(p_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v price_list_version;
+BEGIN
+  PERFORM price_list_writer_check();
+  SELECT * INTO v FROM price_list_version WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND OR NOT (SELECT org_id FROM price_list WHERE id = v.price_list_id) = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Verzia cenníka neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v.status <> 'navrh' THEN
+    RAISE EXCEPTION 'Zmazať sa dá iba návrh.' USING ERRCODE = 'check_violation';
+  END IF;
+  DELETE FROM price_list_version WHERE id = p_id;
+END;
+$$;
+
+
+--
+-- Name: price_list_version_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status <> 'navrh' THEN
+      RAISE EXCEPTION 'Nová verzia cenníka vzniká iba ako návrh.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status <> 'navrh' THEN
+      RAISE EXCEPTION 'Schválená verzia cenníka sa nemaže.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF NEW.price_list_id <> OLD.price_list_id THEN
+    RAISE EXCEPTION 'Verzia sa nepresúva do iného cenníka.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.status = 'navrh' THEN
+    IF NEW.status = 'nahradena' THEN
+      RAISE EXCEPTION 'Návrh sa nedá nahradiť, iba zmazať.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.status = 'nahradena' THEN
+    RAISE EXCEPTION 'Nahradená verzia cenníka sa nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- schválená
+  IF (to_jsonb(NEW) - ARRAY['valid_to', 'status', 'updated_at'])
+     IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['valid_to', 'status', 'updated_at']) THEN
+    RAISE EXCEPTION 'Schválený cenník sa nedá meniť. Vytvor novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.status <> OLD.status THEN
+    IF NEW.status <> 'nahradena' OR OLD.valid_from <= crm_today() OR NEW.valid_to IS DISTINCT FROM OLD.valid_to THEN
+      RAISE EXCEPTION 'Nahradiť sa dá iba schválená verzia, ktorá ešte neplatí.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF NEW.valid_to IS DISTINCT FROM OLD.valid_to THEN
+    IF NEW.valid_to IS NULL OR (OLD.valid_to IS NOT NULL AND NEW.valid_to > OLD.valid_to)
+       OR NEW.valid_to < crm_today() - 1 THEN
+      RAISE EXCEPTION 'Platnosť schválenej verzie sa dá iba skrátiť, najskôr ku včerajšku.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: price_list_version_state(public.price_list_version_status, date, date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_version_state(p_status public.price_list_version_status, p_from date, p_to date, p_on date) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE
+           WHEN p_status = 'navrh' THEN 'navrh'
+           WHEN p_status = 'nahradena' OR p_to < p_on THEN 'ukoncena'
+           WHEN p_from > p_on THEN 'buduca'
+           ELSE 'platna'
+         END
+$$;
+
+
+--
+-- Name: price_list_writer_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_list_writer_check() RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT crm_price_list_writer() THEN
+    RAISE EXCEPTION 'Cenníky spravuje iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+END;
+$$;
+
+
+--
+-- Name: price_with_vat(numeric, numeric, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_with_vat(p_net numeric, p_vat numeric, p_scale integer) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT round(p_net * (1 + p_vat / 100), p_scale)
+$$;
+
+
+--
 -- Name: product_candidates(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -5527,6 +5924,279 @@ COMMENT ON COLUMN public.pipeline_stage_required_field.core_field IS 'pole jadra
 
 
 --
+-- Name: price_list; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_list (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    code text NOT NULL,
+    name text NOT NULL,
+    segment public.customer_segment NOT NULL,
+    description text,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_list_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,60}$'::text)),
+    CONSTRAINT price_list_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT price_list_segment_check CHECK ((segment = ANY (ARRAY['domacnost'::public.customer_segment, 'firma'::public.customer_segment])))
+);
+
+
+--
+-- Name: TABLE price_list; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_list IS 'cenník (napr. Domácnosti – NIE Energopomoc); zmazať sa dá iba bez schválenej verzie';
+
+
+--
+-- Name: price_list_version; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_list_version (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    price_list_id uuid NOT NULL,
+    name text NOT NULL,
+    valid_from date NOT NULL,
+    valid_to date,
+    status public.price_list_version_status DEFAULT 'navrh'::public.price_list_version_status NOT NULL,
+    copied_from_id uuid,
+    note text,
+    approved_at timestamp with time zone,
+    approved_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_list_version_approved_check CHECK (((status = 'navrh'::public.price_list_version_status) = (approved_at IS NULL))),
+    CONSTRAINT price_list_version_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT price_list_version_period_check CHECK (((valid_to IS NULL) OR (valid_to >= valid_from)))
+);
+
+
+--
+-- Name: TABLE price_list_version; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_list_version IS 'verzia cenníka; schválená sa nemení (iba uzavretie dátumom), oprava = nová verzia';
+
+
+--
+-- Name: COLUMN price_list_version.valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_version.valid_to IS 'NULL = do ďalšej verzie; vyplní schválenie nástupcu alebo ukončenie cenníka';
+
+
+--
+-- Name: COLUMN price_list_version.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_version.status IS 'navrh; schvalena; nahradena = budúca schválená verzia nahradená pred účinnosťou';
+
+
+--
+-- Name: COLUMN price_list_version.approved_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_version.approved_by IS 'admin, ktorý schválil; NULL pri skripte naplnenia';
+
+
+--
+-- Name: price_list_current_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.price_list_current_v WITH (security_invoker='true') AS
+ SELECT l.id,
+    l.org_id,
+    l.code,
+    l.name,
+    l.segment,
+    l.description,
+    l.sort_order,
+    cur.id AS current_version_id,
+    cur.name AS current_version_name,
+    cur.valid_from AS current_valid_from,
+    cur.valid_to AS current_valid_to,
+    fut.id AS future_version_id,
+    fut.name AS future_version_name,
+    fut.valid_from AS future_valid_from,
+    dr.id AS draft_version_id,
+    dr.name AS draft_version_name,
+    dr.valid_from AS draft_valid_from
+   FROM (((public.price_list l
+     LEFT JOIN LATERAL ( SELECT v.id,
+            v.price_list_id,
+            v.name,
+            v.valid_from,
+            v.valid_to,
+            v.status,
+            v.copied_from_id,
+            v.note,
+            v.approved_at,
+            v.approved_by,
+            v.created_at,
+            v.updated_at
+           FROM public.price_list_version v
+          WHERE ((v.price_list_id = l.id) AND (public.price_list_version_state(v.status, v.valid_from, v.valid_to, public.crm_today()) = 'platna'::text))
+         LIMIT 1) cur ON (true))
+     LEFT JOIN LATERAL ( SELECT v.id,
+            v.price_list_id,
+            v.name,
+            v.valid_from,
+            v.valid_to,
+            v.status,
+            v.copied_from_id,
+            v.note,
+            v.approved_at,
+            v.approved_by,
+            v.created_at,
+            v.updated_at
+           FROM public.price_list_version v
+          WHERE ((v.price_list_id = l.id) AND (public.price_list_version_state(v.status, v.valid_from, v.valid_to, public.crm_today()) = 'buduca'::text))
+          ORDER BY v.valid_from
+         LIMIT 1) fut ON (true))
+     LEFT JOIN LATERAL ( SELECT v.id,
+            v.price_list_id,
+            v.name,
+            v.valid_from,
+            v.valid_to,
+            v.status,
+            v.copied_from_id,
+            v.note,
+            v.approved_at,
+            v.approved_by,
+            v.created_at,
+            v.updated_at
+           FROM public.price_list_version v
+          WHERE ((v.price_list_id = l.id) AND (v.status = 'navrh'::public.price_list_version_status))
+         LIMIT 1) dr ON (true));
+
+
+--
+-- Name: price_list_item; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_list_item (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    version_id uuid NOT NULL,
+    product_id uuid NOT NULL,
+    price_vt_eur_mwh numeric(12,4),
+    price_nt_eur_mwh numeric(12,4),
+    fee_oom_eur_month numeric(12,4),
+    fee_program_eur_month numeric(12,4),
+    fee_kw_eur_month numeric(12,4),
+    vat_rate numeric(5,2),
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_list_item_fee_kw_eur_month_check CHECK ((fee_kw_eur_month >= (0)::numeric)),
+    CONSTRAINT price_list_item_fee_oom_eur_month_check CHECK ((fee_oom_eur_month >= (0)::numeric)),
+    CONSTRAINT price_list_item_fee_program_eur_month_check CHECK ((fee_program_eur_month >= (0)::numeric)),
+    CONSTRAINT price_list_item_nt_check CHECK (((price_nt_eur_mwh IS NULL) OR (price_vt_eur_mwh IS NOT NULL))),
+    CONSTRAINT price_list_item_price_check CHECK ((num_nonnulls(price_vt_eur_mwh, price_nt_eur_mwh, fee_oom_eur_month, fee_program_eur_month, fee_kw_eur_month) >= 1)),
+    CONSTRAINT price_list_item_price_nt_eur_mwh_check CHECK ((price_nt_eur_mwh >= (0)::numeric)),
+    CONSTRAINT price_list_item_price_vt_eur_mwh_check CHECK ((price_vt_eur_mwh >= (0)::numeric)),
+    CONSTRAINT price_list_item_vat_rate_check CHECK (((vat_rate >= (0)::numeric) AND (vat_rate <= (100)::numeric)))
+);
+
+
+--
+-- Name: TABLE price_list_item; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_list_item IS 'položka verzie cenníka: ceny bez DPH na 4 desatinné miesta';
+
+
+--
+-- Name: COLUMN price_list_item.price_vt_eur_mwh; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item.price_vt_eur_mwh IS 'VT (pri jednotarife jediná cena) €/MWh bez DPH';
+
+
+--
+-- Name: COLUMN price_list_item.fee_oom_eur_month; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item.fee_oom_eur_month IS 'mesačná platba za OM (aj ZEM, poplatok B2B) bez DPH';
+
+
+--
+-- Name: COLUMN price_list_item.fee_program_eur_month; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item.fee_program_eur_month IS 'mesačný poplatok programu (VBattery, VIWA za OOM) bez DPH';
+
+
+--
+-- Name: COLUMN price_list_item.fee_kw_eur_month; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item.fee_kw_eur_month IS 'VIWA: poplatok za odchýlku za kW inštalovaného výkonu mesačne bez DPH';
+
+
+--
+-- Name: COLUMN price_list_item.vat_rate; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item.vat_rate IS 'kópia sadzby DPH produktu pri schválení; v Návrhu NULL (platí DPH produktu)';
+
+
+--
+-- Name: price_list_item_program; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_list_item_program (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    item_id uuid NOT NULL,
+    greencar boolean DEFAULT false NOT NULL,
+    greencar_kwh_per_voucher integer,
+    greencar_voucher_eur numeric(12,2),
+    greenshare boolean DEFAULT false NOT NULL,
+    greenshare_fee_pct numeric(5,2),
+    viwa_conversion_factor numeric(5,4),
+    viwa_activation_bonus integer,
+    viwa_credit_expiry_months smallint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_list_item_program_greencar_kwh_per_voucher_check CHECK ((greencar_kwh_per_voucher > 0)),
+    CONSTRAINT price_list_item_program_greencar_voucher_eur_check CHECK ((greencar_voucher_eur >= (0)::numeric)),
+    CONSTRAINT price_list_item_program_greenshare_fee_pct_check CHECK (((greenshare_fee_pct >= (0)::numeric) AND (greenshare_fee_pct <= (100)::numeric))),
+    CONSTRAINT price_list_item_program_viwa_activation_bonus_check CHECK ((viwa_activation_bonus >= 0)),
+    CONSTRAINT price_list_item_program_viwa_conversion_factor_check CHECK (((viwa_conversion_factor >= (0)::numeric) AND (viwa_conversion_factor <= (1)::numeric))),
+    CONSTRAINT price_list_item_program_viwa_credit_expiry_months_check CHECK ((viwa_credit_expiry_months > 0))
+);
+
+
+--
+-- Name: TABLE price_list_item_program; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_list_item_program IS 'parametre programu VBattery / VIWA pri položke; pevné pre balík, menia sa iba novou verziou';
+
+
+--
+-- Name: COLUMN price_list_item_program.greencar_kwh_per_voucher; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item_program.greencar_kwh_per_voucher IS 'VBattery: kWh za voucher (PREMIUM 400, MAX 300)';
+
+
+--
+-- Name: COLUMN price_list_item_program.greenshare_fee_pct; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item_program.greenshare_fee_pct IS 'VBattery: poplatok GreenShare v % z prevedených kWh (platí sa v kWh)';
+
+
+--
+-- Name: COLUMN price_list_item_program.viwa_conversion_factor; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.price_list_item_program.viwa_conversion_factor IS 'VIWA: konverzný kurz = SPOT × hodnota';
+
+
+--
 -- Name: product; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5603,6 +6273,77 @@ COMMENT ON COLUMN public.product.price_regulation IS 'NULL = nezáleží; true =
 --
 
 COMMENT ON COLUMN public.product.status IS 'predava_sa; dobieha = existujúce zmluvy bežia, nové nie; ukonceny';
+
+
+--
+-- Name: price_list_item_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.price_list_item_v WITH (security_invoker='true') AS
+ SELECT i.id,
+    i.version_id,
+    v.price_list_id,
+    i.product_id,
+    p.code AS product_code,
+    p.name AS product_name,
+    p.category,
+    p.tariff_type,
+    p.status AS product_status,
+    i.sort_order,
+    COALESCE(i.vat_rate, p.vat_rate) AS vat_rate,
+    i.price_vt_eur_mwh,
+    public.price_with_vat(i.price_vt_eur_mwh, COALESCE(i.vat_rate, p.vat_rate), 4) AS price_vt_with_vat,
+    i.price_nt_eur_mwh,
+    public.price_with_vat(i.price_nt_eur_mwh, COALESCE(i.vat_rate, p.vat_rate), 4) AS price_nt_with_vat,
+    i.fee_oom_eur_month,
+    public.price_with_vat(i.fee_oom_eur_month, COALESCE(i.vat_rate, p.vat_rate), 2) AS fee_oom_with_vat,
+    i.fee_program_eur_month,
+    public.price_with_vat(i.fee_program_eur_month, COALESCE(i.vat_rate, p.vat_rate), 2) AS fee_program_with_vat,
+    i.fee_kw_eur_month,
+    public.price_with_vat(i.fee_kw_eur_month, COALESCE(i.vat_rate, p.vat_rate), 4) AS fee_kw_with_vat,
+    g.greencar,
+    g.greencar_kwh_per_voucher,
+    g.greencar_voucher_eur,
+    g.greenshare,
+    g.greenshare_fee_pct,
+    g.viwa_conversion_factor,
+    g.viwa_activation_bonus,
+    g.viwa_credit_expiry_months
+   FROM (((public.price_list_item i
+     JOIN public.price_list_version v ON ((v.id = i.version_id)))
+     JOIN public.product p ON ((p.id = i.product_id)))
+     LEFT JOIN public.price_list_item_program g ON ((g.item_id = i.id)));
+
+
+--
+-- Name: price_list_version_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.price_list_version_v WITH (security_invoker='true') AS
+ SELECT v.id,
+    v.price_list_id,
+    l.org_id,
+    l.code AS price_list_code,
+    l.name AS price_list_name,
+    l.segment,
+    v.name,
+    v.valid_from,
+    v.valid_to,
+    v.status,
+    public.price_list_version_state(v.status, v.valid_from, v.valid_to, public.crm_today()) AS state,
+    v.copied_from_id,
+    v.note,
+    v.approved_at,
+    v.approved_by,
+    u.name AS approved_by_name,
+    ( SELECT count(*) AS count
+           FROM public.price_list_item i
+          WHERE (i.version_id = v.id)) AS item_count,
+    v.created_at,
+    v.updated_at
+   FROM ((public.price_list_version v
+     JOIN public.price_list l ON ((l.id = v.price_list_id)))
+     LEFT JOIN public.app_user u ON ((u.id = v.approved_by)));
 
 
 --
@@ -6540,6 +7281,78 @@ ALTER TABLE ONLY public.pipeline_stage_required_field
 
 
 --
+-- Name: price_list price_list_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list
+    ADD CONSTRAINT price_list_code_key UNIQUE (code);
+
+
+--
+-- Name: price_list_item price_list_item_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item
+    ADD CONSTRAINT price_list_item_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_list_item price_list_item_product_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item
+    ADD CONSTRAINT price_list_item_product_key UNIQUE (version_id, product_id);
+
+
+--
+-- Name: price_list_item_program price_list_item_program_item_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item_program
+    ADD CONSTRAINT price_list_item_program_item_id_key UNIQUE (item_id);
+
+
+--
+-- Name: price_list_item_program price_list_item_program_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item_program
+    ADD CONSTRAINT price_list_item_program_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_list price_list_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list
+    ADD CONSTRAINT price_list_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_list_version price_list_version_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_name_key UNIQUE (price_list_id, name);
+
+
+--
+-- Name: price_list_version price_list_version_overlap; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_overlap EXCLUDE USING gist (price_list_id WITH =, daterange(valid_from, valid_to, '[]'::text) WITH &&) WHERE ((status = 'schvalena'::public.price_list_version_status));
+
+
+--
+-- Name: price_list_version price_list_version_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: product product_code_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7342,6 +8155,27 @@ CREATE UNIQUE INDEX pipeline_org_name_key ON public.pipeline USING btree (org_id
 
 
 --
+-- Name: price_list_item_product_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX price_list_item_product_id_idx ON public.price_list_item USING btree (product_id);
+
+
+--
+-- Name: price_list_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX price_list_org_id_idx ON public.price_list USING btree (org_id);
+
+
+--
+-- Name: price_list_version_one_draft; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX price_list_version_one_draft ON public.price_list_version USING btree (price_list_id) WHERE (status = 'navrh'::public.price_list_version_status);
+
+
+--
 -- Name: product_hubspot_contract_codes_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7748,6 +8582,34 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.pipeline_sta
 
 
 --
+-- Name: price_list trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: price_list_item trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list_item FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: price_list_item_program trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list_item_program FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: price_list_version trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: product trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -7976,6 +8838,34 @@ CREATE TRIGGER trg_guard BEFORE DELETE ON public.custom_field_option FOR EACH RO
 --
 
 CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.lookup_value_guard();
+
+
+--
+-- Name: price_list trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.price_list FOR EACH ROW EXECUTE FUNCTION public.price_list_guard();
+
+
+--
+-- Name: price_list_item trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_list_item FOR EACH ROW EXECUTE FUNCTION public.price_list_item_guard();
+
+
+--
+-- Name: price_list_item_program trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_list_item_program FOR EACH ROW EXECUTE FUNCTION public.price_list_item_program_guard();
+
+
+--
+-- Name: price_list_version trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.price_list_version_guard();
 
 
 --
@@ -8466,6 +9356,34 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline_stage FOR EAC
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline_stage_required_field FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: price_list trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: price_list_item trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list_item FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: price_list_item_program trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list_item_program FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: price_list_version trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -9270,6 +10188,62 @@ ALTER TABLE ONLY public.pipeline_stage_required_field
 
 
 --
+-- Name: price_list_item price_list_item_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item
+    ADD CONSTRAINT price_list_item_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+
+
+--
+-- Name: price_list_item_program price_list_item_program_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item_program
+    ADD CONSTRAINT price_list_item_program_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.price_list_item(id) ON DELETE CASCADE;
+
+
+--
+-- Name: price_list_item price_list_item_version_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_item
+    ADD CONSTRAINT price_list_item_version_id_fkey FOREIGN KEY (version_id) REFERENCES public.price_list_version(id) ON DELETE CASCADE;
+
+
+--
+-- Name: price_list price_list_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list
+    ADD CONSTRAINT price_list_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: price_list_version price_list_version_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: price_list_version price_list_version_copied_from_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_copied_from_id_fkey FOREIGN KEY (copied_from_id) REFERENCES public.price_list_version(id) ON DELETE SET NULL;
+
+
+--
+-- Name: price_list_version price_list_version_price_list_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_list_version
+    ADD CONSTRAINT price_list_version_price_list_id_fkey FOREIGN KEY (price_list_id) REFERENCES public.price_list(id) ON DELETE CASCADE;
+
+
+--
 -- Name: product product_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9730,6 +10704,104 @@ ALTER TABLE public.pipeline_stage ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.pipeline_stage_required_field ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_list; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_list ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_list_item; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_list_item ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_list_item_program; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_list_item_program ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_list_item_program price_list_item_program_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_item_program_read ON public.price_list_item_program FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.price_list_item i
+  WHERE (i.id = price_list_item_program.item_id))));
+
+
+--
+-- Name: price_list_item_program price_list_item_program_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_item_program_write ON public.price_list_item_program USING ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list_item i
+  WHERE (i.id = price_list_item_program.item_id))))) WITH CHECK ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list_item i
+  WHERE (i.id = price_list_item_program.item_id)))));
+
+
+--
+-- Name: price_list_item price_list_item_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_item_read ON public.price_list_item FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.price_list_version v
+  WHERE (v.id = price_list_item.version_id))));
+
+
+--
+-- Name: price_list_item price_list_item_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_item_write ON public.price_list_item USING ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list_version v
+  WHERE (v.id = price_list_item.version_id))))) WITH CHECK ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list_version v
+  WHERE (v.id = price_list_item.version_id)))));
+
+
+--
+-- Name: price_list price_list_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_read ON public.price_list FOR SELECT USING ((( SELECT public.crm_session_ok() AS crm_session_ok) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: price_list_version; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_list_version ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_list_version price_list_version_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_version_read ON public.price_list_version FOR SELECT USING (((EXISTS ( SELECT 1
+   FROM public.price_list l
+  WHERE (l.id = price_list_version.price_list_id))) AND ((status <> 'navrh'::public.price_list_version_status) OR ( SELECT public.crm_price_list_writer() AS crm_price_list_writer))));
+
+
+--
+-- Name: price_list_version price_list_version_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_version_write ON public.price_list_version USING ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list l
+  WHERE (l.id = price_list_version.price_list_id))))) WITH CHECK ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (EXISTS ( SELECT 1
+   FROM public.price_list l
+  WHERE (l.id = price_list_version.price_list_id)))));
+
+
+--
+-- Name: price_list price_list_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_list_write ON public.price_list USING ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])))) WITH CHECK ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
 
 --
 -- Name: product; Type: ROW SECURITY; Schema: public; Owner: -
@@ -10328,4 +11400,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0016'),
     ('0017'),
     ('0018'),
-    ('0019');
+    ('0019'),
+    ('0020');

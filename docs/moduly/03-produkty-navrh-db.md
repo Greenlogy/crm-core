@@ -3,7 +3,8 @@
 Verzia 0.3 · 13. 10. 2026 · **schválené Petrom** (v0.1 = návrh; v0.2 = odpovede 1–13, výslovný rozsah PDS
 v párovaní, cenová regulácia s prázdnou hodnotou, skrytie ZSD C1, export iba schválených verzií, inventár z HubSpotu;
 v0.3 = plán `0019` schválený so zmenami: typ tarifu je vlastnosť produktu, kód modulu 2 sa nasadí spolu s `0019`).
-Implementácia: `0019_produkty` napísaná a overená nanečisto (13. 10.), na `dev` zatiaľ nie.
+Implementácia: `0019_produkty` na `dev` (13. 10., Peter otestoval na Teste). `0020_cenniky` na `dev` (13. 10.)
+(plán schválený so zmenami: „dnes“ v Europe/Bratislava, minulý dátum pri schválení iba vlastník databázy – časť 4).
 Vychádza zo zadania `03-produkty.md` v0.3, odpovedí `03-produkty-otazky.md` (verzia 2), obrazoviek 20–24,
 `docs/rozhodnutia.md`, migrácií `0001`–`0018` a cenníkov 2026 (PDF v `exports/cenniky-2026/`).
 
@@ -298,6 +299,12 @@ Ochrana platí **pre každú rolu** (aj vlastníka databázy a `crm_sync`), niel
 | --- | --- |
 | `price_list_item`, `price_list_item_program` | ak verzia nie je Návrh → chyba „Schválený cenník sa nedá meniť. Vytvor novú verziu.“ |
 | `price_list_version` | Návrh: všetko povolené. Schválená: povolené **iba** (a) nastavenie `valid_to` z prázdneho alebo neskoršieho na dátum ≥ včera (uzavretie nasledujúcou verziou alebo ukončenie cenníka), (b) zmena stavu na Nahradená, ak verzia ešte nezačala platiť. Nič iné, ani mazanie. Nahradená: nič. |
+
+**Dnes** = dátum v Europe/Bratislava (`crm_today()`, `crm_local_date(čas)`; 23:30 UTC v októbri je už nasledujúci deň) –
+pri schválení, ukončení, „platná do od včera“ aj pri stavoch Budúca / Platná / Ukončená (Peter, plán 0020).
+**Minulý dátum pri schválení** smie iba vlastník databázy (skript naplnenia): `crm_owner_session()` = prihlásený vlastník
+tabuliek bez `SET ROLE` a nie spojenie aplikácie; rola `crm_app` nikdy, ani bez `app.user_id` (Peter, plán 0020).
+Parametre programu majú vlastné `id` (audit) a unikátne `item_id`.
 
 Navyše `crm_app` má na `price_list_version` právo UPDATE iba na stĺpce `name`, `valid_from`, `note`
 (oprávnenie po stĺpcoch). Stav, schválenie a `valid_to` mení iba funkcia nižšie (`SECURITY DEFINER`, kontroluje admina).

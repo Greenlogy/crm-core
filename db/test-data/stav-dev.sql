@@ -18,6 +18,8 @@ SELECT (SELECT max(version) FROM schema_migrations) AS posledna_migracia,
        (SELECT CASE WHEN hidden_at IS NULL THEN 'viditeľná' ELSE 'skrytá' END
           FROM lookup_value WHERE code = 'zsd_c1') AS zsd_c1,
        (SELECT count(*) FROM lookup_value WHERE list_code = 'sadzba_distribucie' AND label = 'C11') AS sadzby_c11,
-       (SELECT count(*) FROM pg_class WHERE relname IN ('tariff_scope', 'product_tariff')) AS nove_tabulky;
+       (SELECT count(*) FROM pg_class WHERE relname IN ('tariff_scope', 'product_tariff')) AS tabulky_0019,
+       (SELECT count(*) FROM pg_class WHERE relname IN ('price_list', 'price_list_version', 'price_list_item',
+                                                       'price_list_item_program')) AS tabulky_0020;
 
 ROLLBACK;

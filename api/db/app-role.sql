@@ -44,6 +44,11 @@ GRANT DELETE ON company_contact, deal_contact, deal_oom, offer_item, oom_device,
   custom_field_section TO crm_app;
 -- Párovanie produkt ↔ sadzba a rozsahy PDS (0019; RLS: iba admin). Produkt sa nemaže nikdy.
 GRANT DELETE ON product_tariff, tariff_scope TO crm_app;
+-- Cenníky (0020): mazať smie (databáza dovolí iba Návrh a cenník bez schválenej verzie); na verzii mení iba
+-- názov, účinnosť a poznámku – stav, schválenie a „platná do“ mení iba funkcia (price_list_version_approve, _close).
+GRANT DELETE ON price_list, price_list_version, price_list_item, price_list_item_program TO crm_app;
+REVOKE UPDATE ON price_list_version FROM crm_app;
+GRANT UPDATE (name, valid_from, note) ON price_list_version TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)
