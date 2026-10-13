@@ -5,7 +5,8 @@ v párovaní, cenová regulácia s prázdnou hodnotou, skrytie ZSD C1, export ib
 v0.3 = plán `0019` schválený so zmenami: typ tarifu je vlastnosť produktu, kód modulu 2 sa nasadí spolu s `0019`).
 Implementácia: `0019_produkty` na `dev` (13. 10., Peter otestoval na Teste). `0020_cenniky` na `dev` (13. 10.)
 (plán schválený so zmenami: „dnes“ v Europe/Bratislava, minulý dátum pri schválení iba vlastník databázy – časť 4).
-`0021_cennik_nahlad` (F2): `price_list_version_approve_preview` – náhľad schválenia iba na čítanie, napísaná a overená nanečisto.
+`0021_cennik_nahlad` (F2): `price_list_version_approve_preview` – náhľad schválenia iba na čítanie, na `dev`.
+`0022_produkty_uprava` (F3): ochrana použitého produktu, NT iba pri dvojtarife, ukončený produkt v návrhu, `product_candidates_by`; napísaná a overená nanečisto.
 Vychádza zo zadania `03-produkty.md` v0.3, odpovedí `03-produkty-otazky.md` (verzia 2), obrazoviek 20–24,
 `docs/rozhodnutia.md`, migrácií `0001`–`0018` a cenníkov 2026 (PDF v `exports/cenniky-2026/`).
 

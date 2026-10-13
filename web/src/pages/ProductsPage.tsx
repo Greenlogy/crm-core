@@ -1,13 +1,16 @@
 // Produkty (obrazovka 22, modul 3 F1 – iba čítanie): katalóg s kategóriou, sadzbami, DPH, cenovými modelmi a stavom.
-// Filter skupín a „Zobraziť ukončené“ je v adrese (?skupina=, ?ukoncene=1). Úpravy produktov prídu v F3.
+// Filter skupín a „Zobraziť ukončené“ je v adrese (?skupina=, ?ukoncene=1). F3: admin zakladá a upravuje produkty.
 
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Check } from '../components/form';
+import { ProductPanel } from '../components/product-edit';
 import { PriceTabs, tariffText, vatText } from '../components/pricelists';
 import { Card, ErrorState, PageSkeleton, Source, StatusPill } from '../components/ui';
 import { useApi, type ProductRow } from '../lib/api';
 import { EMPTY, num } from '../lib/format';
 import { label, PRICE_MODEL, PRODUCT_CATEGORY, PRODUCT_GROUPS, PRODUCT_STATUS } from '../lib/labels';
+import { useMe } from '../lib/me';
 
 type Products = { items: ProductRow[]; counts: Record<string, number>; ended_count: number };
 
@@ -16,7 +19,9 @@ export function ProductsPage() {
   const group = params.get('skupina') ?? '';
   const ended = params.get('ukoncene') === '1';
   const query = new URLSearchParams({ ...(group ? { skupina: group } : {}), ...(ended ? { ukoncene: '1' } : {}) }).toString();
-  const { data, error, loading } = useApi<Products>(`/api/products${query ? `?${query}` : ''}`);
+  const { data, error, loading, reload } = useApi<Products>(`/api/products${query ? `?${query}` : ''}`);
+  const admin = useMe().is_admin;
+  const [panel, setPanel] = useState<ProductRow | 'new' | null>(null);
   if (error) return <ErrorState error={error} />;
   if (!data) return <PageSkeleton />;
 
@@ -43,7 +48,24 @@ export function ProductsPage() {
             <Source />
           </div>
         </div>
+        {admin && (
+          <div className="head-actions">
+            <button type="button" className="btn primary" onClick={() => setPanel('new')}>
+              Nový produkt
+            </button>
+          </div>
+        )}
       </header>
+      {panel && (
+        <ProductPanel
+          product={panel === 'new' ? undefined : panel}
+          onClose={() => setPanel(null)}
+          onDone={() => {
+            setPanel(null);
+            reload();
+          }}
+        />
+      )}
       <PriceTabs />
 
       <Card flush label="Katalóg produktov">
@@ -84,8 +106,16 @@ export function ProductsPage() {
                 </tr>
               )}
               {data.items.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
+                <tr key={p.id} className={admin ? 'clickable' : undefined} onClick={admin ? () => setPanel(p) : undefined}>
+                  <td>
+                    {admin ? (
+                      <button type="button" className="link-button" onClick={() => setPanel(p)}>
+                        {p.name}
+                      </button>
+                    ) : (
+                      p.name
+                    )}
+                  </td>
                   <td>{label(PRODUCT_CATEGORY, p.category)}</td>
                   <td>{tariffText(p.tariffs, p.tariff_type, p.category)}</td>
                   <td className="num">{p.vat_rate === null ? 'podľa diela' : vatText(p.vat_rate as string | number)}</td>

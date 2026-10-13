@@ -327,3 +327,135 @@ BEGIN
   RAISE NOTICE 'OK: práva (čítajú aktívni svojej spoločnosti, zapisuje admin, nemaže nikto), audit produktu a párovania';
 END;
 $$;
+
+-- P6. Úprava produktov (0022): použitý produkt sa nemení v kategórii, segmente, type tarifu, regulácii a modeli cenník;
+-- NT iba pri dvojtarife; Dobieha sa kopíruje; ukončený v návrhu → schválenie aj náhľad odmietnu; product_candidates_by
+DO $$
+DECLARE
+  jt  uuid;
+  dt  uuid;
+  fr  uuid;
+  l   uuid;
+  v1  uuid;
+  v2  uuid;
+  r   jsonb;
+  o   uuid;
+  n   integer;
+BEGIN
+  INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, price_models, price_regulation)
+  VALUES (crm_default_org(), 'p6_jednotarif', 'P6 jednotarif', 'dodavka_domacnost', 'domacnost', 19, 'jednotarif', '{cennik,spot_plus_eur}', false)
+  RETURNING id INTO jt;
+  INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, price_models, price_regulation)
+  VALUES (crm_default_org(), 'p6_dvojtarif', 'P6 dvojtarif', 'dodavka_domacnost', 'domacnost', 19, 'dvojtarif', '{cennik}', false)
+  RETURNING id INTO dt;
+  INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, price_models)
+  VALUES (crm_default_org(), 'p6_volny', 'P6 voľný', 'dodavka_domacnost', 'domacnost', 19, 'jednotarif', '{cennik}')
+  RETURNING id INTO fr;
+  INSERT INTO price_list (org_id, code, name, segment) VALUES (crm_default_org(), 'p6_cennik', 'P6 cenník', 'domacnost') RETURNING id INTO l;
+  INSERT INTO price_list_version (price_list_id, name, valid_from) VALUES (l, 'P6', crm_today() - 10) RETURNING id INTO v1;
+
+  -- b) NT iba pri dvojtarife
+  BEGIN
+    INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, price_nt_eur_mwh) VALUES (v1, jt, 100, 80);
+    RAISE EXCEPTION 'CHYBA: NT pri jednotarifnom produkte';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, fee_oom_eur_month) VALUES (v1, jt, 100, 1.5);
+  INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, price_nt_eur_mwh) VALUES (v1, dt, 120, 90);
+  BEGIN
+    UPDATE price_list_item SET price_nt_eur_mwh = 70 WHERE version_id = v1 AND product_id = jt;
+    RAISE EXCEPTION 'CHYBA: NT doplnená jednotarifnej položke';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+
+  -- a) použitý produkt
+  BEGIN
+    UPDATE product SET segment = 'firma' WHERE id = jt;
+    RAISE EXCEPTION 'CHYBA: segment použitého produktu sa zmenil';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE product SET category = 'zem' WHERE id = jt;
+    RAISE EXCEPTION 'CHYBA: kategória použitého produktu sa zmenila';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE product SET tariff_type = 'dvojtarif' WHERE id = jt;
+    RAISE EXCEPTION 'CHYBA: typ tarifu použitého produktu sa zmenil';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE product SET price_regulation = NULL WHERE id = jt;
+    RAISE EXCEPTION 'CHYBA: cenová regulácia použitého produktu sa zmenila';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE product SET price_models = '{spot_plus_eur}' WHERE id = jt;
+    RAISE EXCEPTION 'CHYBA: použitému produktu sa odobral model cenník';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE product SET vat_rate = 20, name = 'P6 jednotarif (premenovaný)', price_models = '{cennik}', sort_order = 5 WHERE id = jt;
+  ASSERT (SELECT vat_rate = 20 AND price_models = '{cennik}' FROM product WHERE id = jt), 'DPH, názov a ostatné modely sa meniť smú';
+  UPDATE product SET tariff_type = 'dvojtarif', segment = 'firma', category = 'dodavka_firma', price_regulation = true WHERE id = fr;
+  ASSERT (SELECT segment = 'firma' FROM product WHERE id = fr), 'nepoužitý produkt sa meniť smie';
+
+  -- c) Dobieha sa kopíruje; ukončený sa vynechá
+  PERFORM price_list_version_approve(v1);
+  UPDATE product SET status = 'dobieha' WHERE id = dt;
+  UPDATE product SET status = 'ukonceny' WHERE id = jt;
+  r := price_list_version_copy(v1, 'P6 kópia', crm_today() + 10);
+  v2 := (r ->> 'version_id')::uuid;
+  ASSERT r -> 'skipped' = '["P6 jednotarif (premenovaný)"]'::jsonb, 'ukončený vynechaný: ' || r::text;
+  ASSERT EXISTS (SELECT 1 FROM price_list_item WHERE version_id = v2 AND product_id = dt), 'Dobieha skopírovaný';
+  BEGIN
+    INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh) VALUES (v2, fr, 1);   -- fr je teraz firma
+    RAISE EXCEPTION 'CHYBA: produkt firmy sa pridal do cenníka domácností';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END;
+$$;
+
+DO $$
+DECLARE
+  dt uuid := (SELECT id FROM product WHERE code = 'p6_dvojtarif');
+  v2 uuid := (SELECT v.id FROM price_list_version v JOIN price_list l ON l.id = v.price_list_id
+               WHERE l.code = 'p6_cennik' AND v.status = 'navrh');
+  r  jsonb;
+  o  uuid;
+  n  integer;
+BEGIN
+  ASSERT v2 IS NOT NULL AND EXISTS (SELECT 1 FROM price_list_item WHERE version_id = v2 AND product_id = dt),
+         'návrh P6 kópia s produktom Dobieha';
+  ASSERT NOT EXISTS (SELECT 1 FROM price_list_item i JOIN product p ON p.id = i.product_id
+                      WHERE i.version_id = v2 AND p.code = 'p6_volny'), 'produkt firmy sa do cenníka domácností nepridal';
+  -- ukončený produkt v návrhu → náhľad a schválenie odmietnu
+  UPDATE product SET status = 'ukonceny' WHERE id = dt;
+  r := price_list_version_approve_preview(v2);
+  ASSERT NOT (r ->> 'can_approve')::boolean AND r -> 'errors' ->> 0 LIKE 'V návrhu je ukončený produkt (P6 dvojtarif)%', 'náhľad: ' || r::text;
+  BEGIN
+    PERFORM price_list_version_approve(v2);
+    RAISE EXCEPTION 'CHYBA: schválil sa návrh s ukončeným produktom';
+  EXCEPTION WHEN check_violation THEN
+    ASSERT SQLERRM LIKE 'V návrhu je ukončený produkt%', SQLERRM;
+  END;
+  UPDATE product SET status = 'dobieha' WHERE id = dt;
+  ASSERT (price_list_version_approve_preview(v2) ->> 'can_approve')::boolean, 'Dobieha v návrhu sa schváliť smie';
+
+  -- product_candidates_by = product_candidates (všetky OOM v databáze testu)
+  SELECT count(*) INTO n FROM oom o
+   WHERE o.pds IS NOT NULL AND o.pds_tariff IS NOT NULL
+     AND (SELECT coalesce(jsonb_agg(c ORDER BY c.product_id), '[]') FROM product_candidates(o.id) c)
+         IS DISTINCT FROM
+         (SELECT coalesce(jsonb_agg(c ORDER BY c.product_id), '[]')
+            FROM product_candidates_by(o.org_id, CASE WHEN o.person_id IS NOT NULL THEN 'domacnost' ELSE 'firma' END::customer_segment,
+                                       o.pds, o.pds_tariff, o.price_regulation, coalesce(o.planned_consumption_nt_mwh, 0) > 0) c);
+  ASSERT n = 0, format('product_candidates_by sa líši pri %s OOM', n);
+  ASSERT (SELECT count(*) FROM oom WHERE pds IS NOT NULL AND pds_tariff IS NOT NULL) > 0, 'porovnanie na OOM';
+  -- bez OOM: ZSD C11, firma ANO → testovací DMP11 je medzi kandidátmi
+  ASSERT EXISTS (SELECT 1 FROM product_candidates_by(crm_default_org(), 'firma', 'zsd', 'zsd_c11', true, false) c
+                   JOIN product p ON p.id = c.product_id WHERE p.code = 't_dmp11' OR p.code = 'green_dmp11')
+         OR NOT EXISTS (SELECT 1 FROM product WHERE code IN ('t_dmp11', 'green_dmp11') AND status = 'predava_sa'),
+         'ZSD C11 → DMP11 podľa údajov';
+  RAISE NOTICE 'OK: úprava produktov (použitý sa nemení v kategórii, segmente, tarife, regulácii, modeli cenník; NT iba dvojtarif; Dobieha sa kopíruje; ukončený v návrhu neprejde; product_candidates_by)';
+END;
+$$;

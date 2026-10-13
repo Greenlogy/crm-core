@@ -1,6 +1,6 @@
 # Modul 3 – Produkty a cenníky: zadanie
 
-Verzia 0.3 · 13. 10. 2026 · **schválené Petrom** (v0.2 = odpovede O0–O6, v0.3 = O7).
+Verzia 0.3 · 13. 10. 2026 · **schválené Petrom** (v0.2 = odpovede O0–O6, v0.3 = O7). **Modul uzavretý 13. 10. 2026** (F1–F3 na Teste, časť 16).
 Vychádza z odpovedí v `03-produkty-otazky.md` (verzia 2, 13. 10. 2026) a z cenníkov 2026. Stavia na moduloch 0 (Nastavenia), 1 (Zákazníci) a 2 (OOM).
 
 ## 1. Čo modul rieši
@@ -50,7 +50,9 @@ Pravidlá zmlúv, ktoré ovplyvňujú tento modul:
 
 **Stavy produktu:**
 - **Predáva sa.**
-- **Dobieha:** existujúce zmluvy bežia, nové sa nepredávajú. Príklad: VBattery AKU.
+- **Dobieha:** existujúce zmluvy bežia, nové sa nepredávajú. Príklad: VBattery AKU. Produkt Dobieha sa smie pridať do návrhu
+  cenníka aj skopírovať do novej verzie (existujúce zmluvy potrebujú nové ceny); nové zmluvy (modul 4) smú použiť iba produkt
+  v stave Predáva sa (Peter, F3).
 - **Ukončený.**
 
 Produkt sa nikdy nemaže, iba sa ukončí.
@@ -224,4 +226,8 @@ Databáza: `0019_produkty`, `0020_cenniky` a naplnenie cenníkov 2026 (`db/seed/
   dôsledkov z databázy (`0021`: uzavretie predošlej, nahradenie budúcej, chýbajúce produkty), ukončenie cenníka (s upozornením
   na zmluvy v module 4), zmazanie návrhu, export verzie .xlsx (schválenú ktokoľvek, kto ju vidí; návrh iba admin, označený
   „NÁVRH – neplatný cenník“ a „-NAVRH“). Súbežná úprava návrhu → 409 a obnovenie stránky.
-- **F3 – produkty a párovanie:** nový produkt, úprava a stav produktu, Nastavenia → Párovanie sadzieb (obrazovka 24).
+- **F3 – produkty a párovanie** (plán schválený 13. 10.): nový produkt (kód z názvu, skrytý), úprava a stav produktu na
+  obrazovke 22 (pri použitom produkte sa nemení kategória, segment, typ tarifu, cenová regulácia ani model „cenník“ – `0022`);
+  Nastavenia → Párovanie sadzieb (obrazovka 24): stĺpce podľa rozsahov PDS (iba zobrazenie, nový rozsah = migrácia), skupiny
+  zlúčene, úprava po produktoch, ukážka „čo CRM ponúkne“ (`product_candidates_by`). Cena NT iba pri dvojtarifnom produkte;
+  ukončený produkt v návrhu cenníka zastaví schválenie. Súbežná úprava produktu a párovania → 409.

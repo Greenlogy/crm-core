@@ -3762,6 +3762,12 @@ BEGIN
       RAISE EXCEPTION 'Produkt „%“ je ukončený.', v_prod.name USING ERRCODE = 'check_violation';
     END IF;
   END IF;
+  -- cena NT iba pri dvojtarifnom produkte (Peter, doplnok b k F3)
+  IF NEW.price_nt_eur_mwh IS NOT NULL
+     AND (SELECT tariff_type FROM product WHERE id = NEW.product_id) <> 'dvojtarif' THEN
+    RAISE EXCEPTION 'Produkt „%“ nie je dvojtarif – cena NT sa nezadáva.', (SELECT name FROM product WHERE id = NEW.product_id)
+      USING ERRCODE = 'check_violation';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -3828,6 +3834,11 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM price_list_item WHERE version_id = p_id) THEN
     RAISE EXCEPTION 'Návrh nemá žiadnu položku.' USING ERRCODE = 'check_violation';
   END IF;
+  IF EXISTS (SELECT 1 FROM price_list_item i JOIN product p ON p.id = i.product_id
+              WHERE i.version_id = p_id AND p.status = 'ukonceny') THEN
+    RAISE EXCEPTION 'V návrhu je ukončený produkt (%) – odoberte ho.', (SELECT string_agg(p.name, ', ') FROM price_list_item i
+      JOIN product p ON p.id = i.product_id WHERE i.version_id = p_id AND p.status = 'ukonceny') USING ERRCODE = 'check_violation';
+  END IF;
   IF v.valid_from < crm_today() AND NOT crm_owner_session() THEN
     RAISE EXCEPTION 'Schváliť sa dá iba verzia s účinnosťou od dnes (%) alebo neskôr.', to_char(crm_today(), 'FMDD. FMMM. YYYY')
       USING ERRCODE = 'check_violation';
@@ -3881,6 +3892,12 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM price_list_item WHERE version_id = p_id) THEN
     v_errors := v_errors || to_jsonb('Návrh nemá žiadnu položku.'::text);
+  END IF;
+  IF EXISTS (SELECT 1 FROM price_list_item i JOIN product p ON p.id = i.product_id
+              WHERE i.version_id = p_id AND p.status = 'ukonceny') THEN
+    v_errors := v_errors || to_jsonb(format('V návrhu je ukončený produkt (%s) – odoberte ho.',
+      (SELECT string_agg(p.name, ', ') FROM price_list_item i JOIN product p ON p.id = i.product_id
+        WHERE i.version_id = p_id AND p.status = 'ukonceny')));
   END IF;
   IF v.valid_from < v_today AND NOT crm_owner_session() THEN
     v_errors := v_errors || to_jsonb(format('Platnosť musí začínať dnes (%s) alebo neskôr.', to_char(v_today, 'FMDD. FMMM. YYYY')));
@@ -4141,14 +4158,27 @@ $$;
 CREATE FUNCTION public.product_candidates(p_oom_id uuid) RETURNS TABLE(product_id uuid, rank smallint, is_only boolean, is_addon boolean)
     LANGUAGE sql STABLE
     AS $$
+  SELECT c.*
+    FROM oom o,
+         LATERAL product_candidates_by(o.org_id,
+                                       CASE WHEN o.person_id IS NOT NULL THEN 'domacnost' ELSE 'firma' END::customer_segment,
+                                       o.pds, o.pds_tariff, o.price_regulation,
+                                       coalesce(o.planned_consumption_nt_mwh, 0) > 0) c
+   WHERE o.id = p_oom_id
+$$;
+
+
+--
+-- Name: product_candidates_by(uuid, public.customer_segment, text, text, boolean, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.product_candidates_by(p_org uuid, p_segment public.customer_segment, p_pds text, p_tariff text, p_regulation boolean, p_has_nt boolean) RETURNS TABLE(product_id uuid, rank smallint, is_only boolean, is_addon boolean)
+    LANGUAGE sql STABLE
+    AS $$
   WITH o AS (
-    SELECT o.org_id, o.price_regulation,
-           coalesce(o.planned_consumption_nt_mwh, 0) > 0 AS has_nt,
-           CASE WHEN o.person_id IS NOT NULL THEN 'domacnost' ELSE 'firma' END::customer_segment AS segment,
-           oom_tariff_scope(o.pds) AS scope,
-           tariff_base(o.pds_tariff, o.pds) AS tariff
-      FROM oom o
-     WHERE o.id = p_oom_id AND o.pds IS NOT NULL AND o.pds_tariff IS NOT NULL
+    SELECT p_org AS org_id, p_regulation AS price_regulation, coalesce(p_has_nt, false) AS has_nt, p_segment AS segment,
+           oom_tariff_scope(p_pds) AS scope, tariff_base(p_tariff, p_pds) AS tariff
+     WHERE p_pds IS NOT NULL AND p_tariff IS NOT NULL
   ), c AS (
     SELECT p.id, p.category = 'zem' AS is_addon, p.sort_order, p.name,
            CASE WHEN p.category = 'zem' THEN 1
@@ -4172,7 +4202,8 @@ $$;
 --
 
 CREATE FUNCTION public.product_guard() RETURNS trigger
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
     AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -4180,6 +4211,14 @@ BEGIN
   END IF;
   IF NEW.code <> OLD.code OR NEW.org_id <> OLD.org_id THEN
     RAISE EXCEPTION 'Kód a spoločnosť produktu sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  -- použitý produkt (je v položke cenníka): kategória, segment, typ tarifu, cenová regulácia a model „cenník“ sa nemenia
+  IF (NEW.category <> OLD.category OR NEW.segment <> OLD.segment OR NEW.tariff_type <> OLD.tariff_type
+      OR NEW.price_regulation IS DISTINCT FROM OLD.price_regulation
+      OR ('cennik' = ANY (OLD.price_models) AND NOT 'cennik' = ANY (NEW.price_models)))
+     AND EXISTS (SELECT 1 FROM price_list_item WHERE product_id = OLD.id) THEN
+    RAISE EXCEPTION 'Produkt „%“ je v cenníku: kategória, segment, typ tarifu, cenová regulácia ani model cenník sa nemenia.', OLD.name
+      USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;
@@ -11484,4 +11523,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0018'),
     ('0019'),
     ('0020'),
-    ('0021');
+    ('0021'),
+    ('0022');

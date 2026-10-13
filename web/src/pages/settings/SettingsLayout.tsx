@@ -9,6 +9,7 @@ export const SETTINGS_SECTIONS = [
   { path: 'pouzivatelia', label: 'Používatelia' },
   { path: 'timy', label: 'Tímy a práva' },
   { path: 'ciselniky', label: 'Číselníky' },
+  { path: 'parovanie-sadzieb', label: 'Párovanie sadzieb' },
   { path: 'vlastne-polia', label: 'Vlastné polia' },
   { path: 'pipelines', label: 'Pipelines a stage' },
   { path: 'audit', label: 'Audit' },

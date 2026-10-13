@@ -25,7 +25,7 @@ export function PriceTabs() {
 }
 
 /** „D1, D2, …, D8“ → „D1–D8“ (iba súvislé čísla s rovnakou predponou, aspoň tri). */
-function compressCodes(labels: string[]): string[] {
+export function compressCodes(labels: string[]): string[] {
   const out: string[] = [];
   let i = 0;
   while (i < labels.length) {

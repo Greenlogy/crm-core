@@ -52,6 +52,11 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   oom_customer_check: 'Odberné miesto patrí práve jednému zákazníkovi (firme alebo domácnosti).',
   // Produkty a cenníky (0019–0021)
   product_code_key: 'Produkt s týmto kódom už existuje.',
+  product_vat_required: 'Zadajte sadzbu DPH (bez nej iba inštalácia FVE).',
+  product_cena_diela_check: 'Model „cena diela“ má iba inštalácia FVE a tá má iba tento model.',
+  product_price_models_check: 'Vyberte aspoň jeden cenový model.',
+  product_segment_check: 'Segment produktu: domácnosť alebo firma.',
+  product_tariff_product_id_scope_code_tariff_code_key: 'Táto sadzba už je pri produkte.',
   price_list_code_key: 'Cenník s podobným názvom už existuje.',
   price_list_name_check: 'Chýba názov cenníka.',
   price_list_version_name_key: 'Verzia s týmto názvom v cenníku už je.',

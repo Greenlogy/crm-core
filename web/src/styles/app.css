@@ -1659,3 +1659,46 @@ a.tab {
 .toolbar .grow {
   flex: 1;
 }
+.mapping-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mapping-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mapping-editor-head .grow {
+  flex: 1;
+}
+.mapping-scopes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.mapping-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.preview-result {
+  margin-top: 12px;
+}
+.mapping-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.mapping-name .btn {
+  flex-shrink: 0;
+}
+.btn.btn-small {
+  padding: 3px 10px;
+  font-size: 12px;
+}

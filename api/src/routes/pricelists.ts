@@ -109,7 +109,8 @@ priceLists.get('/products', async (c) => {
   if (group !== '' && !GROUPS[group]) throw new BadRequest('Neplatná skupina.');
   const rows = await sql<{ category: string; status: string }[]>`
     SELECT p.id, p.code, p.name, p.category, p.segment, p.vat_rate, p.tariff_type, to_json(p.price_models) AS price_models, p.price_regulation,
-           p.status, coalesce(t.tariffs, '[]') AS tariffs
+           p.status, p.sort_order, p.updated_at, coalesce(t.tariffs, '[]') AS tariffs,
+           EXISTS (SELECT 1 FROM price_list_item i WHERE i.product_id = p.id) AS used
       FROM product p
       LEFT JOIN (${tariffs(sql)}) t ON t.product_id = p.id
      ORDER BY p.sort_order, p.name`;

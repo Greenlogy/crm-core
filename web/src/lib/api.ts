@@ -646,6 +646,9 @@ export type ProductRow = {
   price_models: string[];
   price_regulation: boolean | null;
   status: string;
+  sort_order: number;
+  updated_at: string;
+  used: boolean;
   tariffs: TariffRef[];
 };
 

@@ -21,6 +21,7 @@ import { CompanyPage } from './pages/settings/CompanyPage';
 import { CustomFieldsPage } from './pages/settings/CustomFieldsPage';
 import { LookupsPage } from './pages/settings/LookupsPage';
 import { PipelinesPage } from './pages/settings/PipelinesPage';
+import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
 import { UsersPage } from './pages/settings/UsersPage';
 import './styles/tokens.css';
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
           { path: 'pouzivatelia', element: <UsersPage /> },
           { path: 'timy', element: <TeamsPage /> },
           { path: 'ciselniky', element: <LookupsPage /> },
+          { path: 'parovanie-sadzieb', element: <TariffMappingPage /> },
           { path: 'vlastne-polia', element: <CustomFieldsPage /> },
           { path: 'pipelines', element: <PipelinesPage /> },
           { path: 'audit', element: <AuditPage /> },
