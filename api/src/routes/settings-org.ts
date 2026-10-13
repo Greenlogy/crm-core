@@ -31,7 +31,7 @@ orgSettings.get('/orgs', async (c) => {
   const rows = await c.var.sql`
     SELECT o.id, o.code, o.country, o.currency, o.status, o.is_default, o.timezone, o.legal_name, o.reg_no, o.tax_no,
            o.vat_no, o.address, o.registry_entry, o.statutory, o.support_phone, o.email, o.web, o.regulator_license,
-           o.logo_updated_at
+           o.logo_updated_at, o.oom_switch_accept_days, o.oom_switch_confirm_days
       FROM org o
      ORDER BY o.is_default DESC, o.status, o.legal_name`;
   return c.json({ items: rows });
@@ -66,8 +66,20 @@ orgSettings.patch('/orgs/:id', async (c) => {
     if (v !== undefined) values[key] = v === '' ? null : v;
   }
   if (values.legal_name === null) throw new BadRequest('Chýba: Obchodné meno.');
-  if (Object.keys(values).length === 0) return c.json({ ok: true });
-  await c.var.sql`UPDATE org SET ${c.var.sql(values)} WHERE id = ${orgId}`;
+  // Lehoty „prechod sa zasekol“ v dňoch (modul OOM, 0013)
+  const days: Record<string, number> = {};
+  for (const [key, label] of [
+    ['oom_switch_accept_days', 'Dni bez akceptácie výpovede'],
+    ['oom_switch_confirm_days', 'Dni bez potvrdenia zmeny'],
+  ] as const) {
+    const v = b[key];
+    if (v === undefined) continue;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 365) throw new BadRequest(`${label}: celé číslo 1 až 365.`);
+    days[key] = n;
+  }
+  if (Object.keys(values).length === 0 && Object.keys(days).length === 0) return c.json({ ok: true });
+  await c.var.sql`UPDATE org SET ${c.var.sql({ ...values, ...days })} WHERE id = ${orgId}`;
   return c.json({ ok: true });
 });
 

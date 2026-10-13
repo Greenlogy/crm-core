@@ -213,7 +213,7 @@ oomWrite.get('/oom-options', async (c) => {
     SELECT list_code, code, label, parent_code, hidden_at IS NOT NULL AS hidden
       FROM lookup_value
      WHERE list_code IN ('pds', 'sadzba_distribucie', 'typ_merania', 'fakturacne_obdobie', 'sposob_zaloh',
-                         'typ_vykupnej_zmluvy', 'predchadzajuci_dodavatel')
+                         'typ_vykupnej_zmluvy', 'predchadzajuci_dodavatel', 'rola_pri_oom')
        AND (org_id IS NULL OR org_id = ${org})
      ORDER BY list_code, sort_order, lower(label)`;
   const lists: Record<string, unknown[]> = {};
@@ -265,4 +265,141 @@ oomWrite.patch('/oom/:id', async (c) => {
   // RLS: OOM, ktoré používateľ nesmie upravovať, UPDATE nenájde
   if (rows.length === 0) return c.json({ error: 'Odberné miesto nemôžete upravovať alebo neexistuje.' }, 403);
   return c.json({ ok: true });
+});
+
+// ============================================================================
+// F2c – zariadenia, kontaktné osoby, zmazanie OOM
+// Pri Aktívnom OOM iba s právom „upravovať Aktívne OOM“ (databáza, 0015).
+// ============================================================================
+
+const DEVICE_TYPES = ['striedac', 'panely', 'bateria', 'tepelne_cerpadlo', 'wallbox'] as const;
+
+function deviceValues(b: Body, partial: boolean) {
+  const out: Record<string, string | number | null> = {};
+  const type = oneOf(b, 'device_type', 'Druh zariadenia', DEVICE_TYPES);
+  if (type) out.device_type = type;
+  else if (!partial) throw new BadRequest('Chýba: Druh zariadenia.');
+  for (const [k, label] of [['brand', 'Značka'], ['model', 'Model']] as const) {
+    if (!(k in b)) continue;
+    const v = b[k];
+    if (v !== null && typeof v !== 'string') throw new BadRequest(`${label}: očakávaný text.`);
+    const t = (v ?? '').trim();
+    if (t.length > 80) throw new BadRequest(`${label}: najviac 80 znakov.`);
+    out[k] = t || null;
+  }
+  for (const [k, label] of [['power_kw', 'Výkon [kW]'], ['capacity_kwh', 'Kapacita [kWh]']] as const) {
+    if (!(k in b)) continue;
+    const v = b[k];
+    if (v === null || v === '') {
+      out[k] = null;
+      continue;
+    }
+    const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.').replace(/\s/g, ''));
+    if (!Number.isFinite(n) || n < 0) throw new BadRequest(`${label}: neplatné číslo.`);
+    out[k] = n;
+  }
+  if ('count' in b) {
+    const n = Number(b.count);
+    if (!Number.isInteger(n) || n < 1 || n > 10000) throw new BadRequest('Počet: celé číslo od 1.');
+    out.count = n;
+  }
+  return out;
+}
+
+oomWrite.post('/oom/:id/devices', async (c) => {
+  const oomId = id(c.req.param('id'));
+  const v = deviceValues(await readBody(c.req), false);
+  const sql = c.var.sql;
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO oom_device (oom_id, device_type, brand, model, power_kw, capacity_kwh, count)
+    VALUES (${oomId}, ${v.device_type}::device_type, ${v.brand ?? null}, ${v.model ?? null},
+            ${v.power_kw ?? null}::numeric, ${v.capacity_kwh ?? null}::numeric, ${v.count ?? 1}::int)
+    RETURNING id`;
+  return c.json({ id: row.id }, 201);
+});
+
+oomWrite.patch('/oom-devices/:id', async (c) => {
+  const deviceId = id(c.req.param('id'));
+  const v = deviceValues(await readBody(c.req), true);
+  if (Object.keys(v).length === 0) return c.json({ ok: true });
+  const sql = c.var.sql;
+  const rows = await sql`
+    UPDATE oom_device
+       SET device_type = coalesce(${v.device_type ?? null}::device_type, device_type),
+           brand = CASE WHEN ${'brand' in v} THEN ${v.brand ?? null} ELSE brand END,
+           model = CASE WHEN ${'model' in v} THEN ${v.model ?? null} ELSE model END,
+           power_kw = CASE WHEN ${'power_kw' in v} THEN ${v.power_kw ?? null}::numeric ELSE power_kw END,
+           capacity_kwh = CASE WHEN ${'capacity_kwh' in v} THEN ${v.capacity_kwh ?? null}::numeric ELSE capacity_kwh END,
+           count = coalesce(${v.count ?? null}::int, count)
+     WHERE id = ${deviceId}
+     RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Zariadenie nemôžete upravovať alebo neexistuje.' }, 403);
+  return c.json({ ok: true });
+});
+
+oomWrite.delete('/oom-devices/:id', async (c) => {
+  const deviceId = id(c.req.param('id'));
+  const rows = await c.var.sql`DELETE FROM oom_device WHERE id = ${deviceId} RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Zariadenie nemôžete odobrať alebo neexistuje.' }, 403);
+  return c.json({ ok: true });
+});
+
+function contactRoles(b: Body): string[] {
+  const v = b.roles ?? [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !/^[a-z0-9_]{1,63}$/.test(x))) throw new BadRequest('Roly: neplatný zoznam.');
+  return [...new Set(v as string[])];
+}
+
+// Kandidáti na kontaktnú osobu: pri firme osoby vo firme zákazníka; pri domácnosti hľadanie v spoločnosti
+// (pozri /persons/search). Osoba musí byť z firmy zákazníka – stráži databáza.
+oomWrite.get('/oom/:id/contact-candidates', async (c) => {
+  const oomId = id(c.req.param('id'));
+  const rows = await c.var.sql`
+    SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.email, coalesce(p.mobile, p.phone) AS phone,
+           to_jsonb(cc.roles) AS company_roles
+      FROM oom o
+      JOIN company_contact cc ON cc.company_id = o.company_id
+      JOIN contact p ON p.id = cc.contact_id
+     WHERE o.id = ${oomId}
+       AND NOT EXISTS (SELECT 1 FROM oom_contact k WHERE k.oom_id = o.id AND k.contact_id = p.id)
+     ORDER BY cc.is_main_contact DESC, p.last_name, p.first_name`;
+  return c.json({ items: rows });
+});
+
+oomWrite.post('/oom/:id/contacts', async (c) => {
+  const oomId = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  const contactId = uuid(b, 'contact_id', 'Osoba')!;
+  const sql = c.var.sql;
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO oom_contact (oom_id, contact_id, roles)
+    VALUES (${oomId}, ${contactId}, ARRAY(SELECT jsonb_array_elements_text(${sql.json(contactRoles(b))}::jsonb)))
+    RETURNING id`;
+  return c.json({ id: row.id }, 201);
+});
+
+oomWrite.patch('/oom-contacts/:id', async (c) => {
+  const rowId = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  const sql = c.var.sql;
+  const rows = await sql`
+    UPDATE oom_contact SET roles = ARRAY(SELECT jsonb_array_elements_text(${sql.json(contactRoles(b))}::jsonb))
+     WHERE id = ${rowId} RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Kontaktnú osobu nemôžete upravovať alebo neexistuje.' }, 403);
+  return c.json({ ok: true });
+});
+
+oomWrite.delete('/oom-contacts/:id', async (c) => {
+  const rowId = id(c.req.param('id'));
+  const rows = await c.var.sql`DELETE FROM oom_contact WHERE id = ${rowId} RETURNING id`;
+  if (rows.length === 0) return c.json({ error: 'Kontaktnú osobu nemôžete odobrať alebo neexistuje.' }, 403);
+  return c.json({ ok: true });
+});
+
+// Zmazanie OOM: iba admin a iba bez väzieb (deal, cena zo zmluvy, ponuka, aktivita, konverzácia, správa OKTE);
+// inak stav Zrušené. Audit zapíše celý obsah (0015).
+oomWrite.delete('/oom/:id', async (c) => {
+  const oomId = id(c.req.param('id'));
+  const [r] = await c.var.sql<{ eic: string }[]>`SELECT oom_delete(${oomId}) AS eic`;
+  return c.json({ ok: true, eic: r.eic });
 });

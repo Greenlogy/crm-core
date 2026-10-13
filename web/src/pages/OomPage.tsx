@@ -4,6 +4,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ContactsCard, DevicesCard } from '../components/oom-children';
 import { OomActions, PLAN_DATE_LABEL, PLAN_KIND, PlanBanner } from '../components/oom-actions';
 import { BackLink, Card, Empty, ErrorState, HubSpotLink, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
@@ -124,9 +125,9 @@ export function OomPage() {
         ))}
       </div>
 
-      {tab === 'prehlad' && <Overview o={o} />}
+      {tab === 'prehlad' && <Overview o={o} onChanged={reload} />}
       {tab === 'zmluvy' && <ContractsTab o={o} />}
-      {tab === 'osoby' && <PersonsTab o={o} />}
+      {tab === 'osoby' && <ContactsCard o={o} onChanged={reload} />}
     </>
   );
 }
@@ -145,7 +146,7 @@ function nextStep(o: OomCard) {
   return o.supply_from ? `začiatok dodávky ${date(o.supply_from)}` : 'chýba začiatok dodávky';
 }
 
-function Overview(props: { o: OomCard }) {
+function Overview(props: { o: OomCard; onChanged: () => void }) {
   const o = props.o;
   return (
     <div className="columns">
@@ -207,25 +208,7 @@ function Overview(props: { o: OomCard }) {
           <div className="col-mid">
             <LinksCard links={o.links} />
             <SwitchCard o={o} />
-            <Card title={`Zariadenia (${o.devices.length})`}>
-              {o.devices.length === 0 ? (
-                <Empty>Bez zariadení.</Empty>
-              ) : (
-                o.devices.map((d) => (
-                  <Item
-                    key={d.id}
-                    title={
-                      <>
-                        {label(DEVICE_TYPE, d.device_type)}
-                        {d.count > 1 ? ` × ${d.count}` : ''}
-                      </>
-                    }
-                    meta={[d.brand, d.model].filter(Boolean).join(' · ') || undefined}
-                    side={<span>{d.capacity_kwh ? num(d.capacity_kwh, 1, 'kWh') : kw(d.power_kw)}</span>}
-                  />
-                ))
-              )}
-            </Card>
+            <DevicesCard o={o} onChanged={props.onChanged} />
           </div>
         </div>
       </div>
@@ -354,8 +337,17 @@ const FIELD_LABEL: Record<string, string> = {
 // Zákazník, stav a spoločnosť OOM sa menia cez väzby – ukazujú sa ako udalosti väzby, nie ako zmena údajov.
 const LINK_FIELDS = new Set(['company_id', 'person_id', 'status', 'org_id', 'id', 'created_at']);
 
-const val = (v: unknown) => {
+// Hodnoty enumov po slovensky (kódy číselníkov ostávajú kódom)
+const VALUE_LABEL: Record<string, Record<string, string>> = {
+  source_kind: SOURCE_KIND,
+  source_category: SOURCE_CATEGORY,
+  voltage_level: VOLTAGE_LEVEL,
+  type: Object.fromEntries(Object.entries(OOM_TYPE)),
+};
+
+const val = (v: unknown, field?: string) => {
   if (v === null || v === undefined || v === '') return '–';
+  if (field && typeof v === 'string' && VALUE_LABEL[field]?.[v]) return VALUE_LABEL[field][v];
   if (typeof v === 'boolean') return v ? 'áno' : 'nie';
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return date(v);
   return String(v);
@@ -392,7 +384,7 @@ function describe(o: OomCard): Event[] {
       const parts = keys.slice(0, 3).map((k) => {
         const c = change(k);
         const name = k.startsWith('custom.') ? `vlastné pole ${k.slice(7)}` : (FIELD_LABEL[k] ?? k);
-        return `${name} ${val(c?.old)} → ${val(c?.new)}`;
+        return `${name} ${val(c?.old, k)} → ${val(c?.new, k)}`;
       });
       out.push({
         key: e.id,
@@ -569,30 +561,5 @@ function ContractsTab(props: { o: OomCard }) {
         </Card>
       </div>
     </div>
-  );
-}
-
-const SOURCE_LABEL: Record<string, string> = { rucne: 'pri OOM', zmluva: 'zo zmluvy', deal: 'z dealu' };
-
-function PersonsTab(props: { o: OomCard }) {
-  const o = props.o;
-  return (
-    <Card title={`Kontaktné osoby (${o.contacts.length})`}>
-      {o.contacts.length === 0 ? (
-        <Empty>
-          Žiadne kontaktné osoby. Osoba sa k OOM priradí priamo, zo zmluvy alebo cez deal (iba pri stave Aktívne alebo
-          Pripravované).
-        </Empty>
-      ) : (
-        o.contacts.map((p) => (
-          <Item
-            key={p.id}
-            title={<Link to={`/osoby/${p.id}`}>{p.name || '(bez mena)'}</Link>}
-            meta={[p.role_labels.join(', '), p.email, p.mobile ?? p.phone].filter(Boolean).join(' · ') || undefined}
-            side={p.sources.map((s) => <Pill key={s}>{SOURCE_LABEL[s] ?? s}</Pill>)}
-          />
-        ))
-      )}
-    </Card>
   );
 }

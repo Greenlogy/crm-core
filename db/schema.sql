@@ -2718,6 +2718,7 @@ BEGIN
   PERFORM set_config('crm.oom_system', 'on', true);
   DELETE FROM oom_contact WHERE oom_id = p_oom_id;
   DELETE FROM oom_device WHERE oom_id = p_oom_id;
+  DELETE FROM oom_planned_change WHERE oom_id = p_oom_id;   -- 0017: plány (aj vykonané a zrušené) patria OOM
   DELETE FROM oom_customer WHERE oom_id = p_oom_id;
   DELETE FROM oom WHERE id = p_oom_id;
   PERFORM set_config('crm.oom_system', '', true);
@@ -9481,4 +9482,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0013'),
     ('0014'),
     ('0015'),
-    ('0016');
+    ('0016'),
+    ('0017');

@@ -146,6 +146,7 @@ function OrgEditor(props: { org: SettingsOrg; onSaved: () => void }) {
       <div className="settings-col-side">
         <Logo org={o} onChanged={props.onSaved} />
         {detail.data ? <WorkTime org={o} detail={detail.data} onChanged={detail.reload} /> : <Skeleton lines={5} />}
+        <SwitchDays org={o} onSaved={props.onSaved} />
       </div>
     </div>
   );
@@ -470,6 +471,47 @@ function WorkTime(props: { org: SettingsOrg; detail: OrgDetail; onChanged: () =>
         </div>
       </div>
       {save.error && <Notice tone="error">{save.error}</Notice>}
+    </Card>
+  );
+}
+
+// --- Odberné miesta: lehoty „prechod sa zasekol“ (modul OOM, Peter 12. 10.) ---
+
+function SwitchDays(props: { org: SettingsOrg; onSaved: () => void }) {
+  const [accept, setAccept] = useState(String(props.org.oom_switch_accept_days));
+  const [confirm, setConfirm] = useState(String(props.org.oom_switch_confirm_days));
+  const save = useSave();
+  const [saved, setSaved] = useState(false);
+  const dirty = accept !== String(props.org.oom_switch_accept_days) || confirm !== String(props.org.oom_switch_confirm_days);
+  const submit = async () => {
+    const ok = await save.run(() =>
+      send('PATCH', `/api/settings/orgs/${props.org.id}`, { oom_switch_accept_days: Number(accept), oom_switch_confirm_days: Number(confirm) }),
+    );
+    if (ok) {
+      setSaved(true);
+      props.onSaved();
+    }
+  };
+  return (
+    <Card
+      title="Odberné miesta"
+      aside={
+        <button type="button" className="btn primary" disabled={!dirty || save.busy} onClick={submit}>
+          Uložiť
+        </button>
+      }
+    >
+      <p className="caption card-lead">„Prechod sa zasekol“: koľko dní môže prechod k Greenlogy čakať na ďalší krok.</p>
+      <div className="form-grid">
+        <Field label="Výpoveď odoslaná, bez akceptácie [dni]">
+          <TextInput type="number" value={accept} onChange={(v) => { setAccept(v); setSaved(false); }} />
+        </Field>
+        <Field label="Výpoveď akceptovaná, bez potvrdenia zmeny [dni]">
+          <TextInput type="number" value={confirm} onChange={(v) => { setConfirm(v); setSaved(false); }} />
+        </Field>
+      </div>
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {saved && !save.error && <Notice tone="ok">Uložené.</Notice>}
     </Card>
   );
 }

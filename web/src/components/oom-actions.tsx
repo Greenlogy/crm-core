@@ -3,6 +3,8 @@
 // Pravidlá (práva, blokovanie plánom, dátumy) stráži databáza; obrazovka ich vysvetľuje vopred.
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMe } from '../lib/me';
 import { get, send, type OomCard, type OomPlan } from '../lib/api';
 import { date } from '../lib/format';
 import { Field, Notice, Segmented, SidePanel, TextInput, useSave } from './form';
@@ -35,9 +37,24 @@ type Action = 'stav' | 'prepis' | 'navrat' | 'udaje' | null;
 /** Tlačidlá v hlavičke karty OOM podľa stavu a práv. */
 export function OomActions(props: { o: OomCard; onChanged: () => void }) {
   const o = props.o;
+  const me = useMe();
+  const navigate = useNavigate();
   const [open, setOpen] = useState<Action>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const save = useSave();
-  if (!o.can_edit) return null;
+  if (!o.can_edit && !me.is_admin) return null;
+  const remove = async () => {
+    const ok = await save.run(() => send('DELETE', `/api/oom/${o.id}`));
+    if (ok) navigate('/oom');
+  };
+  if (!o.can_edit) {
+    return (
+      <div className="head-actions">
+        <DeleteButton confirm={confirmDelete} setConfirm={setConfirmDelete} busy={save.busy} onDelete={remove} />
+        {save.error && <Notice tone="error">{save.error}</Notice>}
+      </div>
+    );
+  }
   const linkOpen = o.status === 'pripravovane' || o.status === 'aktivne';
   const blocked = !!o.plan_id;
   const missing = o.active_missing ?? [];
@@ -85,12 +102,36 @@ export function OomActions(props: { o: OomCard; onChanged: () => void }) {
       >
         Upraviť údaje
       </button>
+      {me.is_admin && <DeleteButton confirm={confirmDelete} setConfirm={setConfirmDelete} busy={save.busy} onDelete={remove} />}
       {save.error && <Notice tone="error">{save.error}</Notice>}
       {open === 'udaje' && <OomEditPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'stav' && <StatusPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'prepis' && <TransferPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
       {open === 'navrat' && <ReconnectPanel o={o} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); props.onChanged(); }} />}
     </div>
+  );
+}
+
+/** Zmazanie OOM (iba admin; databáza dovolí iba OOM bez dealov, cien, ponúk, aktivít a správ OKTE). */
+function DeleteButton(props: { confirm: boolean; setConfirm: (v: boolean) => void; busy: boolean; onDelete: () => void }) {
+  return props.confirm ? (
+    <>
+      <button type="button" className="btn btn-danger-solid" disabled={props.busy} onClick={props.onDelete}>
+        Naozaj zmazať OOM?
+      </button>
+      <button type="button" className="btn" onClick={() => props.setConfirm(false)}>
+        Nie
+      </button>
+    </>
+  ) : (
+    <button
+      type="button"
+      className="btn btn-danger"
+      title="Iba OOM bez väzieb (deal, zmluva, ponuka, aktivita); inak použite stav Zrušené."
+      onClick={() => props.setConfirm(true)}
+    >
+      Zmazať
+    </button>
   );
 }
 

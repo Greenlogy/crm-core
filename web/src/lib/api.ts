@@ -378,6 +378,7 @@ export type OomCard = {
     email: string | null;
     phone: string | null;
     mobile: string | null;
+    oom_contact_id: string | null;
     sources: string[];
     roles: string[];
     role_labels: string[];

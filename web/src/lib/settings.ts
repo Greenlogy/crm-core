@@ -98,6 +98,8 @@ export type SettingsOrg = {
   web: string | null;
   regulator_license: string | null;
   logo_updated_at: string | null;
+  oom_switch_accept_days: number;
+  oom_switch_confirm_days: number;
 };
 
 export type BankPurpose = 'faktury' | 'zalohy' | 'vykup';
@@ -139,8 +141,10 @@ export type LookupValue = {
   is_system: boolean;
   hidden_at: string | null;
   hubspot_value: string | null;
+  parent_code: string | null;
+  reg_no: string | null;
 };
-export type LookupList = { code: string; name: string; used_on: string | null; values: LookupValue[] };
+export type LookupList = { code: string; name: string; used_on: string | null; parent_list: string | null; values: LookupValue[] };
 
 export type Entity = 'firma' | 'osoba' | 'oom' | 'deal' | 'zmluva' | 'ponuka';
 export type FieldType = 'text' | 'dlhy_text' | 'cislo' | 'suma' | 'datum' | 'vyber' | 'vyber_viac' | 'ano_nie' | 'odkaz';

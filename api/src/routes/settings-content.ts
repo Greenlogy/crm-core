@@ -32,13 +32,22 @@ function orgId(b: Body): string | null | undefined {
 // Číselníky
 // ============================================================================
 
+/** IČO hodnoty číselníka (PDS): 8 číslic (doplní úvodné nuly), '' = vymazať, undefined = bez zmeny. */
+function regNoOf(b: Record<string, unknown>): string | null | undefined {
+  if (!('reg_no' in b)) return undefined;
+  const v = b.reg_no;
+  if (v === null || v === '') return null;
+  if (typeof v !== 'string' || !/^\d{1,8}$/.test(v.replace(/\s/g, ''))) throw new BadRequest('IČO: najviac 8 číslic.');
+  return v.replace(/\s/g, '').padStart(8, '0');
+}
+
 contentSettings.get('/lookups', async (c) => {
   const rows = await c.var.sql`
-    SELECT l.code, l.name, l.used_on,
+    SELECT l.code, l.name, l.used_on, l.parent_list,
            coalesce((SELECT json_agg(json_build_object(
                        'id', v.id, 'code', v.code, 'label', v.label, 'org_id', v.org_id, 'org_name', o.legal_name,
                        'sort_order', v.sort_order, 'is_system', v.is_system, 'hidden_at', v.hidden_at,
-                       'hubspot_value', v.hubspot_value)
+                       'hubspot_value', v.hubspot_value, 'parent_code', v.parent_code, 'reg_no', v.reg_no)
                      ORDER BY v.hidden_at IS NOT NULL, v.sort_order, lower(v.label))
                        FROM lookup_value v LEFT JOIN org o ON o.id = v.org_id
                       WHERE v.list_code = l.code), '[]') AS "values"
@@ -52,9 +61,13 @@ contentSettings.post('/lookups/:list/values', async (c) => {
   const b = await readBody(c.req);
   const label = str(b, 'label', 'Názov hodnoty', { max: 100 })!;
   const org = orgId(b) ?? null;
+  // Sadzba patrí PDS (parent_code, 0013); IČO iba pri PDS. Kontrolu nadradenej hodnoty robí databáza.
+  const parent = str(b, 'parent_code', 'Nadradená hodnota', { max: 63, optional: true }) || null;
+  const regNo = regNoOf(b);
   const [{ n }] = await c.var.sql`SELECT coalesce(max(sort_order), 0) + 1 AS n FROM lookup_value WHERE list_code = ${list}`;
   const [row] = await c.var.sql<{ id: string }[]>`
-    INSERT INTO lookup_value (list_code, label, org_id, sort_order) VALUES (${list}, ${label}, ${org}, ${n})
+    INSERT INTO lookup_value (list_code, label, org_id, sort_order, parent_code, reg_no)
+    VALUES (${list}, ${label}, ${org}, ${n}, ${parent}, ${list === 'pds' ? (regNo ?? null) : null})
     RETURNING id`;
   return c.json({ id: row.id }, 201);
 });
@@ -67,9 +80,11 @@ contentSettings.patch('/lookup-values/:id', async (c) => {
   const hidden = bool(b, 'hidden', 'Skryť');
   const sort = int(b, 'sort_order', 'Poradie', 0, 100000);
   const org = orgId(b);
+  const regNo = regNoOf(b);
   await c.var.sql`
     UPDATE lookup_value
        SET label = coalesce(${label ?? null}, label),
+           reg_no = CASE WHEN ${regNo !== undefined} AND list_code = 'pds' THEN ${regNo ?? null} ELSE reg_no END,
            sort_order = coalesce(${sort ?? null}::int, sort_order),
            org_id = CASE WHEN ${org !== undefined} THEN ${org ?? null}::uuid ELSE org_id END,
            hidden_at = CASE WHEN ${hidden === undefined} THEN hidden_at

@@ -780,3 +780,17 @@ END;
 $$;
 
 RESET ROLE;
+
+-- O18. 0017: zmazanie OOM s plánmi (admin Peter; p1 z O16 má vykonaný plán odchodu)
+DO $$
+BEGIN
+  PERFORM set_config('app.user_id', (SELECT id FROM app_user WHERE email = 'peter@greenlogy.com')::text, true);
+  ASSERT EXISTS (SELECT 1 FROM oom_planned_change WHERE oom_id = '00000000-0000-4000-8000-000000004011'), 'p1 má plán';
+  ASSERT oom_delete('00000000-0000-4000-8000-000000004011') = '24ZZS000TEST730J', 'admin zmazal OOM s plánom';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom_planned_change WHERE oom_id = '00000000-0000-4000-8000-000000004011'), 'plány zmazané s OOM';
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'oom_planned_change' AND action = 'delete'
+                  AND diff ->> 'oom_id' = '00000000-0000-4000-8000-000000004011'), 'zmazaný plán v audite';
+  PERFORM set_config('app.user_id', '', true);
+  RAISE NOTICE 'OK: zmazanie OOM zmaže aj jeho plány (0017)';
+END;
+$$;

@@ -128,6 +128,7 @@ export async function oomCard(sql: Sql, id: string) {
     // Kontaktné osoby pri OOM a osoby z dealov (contact_oom_v): iba pri Aktívnom alebo Pripravovanom OOM.
     sql`
       SELECT p.id, concat_ws(' ', p.first_name, p.last_name) AS name, p.email, p.phone, p.mobile,
+             (SELECT k.id FROM oom_contact k WHERE k.oom_id = v.oom_id AND k.contact_id = v.contact_id) AS oom_contact_id,
              to_jsonb(v.sources) AS sources, to_jsonb(v.roles) AS roles,
              coalesce((SELECT jsonb_agg(lv.label ORDER BY lv.sort_order) FROM lookup_value lv
                         WHERE lv.list_code = 'rola_pri_oom' AND lv.code = ANY (v.roles)), '[]') AS role_labels

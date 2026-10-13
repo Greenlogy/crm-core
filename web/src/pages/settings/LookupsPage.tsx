@@ -1,5 +1,6 @@
 // Nastavenia – Číselníky (vzor obrazovky 14: zoznam + úprava). Hodnota sa nikdy nemaže, iba skryje;
 // systémové hodnoty (zámok) sa nedajú premenovať ani skryť. Zoznamy zakladá iba migrácia.
+// Sadzby distribúcie patria PDS (výber PDS, filter); pri PDS sa eviduje IČO prevádzkovateľa (modul OOM).
 
 import { useState } from 'react';
 import { Check, Notice, useSave } from '../../components/form';
@@ -38,28 +39,43 @@ export function LookupsPage() {
               </button>
             ))}
           </nav>
-          <LookupValues key={current.code} list={current} onChanged={lookups.reload} />
+          <LookupValues
+            key={current.code}
+            list={current}
+            parents={current.parent_list ? list.find((l) => l.code === current.parent_list) : undefined}
+            onChanged={lookups.reload}
+          />
         </div>
       )}
     </>
   );
 }
 
-function LookupValues(props: { list: LookupList; onChanged: () => void }) {
+function LookupValues(props: { list: LookupList; parents?: LookupList; onChanged: () => void }) {
   const me = useMe();
   const [label, setLabel] = useState('');
   const [orgId, setOrgId] = useState('');
   const [showHidden, setShowHidden] = useState(false);
+  const [parent, setParent] = useState('');
+  const [regNo, setRegNo] = useState('');
   const save = useSave();
-  const values = props.list.values.filter((v) => showHidden || !v.hidden_at);
+  const isPds = props.list.code === 'pds';
+  const parentLabel = (code: string | null) => props.parents?.values.find((p) => p.code === code)?.label ?? code ?? '–';
+  const values = props.list.values.filter((v) => (showHidden || !v.hidden_at) && (!parent || v.parent_code === parent));
   const hiddenCount = props.list.values.filter((v) => v.hidden_at).length;
 
   const add = async () => {
     const ok = await save.run(() =>
-      send('POST', `/api/settings/lookups/${props.list.code}/values`, { label, org_id: orgId || null }),
+      send('POST', `/api/settings/lookups/${props.list.code}/values`, {
+        label,
+        org_id: orgId || null,
+        ...(props.parents ? { parent_code: parent } : {}),
+        ...(isPds ? { reg_no: regNo } : {}),
+      }),
     );
     if (ok) {
       setLabel('');
+      setRegNo('');
       props.onChanged();
     }
   };
@@ -72,6 +88,16 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
     <section className="card settings-col-main" aria-label={props.list.name}>
       <div className="card-head">
         <h2 className="t-section-title">{props.list.name}</h2>
+        {props.parents && (
+          <select className="inp" aria-label={props.parents.name} value={parent} onChange={(e) => setParent(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">{`${props.parents.name}: všetky`}</option>
+            {props.parents.values.map((p) => (
+              <option key={p.code} value={p.code}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        )}
         {hiddenCount > 0 && (
           <Check checked={showHidden} onChange={setShowHidden}>
             Aj skryté ({hiddenCount})
@@ -83,6 +109,8 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
           <thead>
             <tr>
               <th>Hodnota</th>
+              {props.parents && <th>PDS</th>}
+              {isPds && <th>IČO</th>}
               <th>Kód</th>
               <th>Platí pre</th>
               <th>Stav</th>
@@ -92,7 +120,7 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
           <tbody>
             {values.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={5 + (props.parents ? 1 : 0) + (isPds ? 1 : 0)} className="muted">
                   Zatiaľ žiadna hodnota. Hodnoty z HubSpotu sa doplnia pri prevzatí dát.
                 </td>
               </tr>
@@ -108,6 +136,12 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
                     <InlineLabel value={v.label} onSave={(l) => patch(v, { label: l })} />
                   )}
                 </td>
+                {props.parents && <td>{parentLabel(v.parent_code)}</td>}
+                {isPds && (
+                  <td className="mono">
+                    <InlineLabel value={v.reg_no ?? ''} placeholder="doplniť IČO" onSave={(x) => patch(v, { reg_no: x })} />
+                  </td>
+                )}
                 <td className="mono">{v.code}</td>
                 <td>{v.org_name ?? 'Celá skupina'}</td>
                 <td>{v.hidden_at ? <Pill>Skrytá</Pill> : <Pill tone="positive">Aktívna</Pill>}</td>
@@ -134,6 +168,9 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
             onChange={(e) => setLabel(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && label.trim() && void add()}
           />
+          {isPds && (
+            <input className="inp" placeholder="IČO (nepovinné)" aria-label="IČO" value={regNo} maxLength={10} onChange={(e) => setRegNo(e.target.value)} />
+          )}
           <select className="inp" aria-label="Platí pre" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
             <option value="">Celá skupina</option>
             {me.orgs.map((o) => (
@@ -142,8 +179,14 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
               </option>
             ))}
           </select>
-          <button type="button" className="btn" disabled={!label.trim() || save.busy} onClick={add}>
-            + Pridať hodnotu
+          <button
+            type="button"
+            className="btn"
+            disabled={!label.trim() || (!!props.parents && !parent) || save.busy}
+            title={props.parents && !parent ? `Najprv hore vyberte ${props.parents.name}.` : undefined}
+            onClick={add}
+          >
+            + Pridať hodnotu{props.parents && parent ? ` k ${parentLabel(parent)}` : ''}
           </button>
         </div>
         {save.error && <Notice tone="error">{save.error}</Notice>}
@@ -156,19 +199,20 @@ function LookupValues(props: { list: LookupList; onChanged: () => void }) {
 }
 
 /** Názov upraviteľný kliknutím; uloží sa Enterom alebo opustením poľa. */
-export function InlineLabel(props: { value: string; onSave: (v: string) => void }) {
+export function InlineLabel(props: { value: string; onSave: (v: string) => void; placeholder?: string }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(props.value);
   if (!editing) {
     return (
-      <button type="button" className="link-button inline-edit" title="Premenovať" onClick={() => setEditing(true)}>
-        {props.value}
+      <button type="button" className="link-button inline-edit" title="Upraviť" onClick={() => setEditing(true)}>
+        {props.value || <span className="muted">{props.placeholder ?? '–'}</span>}
       </button>
     );
   }
+  // s placeholderom je pole nepovinné: prázdne = vymazať
   const done = () => {
     setEditing(false);
-    if (value.trim() && value.trim() !== props.value) props.onSave(value.trim());
+    if ((value.trim() || props.placeholder) && value.trim() !== props.value) props.onSave(value.trim());
     else setValue(props.value);
   };
   return (
