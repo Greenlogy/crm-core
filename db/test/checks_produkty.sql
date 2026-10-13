@@ -150,6 +150,12 @@ DECLARE
   i   integer;
   o   uuid;
 BEGIN
+  -- Testy počítajú iba vlastné záznamy: skutočné produkty (napr. z cenníkov 2026 na Teste) sa v transakcii testu
+  -- dočasne vyradia z návrhu (Dobieha) a na konci bloku vrátia.
+  CREATE TEMP TABLE t_vyradene ON COMMIT DROP AS
+    SELECT id FROM product WHERE code NOT LIKE 't\_%' AND status = 'predava_sa';
+  UPDATE product SET status = 'dobieha' WHERE id IN (SELECT id FROM t_vyradene);
+
   -- Katalóg testu: DD2 ANO / NIE, ZEM, DMP1–DMP11 a produkt iba so spoločnými riadkami
   FOR v_p, i IN
     INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, price_models, price_regulation)
@@ -223,6 +229,7 @@ BEGIN
   UPDATE product SET status = 'dobieha' WHERE code = 't_dmp11';
   o := pg_temp.t_pom(19, f, NULL, 'ssd', 'ssd_c11', true);
   ASSERT pg_temp.t_cand(o) = '', 'dobiehajúci produkt sa neponúka: ' || pg_temp.t_cand(o);
+  UPDATE product SET status = 'predava_sa' WHERE id IN (SELECT id FROM t_vyradene);
   RAISE NOTICE 'OK: návrh produktov (SSD C1 → DMP1, ZSD C2-X3 + NT → DMP4–8 navrchu, ZSD C11 → DMP11, rozsah PDS, regulácia ANO/NIE/nevyplnená, stav)';
 END;
 $$;

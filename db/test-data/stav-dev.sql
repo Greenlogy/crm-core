@@ -1,6 +1,7 @@
 -- Stav Testu (Neon dev) – iba čítanie (transakcia READ ONLY), nič nemení, bez osobných údajov (iba počty).
 -- Použitie: ./integrations/hubspot-sync/sample/psql-dev.sh db/test-data/stav-dev.sql
--- Pred db/test/run.sh musia byť všetky počty záznamov 0 (testy zatiaľ počítajú celé tabuľky).
+-- Pred db/test/run.sh musia byť firmy, osoby, OOM, dealy a zmluvy 0 (testy zákazníkov zatiaľ počítajú celé tabuľky);
+-- produkty a cenníky z db/seed/cenniky-2026.sh testom nevadia.
 
 BEGIN TRANSACTION READ ONLY;
 

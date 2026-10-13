@@ -477,6 +477,8 @@ nič nezduplikuje (kódy produktov a cenníkov), už schválené verzie nemení.
 - Ceny bez DPH sa prepíšu z PDF ručne do SQL; skript na konci **porovná ceny s DPH** (`price_with_vat`) so stĺpcom
   „s DPH“ z PDF a pri rozdiele skončí chybou. Kontrola navyše: ANO = NIE − 31,24 €/MWh pri VT aj NT.
 - VBattery AKU nemá položku (pôvodná cena ostáva na zmluvách).
+- Implementácia: `db/seed/cenniky-2026.sh dev [--skuska]`; Poplatky B2B 5,00 € (s DPH 5,95 € – dopočítané, nie z PDF);
+  Green Solar má segment domácnosť (Peter). Na Teste nahraté 13. 10.
 - Údaje z HubSpotu sa nenahrávajú.
 - PDF cenníkov sú v `exports/cenniky-2026/` (presunuté 13. 10.).
 
