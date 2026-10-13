@@ -1,16 +1,21 @@
 // Cenníky (obrazovka 20, modul 3 F1 – iba čítanie): zoznam cenníkov s platnou a budúcou verziou.
 // Návrh vidí iba admin (databáza). Stĺpec „Zmluvy s cenou z cenníka“ príde v module 4.
 
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { NewPriceListPanel } from '../components/pricelist-edit';
 import { PriceTabs, productsText } from '../components/pricelists';
 import { Card, ErrorState, PageSkeleton, Pill, Source } from '../components/ui';
 import { useApi, type PriceListRow } from '../lib/api';
 import { date, EMPTY } from '../lib/format';
 import { label, SEGMENT } from '../lib/labels';
+import { useMe } from '../lib/me';
 
 export function PriceListsPage() {
   const navigate = useNavigate();
   const { data, error } = useApi<{ items: PriceListRow[] }>('/api/price-lists');
+  const admin = useMe().is_admin;
+  const [creating, setCreating] = useState(false);
   if (error) return <ErrorState error={error} />;
   if (!data) return <PageSkeleton />;
 
@@ -24,7 +29,15 @@ export function PriceListsPage() {
             <Source />
           </div>
         </div>
+        {admin && (
+          <div className="head-actions">
+            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+              Nový cenník
+            </button>
+          </div>
+        )}
       </header>
+      {creating && <NewPriceListPanel onClose={() => setCreating(false)} onCreated={(id) => navigate(`/cenniky/${id}`)} />}
       <PriceTabs />
 
       <Card flush label="Zoznam cenníkov">

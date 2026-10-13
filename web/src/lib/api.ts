@@ -490,7 +490,7 @@ export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 /** Zápis (POST, PATCH, DELETE) ako JSON; chyba nesie slovenskú správu z API. */
-export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<T> {
+export async function send<T = unknown>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: { Accept: 'application/json', ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
@@ -577,6 +577,7 @@ export type PriceListVersion = {
   approved_at: string | null;
   approved_by_name: string | null;
   item_count: number | string;
+  updated_at: string;
 };
 
 export type PriceListItem = {
@@ -598,7 +599,29 @@ export type PriceListItem = {
   fee_program_with_vat: Num;
   fee_kw_eur_month: Num;
   fee_kw_with_vat: Num;
+  sort_order: number;
+  greencar: boolean | null;
+  greencar_kwh_per_voucher: number | null;
+  greencar_voucher_eur: Num;
+  greenshare: boolean | null;
+  greenshare_fee_pct: Num;
+  viwa_conversion_factor: Num;
+  viwa_activation_bonus: number | null;
+  viwa_credit_expiry_months: number | null;
   tariffs: TariffRef[];
+};
+
+export type ApprovePreview = {
+  version_id: string;
+  name: string;
+  valid_from: string;
+  valid_to: string | null;
+  item_count: number;
+  can_approve: boolean;
+  errors: string[];
+  supersedes: { id: string; name: string } | null;
+  closes: { id: string; name: string; valid_to: string } | null;
+  missing_products: string[];
 };
 
 export type PriceListDetail = {

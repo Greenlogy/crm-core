@@ -12,7 +12,7 @@ export const priceLists = new Hono<AppEnv>();
 const notFound = { error: 'Záznam neexistuje.' } as const;
 
 /** Sadzby produktu podľa rozsahu PDS s názvami z číselníka (napr. DMP4: spoločné C4, ZSD C2-X3, VSD X3-C2). */
-function tariffs(sql: Sql) {
+export function tariffs(sql: Sql) {
   return sql`
     WITH lab AS (
       SELECT DISTINCT ON (tariff_base(code, parent_code)) tariff_base(code, parent_code) AS base, label, sort_order
@@ -46,22 +46,29 @@ priceLists.get('/price-lists', async (c) => {
 // Obrazovka 21: detail cenníka a zvolenej verzie (?version=; bez neho platná, inak najbližšia budúca, inak posledná).
 // Verzia, ktorú používateľ nevidí (Návrh pre ne-admina) alebo patrí inému cenníku → 404.
 priceLists.get('/price-lists/:id', async (c) => {
-  const sql = c.var.sql;
   const id = c.req.param('id');
   const version = c.req.query('version') ?? '';
   if (!UUID.test(id) || (version !== '' && !UUID.test(version))) throw new BadRequest('Neplatné ID.');
-  const [list] = await sql`SELECT id, code, name, segment, description FROM price_list WHERE id = ${id}`;
-  if (!list) return c.json(notFound, 404);
+  const detail = await priceListDetail(c.var.sql, id, version || null);
+  return detail ? c.json(detail) : c.json(notFound, 404);
+});
+
+/** Detail cenníka so zvolenou verziou (null = cenník alebo verzia neexistuje / nie je viditeľná). Používa aj F2. */
+export async function priceListDetail(sql: Sql, id: string, version: string | null) {
+  const [list] = await sql<{ id: string; code: string; name: string; segment: string; description: string | null; org_id: string }[]>`
+    SELECT id, code, name, segment, description, org_id FROM price_list WHERE id = ${id}`;
+  if (!list) return null;
 
   const versions = await sql<{ id: string; state: string; valid_from: string }[]>`
-    SELECT id, name, valid_from, valid_to, status, state, copied_from_id, note, approved_at, approved_by_name, item_count
+    SELECT id, name, valid_from, valid_to, status, state, copied_from_id, note, approved_at, approved_by_name, item_count,
+           updated_at
       FROM price_list_version_v
      WHERE price_list_id = ${id}
      ORDER BY (status = 'navrh') DESC, valid_from DESC, created_at DESC`;
   let selected: string | undefined;
-  if (version !== '') {
+  if (version) {
     selected = versions.find((v) => v.id === version)?.id;
-    if (!selected) return c.json(notFound, 404);
+    if (!selected) return null;
   } else {
     selected =
       versions.find((v) => v.state === 'platna')?.id ??
@@ -72,18 +79,20 @@ priceLists.get('/price-lists/:id', async (c) => {
 
   const items = selected
     ? await sql`
-        SELECT i.id, i.product_id, i.product_code, i.product_name, i.category, i.tariff_type, i.product_status,
+        SELECT i.id, i.product_id, i.product_code, i.product_name, i.category, i.tariff_type, i.product_status, i.sort_order,
                i.vat_rate, i.price_vt_eur_mwh, i.price_vt_with_vat, i.price_nt_eur_mwh, i.price_nt_with_vat,
                i.fee_oom_eur_month, i.fee_oom_with_vat, i.fee_program_eur_month, i.fee_program_with_vat,
                i.fee_kw_eur_month, i.fee_kw_with_vat,
+               i.greencar, i.greencar_kwh_per_voucher, i.greencar_voucher_eur, i.greenshare, i.greenshare_fee_pct,
+               i.viwa_conversion_factor, i.viwa_activation_bonus, i.viwa_credit_expiry_months,
                coalesce(t.tariffs, '[]') AS tariffs
           FROM price_list_item_v i
           LEFT JOIN (${tariffs(sql)}) t ON t.product_id = i.product_id
          WHERE i.version_id = ${selected}
          ORDER BY i.sort_order, i.product_name`
     : [];
-  return c.json({ ...list, versions, selected_version_id: selected ?? null, items });
-});
+  return { ...list, versions, selected_version_id: selected ?? null, items };
+}
 
 // Obrazovka 22: katalóg produktov. ?skupina=dodavka|vykup|sluzby|instalacia, ?ukoncene=1 zobrazí aj ukončené.
 const GROUPS: Record<string, string[]> = {

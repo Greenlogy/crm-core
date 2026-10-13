@@ -1632,3 +1632,30 @@ a.tab {
   color: var(--ink-muted);
   font-size: 13px;
 }
+.card-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.num-input {
+  width: 9em;
+  text-align: right;
+}
+.params-row td {
+  background: var(--surface-muted);
+}
+.params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+}
+.params .param {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.toolbar .grow {
+  flex: 1;
+}

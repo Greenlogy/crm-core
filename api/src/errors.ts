@@ -50,12 +50,25 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   oom_switch_steps_check:
     'Kroky prechodu idú po poradí: výpoveď odoslaná → akceptovaná → zmena potvrdená (bez výpovede iba potvrdenie zmeny).',
   oom_customer_check: 'Odberné miesto patrí práve jednému zákazníkovi (firme alebo domácnosti).',
+  // Produkty a cenníky (0019–0021)
+  product_code_key: 'Produkt s týmto kódom už existuje.',
+  price_list_code_key: 'Cenník s podobným názvom už existuje.',
+  price_list_name_check: 'Chýba názov cenníka.',
+  price_list_version_name_key: 'Verzia s týmto názvom v cenníku už je.',
+  price_list_version_name_check: 'Chýba názov verzie.',
+  price_list_version_one_draft: 'Cenník už má rozpracovaný návrh – dokončite ho alebo zmažte.',
+  price_list_version_period_check: 'Platná do nemôže byť pred platná od.',
+  price_list_version_overlap: 'Platnosť sa prekrýva s inou schválenou verziou cenníka.',
+  price_list_item_product_key: 'Produkt už je vo verzii.',
+  price_list_item_price_check: 'Každá položka musí mať aspoň jednu cenu.',
+  price_list_item_nt_check: 'Cena NT sa dá zadať iba spolu s VT.',
+  price_list_item_program_item_id_key: 'Parametre programu už pri položke sú.',
 };
 
 export type ApiErrorBody = { error: string; code?: string; field?: string; constraint?: string };
 
 /** null = nie je to chyba databázy, ktorú vieme vysvetliť (→ 500). */
-export function dbErrorResponse(err: unknown): { status: 400 | 403 | 409; body: ApiErrorBody } | null {
+export function dbErrorResponse(err: unknown): { status: 400 | 403 | 404 | 409; body: ApiErrorBody } | null {
   const e = err as PgError;
   if (!e || typeof e.code !== 'string') return null;
   // RAISE EXCEPTION z našich funkcií a spúšťačov
@@ -68,7 +81,7 @@ export function dbErrorResponse(err: unknown): { status: 400 | 403 | 409; body: 
       return {
         status: 409,
         body: {
-          error: CONSTRAINT_MESSAGES[e.constraint_name ?? ''] ?? 'Záznam s týmito údajmi už existuje.',
+          error: ours ? e.message! : (CONSTRAINT_MESSAGES[e.constraint_name ?? ''] ?? 'Záznam s týmito údajmi už existuje.'),
           code: e.code,
           constraint: e.constraint_name,
         },
@@ -91,6 +104,11 @@ export function dbErrorResponse(err: unknown): { status: 400 | 403 | 409; body: 
           constraint: e.constraint_name,
         },
       };
+    case '23P01': // exclusion_violation (napr. prekrytie platnosti verzií cenníka)
+      return {
+        status: 409,
+        body: { error: CONSTRAINT_MESSAGES[e.constraint_name ?? ''] ?? 'Údaje sa prekrývajú s iným záznamom.', code: e.code, constraint: e.constraint_name },
+      };
     case '23502': // not_null_violation
       return { status: 400, body: { error: 'Chýba povinný údaj.', code: e.code, field: e.column_name } };
     case '22P02': // invalid_text_representation (neplatná hodnota výberu, uuid…)
@@ -99,8 +117,9 @@ export function dbErrorResponse(err: unknown): { status: 400 | 403 | 409; body: 
     case '22001': // string_data_right_truncation
     case '22003': // numeric_value_out_of_range
       return { status: 400, body: { error: 'Neplatná hodnota.', code: e.code } };
+    case 'P0002': // no_data_found („… neexistuje“)
+      return { status: 404, body: { error: ours ? e.message! : 'Záznam neexistuje.', code: e.code } };
     case 'P0001': // raise_exception
-    case 'P0002': // no_data_found
       return { status: 400, body: { error: ours ? e.message! : 'Zmena sa nedá uložiť.', code: e.code } };
     default:
       return null;

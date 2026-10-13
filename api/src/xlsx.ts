@@ -21,7 +21,8 @@ function colName(i: number): string {
   return s;
 }
 
-function sheetXml(header: string[], rows: Cell[][], widths: number[]): string {
+function sheetXml(header: string[], rows: Cell[][], widths: number[], title: Cell[][] = []): string {
+  const t = title.length; // tučné riadky nad hlavičkou (napr. „NÁVRH – neplatný cenník“)
   const cols = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
   const row = (cells: Cell[], r: number, style: number) =>
     `<row r="${r}">` +
@@ -37,11 +38,12 @@ function sheetXml(header: string[], rows: Cell[][], widths: number[]): string {
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+    `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${t + 1}" topLeftCell="A${t + 2}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
     `<cols>${cols}</cols><sheetData>` +
-    row(header, 1, 1) +
-    rows.map((r, i) => row(r, i + 2, 0)).join('') +
-    `</sheetData><autoFilter ref="A1:${colName(header.length - 1)}${rows.length + 1}"/></worksheet>`
+    title.map((r, i) => row(r, i + 1, 1)).join('') +
+    row(header, t + 1, 1) +
+    rows.map((r, i) => row(r, i + t + 2, 0)).join('') +
+    `</sheetData><autoFilter ref="A${t + 1}:${colName(header.length - 1)}${rows.length + t + 1}"/></worksheet>`
   );
 }
 
@@ -162,7 +164,7 @@ function zip(files: [string, Uint8Array][]): Uint8Array {
   return out;
 }
 
-export type Sheet = { name: string; header: string[]; rows: Cell[][] };
+export type Sheet = { name: string; header: string[]; rows: Cell[][]; title?: Cell[][] };
 
 const widthsOf = (header: string[], rows: Cell[][]) =>
   header.map((h, i) => Math.min(50, Math.max(8, h.length + 2, ...rows.slice(0, 200).map((r) => String(r[i] ?? '').length + 2))));
@@ -170,7 +172,7 @@ const widthsOf = (header: string[], rows: Cell[][]) =>
 /** Súbor .xlsx s viacerými hárkami (napr. šablóna importu: dáta + pokyny). */
 export function xlsxBook(sheets: Sheet[]): Uint8Array {
   return zip(
-    FILES(sheets.map((sh) => ({ name: sh.name, xml: sheetXml(sh.header, sh.rows, widthsOf(sh.header, sh.rows)) }))).map(
+    FILES(sheets.map((sh) => ({ name: sh.name, xml: sheetXml(sh.header, sh.rows, widthsOf(sh.header, sh.rows), sh.title) }))).map(
       ([n, s]) => [n, enc.encode(s)],
     ),
   );

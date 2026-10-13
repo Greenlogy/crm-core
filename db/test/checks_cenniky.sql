@@ -404,3 +404,57 @@ BEGIN
   RAISE NOTICE 'OK: crm_app bez používateľa ani s adminom neschváli minulý dátum, stav nezmení priamo; mazanie cenníka; audit';
 END;
 $$;
+
+-- C9. Náhľad schválenia (0021): nahradenie, uzavretie predošlej, chýbajúce produkty, chyby; nič nemení
+DO $$
+DECLARE
+  t   constant date := crm_today();
+  d   uuid := (SELECT v.id FROM price_list_version v JOIN price_list l ON l.id = v.price_list_id
+                WHERE l.code = 'c_domacnosti' AND v.status = 'navrh');
+  r   jsonb;
+  n   bigint := (SELECT count(*) FROM audit_log);
+BEGIN
+  r := price_list_version_approve_preview(d);
+  ASSERT (r ->> 'can_approve')::boolean AND r -> 'supersedes' = 'null'::jsonb AND r -> 'closes' = 'null'::jsonb, 'bez dôsledkov: ' || r::text;
+  ASSERT r -> 'missing_products' = '["C starý"]'::jsonb, 'chýbajúci produkt z platnej verzie: ' || r::text;
+
+  UPDATE price_list_version SET valid_from = t + 30 WHERE id = d;   -- dátum budúcej schválenej verzie
+  r := price_list_version_approve_preview(d);
+  ASSERT r -> 'supersedes' ->> 'name' = '2027 oprava' AND (r ->> 'can_approve')::boolean, 'nahradí budúcu: ' || r::text;
+
+  UPDATE price_list_version SET valid_from = t + 5 WHERE id = d;    -- počas platnej verzie v0, pred „medzi“
+  r := price_list_version_approve_preview(d);
+  ASSERT r -> 'closes' ->> 'name' = 'v0' AND (r -> 'closes' ->> 'valid_to')::date = t + 4, 'uzavrie v0: ' || r::text;
+  ASSERT (r ->> 'valid_to')::date = t + 9, 'nová platí do dňa pred „medzi“: ' || r::text;
+
+  UPDATE price_list_version SET valid_from = t - 400 WHERE id = d;  -- rovnaký dátum ako platná v0 (vlastník smie minulosť)
+  r := price_list_version_approve_preview(d);
+  ASSERT NOT (r ->> 'can_approve')::boolean AND r -> 'errors' ->> 0 LIKE '%už platí%', 'platnú nenahradí: ' || r::text;
+
+  ASSERT (SELECT count(*) FROM audit_log) = n + 3, 'náhľad nič nezapísal (iba 3 zmeny dátumu v teste)';
+  ASSERT (SELECT status FROM price_list_version WHERE name = 'v0' AND price_list_id = '00000000-0000-4000-8000-000000005101') = 'schvalena',
+         'náhľad nezmenil verzie';
+END;
+$$;
+
+SET LOCAL ROLE crm_rls_test;
+DO $$
+DECLARE
+  r jsonb;
+BEGIN
+  PERFORM set_config('app.require_user', 'on', true);
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000000011', true);
+  BEGIN
+    PERFORM price_list_version_approve_preview('00000000-0000-4000-8000-000000005204');
+    RAISE EXCEPTION 'CHYBA: obchodník videl náhľad schválenia';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM set_config('app.user_id', (SELECT id FROM app_user WHERE lower(email) = 'peter@greenlogy.com')::text, true);
+  r := price_list_version_approve_preview('00000000-0000-4000-8000-000000005204');   -- návrh s minulým dátumom
+  ASSERT NOT (r ->> 'can_approve')::boolean AND r -> 'errors' ->> 0 LIKE 'Platnosť musí začínať dnes%', 'admin: minulý dátum: ' || r::text;
+  PERFORM set_config('app.user_id', '', true);
+  PERFORM set_config('app.require_user', '', true);
+  RAISE NOTICE 'OK: náhľad schválenia (nahradenie, uzavretie predošlej, platnosť do, chýbajúce produkty, chyby; iba admin; nič nemení)';
+END;
+$$;
+RESET ROLE;

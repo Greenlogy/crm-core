@@ -12,6 +12,7 @@ import { exportRoutes } from './routes/export';
 import { oomImport } from './routes/oom-import';
 import { oomWrite } from './routes/oom-write';
 import { priceLists } from './routes/pricelists';
+import { priceListsWrite } from './routes/pricelists-write';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
@@ -31,7 +32,7 @@ import { dailyOomActivation } from './jobs';
 
 const app = new Hono<AppEnv>().basePath('/api');
 
-const WRITE_METHODS = new Set(['POST', 'PATCH', 'DELETE']);
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Zápis iba ako JSON z vlastnej stránky: cudzia stránka nemôže v mene prihláseného nič zmeniť
 // (formulár inej stránky nepošle JSON a prehliadač pošle jej Origin).
@@ -118,6 +119,7 @@ app.route('/', exportRoutes);
 app.route('/', oomImport);
 app.route('/', oomWrite);
 app.route('/', priceLists);
+app.route('/', priceListsWrite);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
@@ -199,9 +201,14 @@ app.onError((err, c) => {
   if (err instanceof Forbidden) return c.json({ error: err.message }, 403);
   const known = dbErrorResponse(err);
   if (known) return c.json(known.body, known.status);
-  // Bez správy chyby: môže obsahovať hodnoty z databázy.
-  const code = (err as { code?: string }).code ?? 'unknown';
-  console.error(`API chyba ${c.req.method} ${c.req.routePath}: ${err.name} ${code}`);
+  // Bez správy chyby: môže obsahovať hodnoty z databázy (aj osobné údaje). Do logu iba kód, obmedzenie a miesto v databáze;
+  // používateľ dostane všeobecnú správu, nikdy text SQL.
+  const e = err as { code?: string; constraint_name?: string; routine?: string; table_name?: string };
+  console.error(
+    `API chyba ${c.req.method} ${c.req.routePath}: ${err.name} ${e.code ?? 'unknown'}` +
+      `${e.constraint_name ? ` obmedzenie=${e.constraint_name}` : ''}${e.table_name ? ` tabuľka=${e.table_name}` : ''}` +
+      `${e.routine ? ` rutina=${e.routine}` : ''}`,
+  );
   return c.json({ error: 'Chyba servera.' }, 500);
 });
 

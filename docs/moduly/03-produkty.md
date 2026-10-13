@@ -218,6 +218,10 @@ Databáza: `0019_produkty`, `0020_cenniky` a naplnenie cenníkov 2026 (`db/seed/
   `/cenniky/:id` (iba platné ID; `?verzia=`). Ceny s DPH iba z databázy, čísla v sk-SK. Detail podľa obsahu verzie:
   VBattery, VIWA a Poplatky B2B bez VT/NT; VIWA poplatok za OOM a €/kW, VBattery mesačný poplatok.
   Stĺpce „Zmluvy“ a „prejde X zmlúv“ skryté do modulu 4. Návrh vidí iba admin; obchodník s `?verzia=` návrhu dostane 404.
-- **F2 – úpravy adminom:** nový cenník, návrh verzie (kópia), úprava cien a parametrov programov, schválenie, ukončenie,
-  zmazanie návrhu, export verzie (.xlsx: schválenú ktokoľvek, návrh iba admin).
+- **F2 – úpravy adminom** (plán schválený 13. 10.): nový cenník (kód z názvu bez roka, skrytý), prvá verzia, nová verzia
+  kópiou (predvolene od 1. 1. nasledujúceho roka; ukončené produkty sa neskopírujú), údaje návrhu, úprava cien a parametrov
+  programov (uloží sa celá tabuľka naraz; najviac 4 desatinné miesta; cena s DPH „po uložení“), schválenie s náhľadom
+  dôsledkov z databázy (`0021`: uzavretie predošlej, nahradenie budúcej, chýbajúce produkty), ukončenie cenníka (s upozornením
+  na zmluvy v module 4), zmazanie návrhu, export verzie .xlsx (schválenú ktokoľvek, kto ju vidí; návrh iba admin, označený
+  „NÁVRH – neplatný cenník“ a „-NAVRH“). Súbežná úprava návrhu → 409 a obnovenie stránky.
 - **F3 – produkty a párovanie:** nový produkt, úprava a stav produktu, Nastavenia → Párovanie sadzieb (obrazovka 24).
