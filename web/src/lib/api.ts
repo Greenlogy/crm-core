@@ -542,3 +542,110 @@ export type Me = {
   orgs: OrgRef[];
   permissions: Partial<Record<ModuleCode, Permission>>;
 };
+
+// Modul 3 Produkty a cenníky (F1, iba čítanie)
+export type TariffRef = { scope: string; label: string };
+
+export type PriceListRow = {
+  id: string;
+  code: string;
+  name: string;
+  segment: string;
+  description: string | null;
+  current_version_id: string | null;
+  current_version_name: string | null;
+  current_valid_from: string | null;
+  current_valid_to: string | null;
+  future_version_id: string | null;
+  future_version_name: string | null;
+  future_valid_from: string | null;
+  draft_version_id: string | null;
+  draft_version_name: string | null;
+  draft_valid_from: string | null;
+  products: string[];
+};
+
+export type PriceListVersion = {
+  id: string;
+  name: string;
+  valid_from: string;
+  valid_to: string | null;
+  status: 'navrh' | 'schvalena' | 'nahradena';
+  state: 'navrh' | 'buduca' | 'platna' | 'ukoncena';
+  copied_from_id: string | null;
+  note: string | null;
+  approved_at: string | null;
+  approved_by_name: string | null;
+  item_count: number | string;
+};
+
+export type PriceListItem = {
+  id: string;
+  product_id: string;
+  product_code: string;
+  product_name: string;
+  category: string;
+  tariff_type: string;
+  product_status: string;
+  vat_rate: Num;
+  price_vt_eur_mwh: Num;
+  price_vt_with_vat: Num;
+  price_nt_eur_mwh: Num;
+  price_nt_with_vat: Num;
+  fee_oom_eur_month: Num;
+  fee_oom_with_vat: Num;
+  fee_program_eur_month: Num;
+  fee_program_with_vat: Num;
+  fee_kw_eur_month: Num;
+  fee_kw_with_vat: Num;
+  tariffs: TariffRef[];
+};
+
+export type PriceListDetail = {
+  id: string;
+  code: string;
+  name: string;
+  segment: string;
+  description: string | null;
+  versions: PriceListVersion[];
+  selected_version_id: string | null;
+  items: PriceListItem[];
+};
+
+export type ProductRow = {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  segment: string;
+  vat_rate: Num;
+  tariff_type: string;
+  price_models: string[];
+  price_regulation: boolean | null;
+  status: string;
+  tariffs: TariffRef[];
+};
+
+export type ProgramRow = {
+  product_id: string;
+  code: string;
+  name: string;
+  category: 'vbattery' | 'viwa';
+  status: string;
+  price_list_name: string | null;
+  version_name: string | null;
+  valid_from: string | null;
+  vat_rate: Num;
+  fee_program_eur_month: Num;
+  fee_program_with_vat: Num;
+  fee_kw_eur_month: Num;
+  fee_kw_with_vat: Num;
+  greencar: boolean | null;
+  greencar_kwh_per_voucher: number | null;
+  greencar_voucher_eur: Num;
+  greenshare: boolean | null;
+  greenshare_fee_pct: Num;
+  viwa_conversion_factor: Num;
+  viwa_activation_bonus: number | null;
+  viwa_credit_expiry_months: number | null;
+};

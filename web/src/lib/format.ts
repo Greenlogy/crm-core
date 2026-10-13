@@ -40,6 +40,22 @@ export const eurMonth = (v: Num | undefined) => {
 };
 export const pct = (v: Num | undefined) => num(v, 2, '%');
 
+/**
+ * Číslo z databázy (numeric ako text) v sk-SK bez prepočtu: medzera (U+00A0) pre tisíce, desatinná čiarka,
+ * `min` desatinných miest; ak má číslo viac platných miest, ukáže `max` (1,5000 → 1,50; 7,7480 → 7,7480 pri min 2, max 4).
+ * Nič sa nezaokrúhľuje.
+ * Ceny s DPH už zaokrúhlila databáza – web ich iba zobrazí.
+ */
+export function dec(v: Num | undefined, min: number, max = min): string {
+  if (v === null || v === undefined || v === '') return EMPTY;
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(v).trim());
+  if (!m) return EMPTY;
+  let frac = (m[3] ?? '').replace(/0+$/, '');
+  frac = frac.padEnd(frac.length > min ? Math.max(max, frac.length) : min, '0');
+  const int = m[2].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+  return `${m[1]}${int}${frac ? `,${frac}` : ''}`;
+}
+
 // 'YYYY-MM-DD' alebo ISO čas → „8. 10. 2026“ (čas v Europe/Bratislava).
 export function date(v: string | null | undefined): string {
   if (!v) return EMPTY;

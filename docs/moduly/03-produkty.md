@@ -208,3 +208,16 @@ Otvorené: žiadne.
 - **Modul 5:** obchody a ponuky, Green Solar ako samostatný druh obchodu (zmluva o dielo).
 - VIWA pre domácnosti ako náhrada VBattery.
 - Import príznaku energopomoci z XM Trade.
+
+## 16. Fázy (Peter, 13. 10. 2026)
+
+Databáza: `0019_produkty`, `0020_cenniky` a naplnenie cenníkov 2026 (`db/seed/cenniky-2026.sh`) na Teste.
+
+- **F1 – iba čítanie** (plán schválený 13. 10.): obrazovky 20 Cenníky, 21 Detail cenníka, 22 Produkty, 23 Programy;
+  položka menu Cenníky pre všetkých (aj externých). Adresy `/cenniky`, `/cenniky/produkty`, `/cenniky/programy`,
+  `/cenniky/:id` (iba platné ID; `?verzia=`). Ceny s DPH iba z databázy, čísla v sk-SK. Detail podľa obsahu verzie:
+  VBattery, VIWA a Poplatky B2B bez VT/NT; VIWA poplatok za OOM a €/kW, VBattery mesačný poplatok.
+  Stĺpce „Zmluvy“ a „prejde X zmlúv“ skryté do modulu 4. Návrh vidí iba admin; obchodník s `?verzia=` návrhu dostane 404.
+- **F2 – úpravy adminom:** nový cenník, návrh verzie (kópia), úprava cien a parametrov programov, schválenie, ukončenie,
+  zmazanie návrhu, export verzie (.xlsx: schválenú ktokoľvek, návrh iba admin).
+- **F3 – produkty a párovanie:** nový produkt, úprava a stav produktu, Nastavenia → Párovanie sadzieb (obrazovka 24).

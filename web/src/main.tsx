@@ -10,6 +10,10 @@ import { OomImportPage } from './pages/OomImportPage';
 import { OomListPage } from './pages/OomListPage';
 import { OomPage } from './pages/OomPage';
 import { PersonPage } from './pages/PersonPage';
+import { PriceListPage } from './pages/PriceListPage';
+import { PriceListsPage } from './pages/PriceListsPage';
+import { ProductsPage } from './pages/ProductsPage';
+import { ProgramsPage } from './pages/ProgramsPage';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
 import { MeProvider } from './lib/me';
 import { AuditPage } from './pages/settings/AuditPage';
@@ -43,6 +47,11 @@ const router = createBrowserRouter([
       { path: 'oom/import', element: <OomImportPage /> },
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
+      // Cenníky: pevné adresy pred /cenniky/:id (stránka detailu prijme iba platné ID)
+      { path: 'cenniky', element: <PriceListsPage /> },
+      { path: 'cenniky/produkty', element: <ProductsPage /> },
+      { path: 'cenniky/programy', element: <ProgramsPage /> },
+      { path: 'cenniky/:id', element: <PriceListPage /> },
       {
         path: 'nastavenia',
         element: <SettingsLayout />,

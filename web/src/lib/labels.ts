@@ -117,3 +117,56 @@ export const label = (map: Record<string, string>, v: string | null | undefined)
 const HS_OBJECT = { company: '0-2', contact: '0-1', deal: '0-3', oom: '2-16666415' } as const;
 export const hubspotUrl = (object: keyof typeof HS_OBJECT, id: string) =>
   `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL}/record/${HS_OBJECT[object]}/${id}`;
+
+// Modul 3 Produkty a cenníky
+export const PRODUCT_CATEGORY: Record<string, string> = {
+  dodavka_domacnost: 'Dodávka – domácnosti',
+  dodavka_maly_podnik: 'Dodávka – malé podniky',
+  dodavka_firma: 'Dodávka – firmy',
+  vykup_firma: 'Výkup – firmy',
+  velkoobchod: 'Veľkoobchod',
+  zem: 'Služba – domácnosti',
+  vbattery: 'Virtuálna batéria',
+  viwa: 'Virtuálna peňaženka',
+  instalacia_fve: 'Inštalácia FVE',
+  poplatok: 'Poplatok – firmy',
+};
+
+export const PRICE_MODEL: Record<string, string> = {
+  cennik: 'Cenník',
+  fix: 'FIX',
+  spot_plus_eur: 'SPOT + aditív €',
+  spot_minus_eur: 'SPOT − aditív €',
+  spot_minus_pct: 'SPOT − aditív %',
+  cena_diela: 'Pevná cena za dielo',
+};
+
+export const TARIFF_TYPE: Record<string, string> = {
+  jednotarif: 'jednotarif',
+  dvojtarif: 'dvojtarif',
+  nemerany: 'nemeraný',
+  netyka_sa: '',
+};
+
+export const PRODUCT_STATUS: Record<string, { label: string; tone: Tone; live?: boolean }> = {
+  predava_sa: { label: 'Predáva sa', tone: 'positive', live: true },
+  dobieha: { label: 'Dobieha', tone: 'warning' },
+  ukonceny: { label: 'Ukončený', tone: 'neutral' },
+};
+
+// Stav verzie cenníka: uložený Návrh / Schválená / Nahradená, zobrazený podľa dátumu (Europe/Bratislava, databáza).
+export const VERSION_STATE: Record<string, { label: string; tone: Tone; live?: boolean }> = {
+  navrh: { label: 'Návrh', tone: 'warning' },
+  buduca: { label: 'Budúca', tone: 'info' },
+  platna: { label: 'Platná', tone: 'positive', live: true },
+  ukoncena: { label: 'Ukončená', tone: 'neutral' },
+};
+
+/** Skupiny katalógu (obrazovka 22) – rovnaké kódy ako ?skupina= v API. */
+export const PRODUCT_GROUPS: [string, string][] = [
+  ['', 'Všetky'],
+  ['dodavka', 'Dodávka'],
+  ['vykup', 'Výkup'],
+  ['sluzby', 'Služby a programy'],
+  ['instalacia', 'Inštalácia'],
+];
