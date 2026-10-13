@@ -151,3 +151,13 @@ F2b (rozhodnuté pri implementácii, Peter môže zmeniť):
 8. Nové OOM je vždy **Pripravované**; Aktívne bude automaticky (potvrdená zmena + začiatok dodávky) alebo tlačidlom Aktivovať, ak má povinné údaje.
 9. **EIC sa dá opraviť** (preklep) – s kontrolou formátu, kontrolnej číslice a duplicity; zmena je v audite.
 
+F4 – import z Excelu (Peter schválil 13. 10. 2026, lokálne overené):
+10. **Knižnica:** SheetJS 0.20.3 z cdn.sheetjs.com, pripnutá kontrolným súčtom (sha512) v `package-lock.json`; súbor číta Worker, databáza dostane celý súbor naraz ako JSON pole riadkov (jedna funkcia `oom_import_run`, migrácia `0018`).
+11. **Šablóna = export:** šablóna a export zoznamu OOM majú rovnaké stĺpce (EIC, ID zákazníka, IČO zákazníka, E-mail zákazníka, údaje OOM, vlastné polia). Export navyše obsahuje stĺpce „(len na čítanie)“, ktoré import vynechá. Postup export → úprava v Exceli → import.
+12. **Zákazník** sa páruje podľa ID zákazníka → IČO → e-mailu (e-mail musí byť jednoznačný). Pri existujúcom OOM musí sedieť s aktuálnym zákazníkom, inak chyba „prepis urobte na karte OOM“; prázdny zákazník pri zmene je povolený. Nové OOM zákazníka a typ potrebuje.
+13. **Prázdna bunka = bez zmeny.** Číselníky sa zadávajú názvom (veľkosť písmen nerozhoduje, pomlčky – a — = -), skrytú hodnotu import neprijme; sadzba musí patriť k PDS. Vlastné polia podľa typu; „výber viacerých“ a „odkaz“ import nemení.
+14. **Stav OOM import nemení**, nové OOM vznikne ako Pripravované; z krokov prechodu iba „Dodávka od“.
+15. **Uloženie musí sedieť s náhľadom:** rovnaký súbor (odtlačok SHA-256) a rovnaké počty nové / zmena / bez zmeny / chyba; inak sa neuloží nič a treba nový náhľad. Uložia sa platné riadky, chybné nie. Záznam v `oom_import`, audit so zdrojom „import“.
+16. **Súbor sa nikde neukladá;** súbor s chybnými riadkami (pôvodné bunky + Chyba + Pôvodný riadok) sa vytvorí až pri stiahnutí.
+17. **Limit 5 000 riadkov a 10 MB** (Peter 13. 10., pôvodne 2 000 a 5 MB). Väčší súbor treba rozdeliť. Lokálne 5 000 riadkov: náhľad 6,0 s, uloženie 6,6 s; na Teste overené (Peter, 13. 10.).
+18. **EIC v súbore viackrát:** chybné sú všetky riadky s týmto EIC (neuloží sa ani prvý), všetky idú do súboru s chybami. Súbor s chybami má vždy toľko riadkov, koľko chýb ukáže náhľad.

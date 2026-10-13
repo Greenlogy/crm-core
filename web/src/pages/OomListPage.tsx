@@ -58,6 +58,7 @@ export function OomListPage() {
   const defs = useFieldDefs('oom');
   const listDefs = defs.filter((d) => d.show_in_list && !d.archived_at);
   const canExport = permission(me, 'odberne_miesta').export;
+  const canImport = permission(me, 'odberne_miesta').import;
   const [input, setInput] = useState(q);
   const canCreate = useCanCreateOom();
   const [creating, setCreating] = useState(false);
@@ -90,6 +91,11 @@ export function OomListPage() {
           </div>
         </div>
         <div className="head-actions">
+          {canImport && (
+            <button type="button" className="btn" onClick={() => navigate('/oom/import')}>
+              Import z Excelu
+            </button>
+          )}
           {canExport && (
             <a className="btn" href={`/api/oom/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
               Export

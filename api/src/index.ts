@@ -9,6 +9,7 @@ import { asUser, connect, type Env } from './db';
 import { dbErrorResponse } from './errors';
 import { customersWrite } from './routes/customers-write';
 import { exportRoutes } from './routes/export';
+import { oomImport } from './routes/oom-import';
 import { oomWrite } from './routes/oom-write';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
@@ -113,6 +114,7 @@ app.get('/me', async (c) => {
 // Zákazníci – zakladanie, úpravy, duplicity (pred kartami: /companies/search nie je id)
 app.route('/', customersWrite);
 app.route('/', exportRoutes);
+app.route('/', oomImport);
 app.route('/', oomWrite);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),

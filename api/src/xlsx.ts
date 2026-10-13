@@ -1,5 +1,5 @@
 // Jednoduchý súbor .xlsx bez knižníc (rozhodnutie 2026-10-12: export zoznamov).
-// Jeden hárok; text sa zapisuje ako text (IČO/OIB, telefóny, EIC nestratia úvodné nuly), čísla ako čísla.
+// Jeden alebo viac hárkov; text sa zapisuje ako text (IČO/OIB, telefóny, EIC nestratia úvodné nuly), čísla ako čísla.
 // XLSX = ZIP s niekoľkými XML súbormi; ZIP bez kompresie (metóda „stored“) stačí a nepotrebuje knižnicu.
 
 export type Cell = string | number | null | undefined;
@@ -45,14 +45,16 @@ function sheetXml(header: string[], rows: Cell[][], widths: number[]): string {
   );
 }
 
-const FILES = (sheetName: string, sheet: string): [string, string][] => [
+const FILES = (sheets: { name: string; xml: string }[]): [string, string][] => [
   [
     '[Content_Types].xml',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
       '<Default Extension="xml" ContentType="application/xml"/>' +
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      sheets
+        .map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`)
+        .join('') +
       '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
       '</Types>',
   ],
@@ -66,13 +68,15 @@ const FILES = (sheetName: string, sheet: string): [string, string][] => [
     'xl/workbook.xml',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      `<sheets><sheet name="${xml(sheetName.slice(0, 31))}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      `<sheets>${sheets.map((sh, i) => `<sheet name="${xml(sh.name.slice(0, 31))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`,
   ],
   [
     'xl/_rels/workbook.xml.rels',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      sheets
+        .map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`)
+        .join('') +
+      `<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
       '</Relationships>',
   ],
   [
@@ -88,7 +92,7 @@ const FILES = (sheetName: string, sheet: string): [string, string][] => [
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
       '</styleSheet>',
   ],
-  ['xl/worksheets/sheet1.xml', sheet],
+  ...sheets.map((sh, i): [string, string] => [`xl/worksheets/sheet${i + 1}.xml`, sh.xml]),
 ];
 
 // --- ZIP (metóda stored) ---
@@ -158,10 +162,21 @@ function zip(files: [string, Uint8Array][]): Uint8Array {
   return out;
 }
 
+export type Sheet = { name: string; header: string[]; rows: Cell[][] };
+
+const widthsOf = (header: string[], rows: Cell[][]) =>
+  header.map((h, i) => Math.min(50, Math.max(8, h.length + 2, ...rows.slice(0, 200).map((r) => String(r[i] ?? '').length + 2))));
+
+/** Súbor .xlsx s viacerými hárkami (napr. šablóna importu: dáta + pokyny). */
+export function xlsxBook(sheets: Sheet[]): Uint8Array {
+  return zip(
+    FILES(sheets.map((sh) => ({ name: sh.name, xml: sheetXml(sh.header, sh.rows, widthsOf(sh.header, sh.rows)) }))).map(
+      ([n, s]) => [n, enc.encode(s)],
+    ),
+  );
+}
+
 /** Súbor .xlsx s jedným hárkom: hlavička tučne, ukotvená, s automatickým filtrom. */
 export function xlsx(sheetName: string, header: string[], rows: Cell[][]): Uint8Array {
-  const widths = header.map((h, i) =>
-    Math.min(50, Math.max(8, h.length + 2, ...rows.slice(0, 200).map((r) => String(r[i] ?? '').length + 2))),
-  );
-  return zip(FILES(sheetName, sheetXml(header, rows, widths)).map(([n, s]) => [n, enc.encode(s)]));
+  return xlsxBook([{ name: sheetName, header, rows }]);
 }

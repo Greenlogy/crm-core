@@ -794,3 +794,123 @@ BEGIN
   RAISE NOTICE 'OK: zmazanie OOM zmaže aj jeho plány (0017)';
 END;
 $$;
+
+-- ============================================================================
+-- 0018: import OOM z Excelu (náhľad, uloženie, kontrola počtov, chyby)
+-- ============================================================================
+
+-- O19. Náhľad a uloženie (Peter, CEO = právo importovať)
+DO $$
+DECLARE
+  v_rows jsonb;
+  r      jsonb;
+  v_prev jsonb;
+  v_save jsonb;
+BEGIN
+  PERFORM set_config('app.user_id', (SELECT id FROM app_user WHERE email = 'peter@greenlogy.com')::text, true);
+  UPDATE lookup_value SET hidden_at = now() WHERE list_code = 'fakturacne_obdobie' AND code = 'rocne';
+  v_rows := jsonb_build_array(
+    -- nové: IČO bez núl, sadzba s dlhou pomlčkou, číselníky malými písmenami
+    jsonb_build_object('row', 2, 'eic', '24ZZS000TEST740G', 'ico', '123456',
+      'fields', jsonb_build_object('type', 'spotreba', 'name', 'Import 1', 'address_zip', '01401', 'pds', 'zsd',
+                                   'pds_tariff', 'C2–X3', 'voltage_level', 'nn', 'billing_period', 'mesačne',
+                                   'planned_consumption_vt_mwh', 12.5)),
+    -- zmena existujúceho (Alfa – sklad), bez zákazníka
+    jsonb_build_object('row', 3, 'eic', '24ZZS000TEST001H', 'fields', jsonb_build_object('name', 'Alfa – sklad 2', 'breaker_a', 40)),
+    -- bez zmeny (rovnaký názov)
+    jsonb_build_object('row', 4, 'eic', '24ZZS000TEST003D', 'fields', jsonb_build_object('name', 'Alfa – zdieľanie 2')),
+    -- chyby
+    jsonb_build_object('row', 5, 'eic', '24ZZS000TEST741E', 'ico', '00123456',
+      'fields', jsonb_build_object('type', 'spotreba', 'pds', 'ZSD', 'pds_tariff', 'D9')),
+    jsonb_build_object('row', 6, 'eic', '24ZZS000TEST742C', 'ico', '00123456',
+      'fields', jsonb_build_object('type', 'spotreba', 'billing_period', 'Ročne')),
+    jsonb_build_object('row', 7, 'eic', '24ZZS000TEST004B', 'ico', '12345678', 'fields', jsonb_build_object('name', 'X')),
+    jsonb_build_object('row', 8, 'eic', '24ZZS000TEST743B', 'ico', '00123456', 'fields', jsonb_build_object('type', 'spotreba')),
+    jsonb_build_object('row', 9, 'eic', '24ZZS000TEST743A', 'email', 'nikto@example.test', 'fields', jsonb_build_object('type', 'spotreba')),
+    -- duplicita: chybné sú oba riadky (4 aj 10)
+    jsonb_build_object('row', 10, 'eic', '24ZZS000TEST003D', 'fields', jsonb_build_object('name', 'Duplicita')),
+    jsonb_build_object('row', 11, 'eic', '24ZZS000TEST749X', 'parse_errors', jsonb_build_array('Dodávka od: neplatný dátum „31. 2. 2026“.'))
+  );
+
+  v_prev := oom_import_run(crm_default_org(), v_rows, false);
+  ASSERT v_prev -> 'counts' = '{"riadkov": 10, "nove": 1, "zmena": 1, "bez_zmeny": 0, "chyba": 8}'::jsonb, format('počty náhľadu %s', v_prev -> 'counts');
+  ASSERT NOT EXISTS (SELECT 1 FROM oom WHERE eic = '24ZZS000TEST740G'), 'náhľad nič neuložil';
+  ASSERT (SELECT name FROM oom WHERE eic = '24ZZS000TEST001H') <> 'Alfa – sklad 2', 'náhľad nezmenil existujúce';
+  FOR r IN SELECT x FROM jsonb_array_elements(v_prev -> 'rows') x LOOP
+    CASE (r ->> 'row')::int
+      WHEN 3 THEN ASSERT r -> 'changes' @> '[{"field": "name", "new": "Alfa – sklad 2"}]', format('zmena: %s', r);
+      WHEN 4 THEN ASSERT r ->> 'error' LIKE 'EIC je v súbore viackrát (riadky 4, 10)%', r ->> 'error';
+      WHEN 5 THEN ASSERT r ->> 'error' LIKE 'Neznáma hodnota „D9“%', r ->> 'error';
+      WHEN 6 THEN ASSERT r ->> 'error' LIKE '%je v číselníku skrytá%', r ->> 'error';
+      WHEN 7 THEN ASSERT r ->> 'error' LIKE '%prepis urobte na karte OOM%', r ->> 'error';
+      WHEN 8 THEN ASSERT r ->> 'error' = 'Neplatný formát alebo kontrolná číslica EIC.', r ->> 'error';
+      WHEN 9 THEN ASSERT r ->> 'error' LIKE 'Osoba s e-mailom%', r ->> 'error';
+      WHEN 10 THEN ASSERT r ->> 'error' LIKE 'EIC je v súbore viackrát (riadky 4, 10)%', r ->> 'error';
+      WHEN 11 THEN ASSERT r ->> 'error' LIKE 'Dodávka od: neplatný dátum%', r ->> 'error';
+      ELSE NULL;
+    END CASE;
+  END LOOP;
+
+  -- uloženie s inými počtami (napr. niekto medzitým zmenil dáta) → nič
+  v_save := oom_import_run(crm_default_org(), v_rows, true, 'obec.xlsx', '{"riadkov": 10, "nove": 2, "zmena": 1, "bez_zmeny": 1, "chyba": 6}');
+  ASSERT (v_save ->> 'mismatch')::boolean, 'nesedí s náhľadom';
+  ASSERT NOT EXISTS (SELECT 1 FROM oom WHERE eic = '24ZZS000TEST740G') AND NOT EXISTS (SELECT 1 FROM oom_import WHERE file_name = 'obec.xlsx'), 'nič neuložené';
+
+  -- uloženie s počtami z náhľadu
+  v_save := oom_import_run(crm_default_org(), v_rows, true, 'obec.xlsx', v_prev -> 'counts');
+  ASSERT v_save ->> 'import_id' IS NOT NULL, format('uložené: %s', v_save);
+  ASSERT (SELECT status = 'pripravovane' AND pds_tariff = 'zsd_c2_x3' AND billing_period = 'mesacne' AND company_id = '00000000-0000-4000-8000-000000000101'
+            FROM oom WHERE eic = '24ZZS000TEST740G'), 'nové OOM: Pripravované, číselníky, zákazník podľa IČO';
+  ASSERT (SELECT name = 'Alfa – sklad 2' AND breaker_a = 40 FROM oom WHERE eic = '24ZZS000TEST001H'), 'zmena uložená';
+  ASSERT (SELECT row_count = 10 AND created_count = 1 AND updated_count = 1 AND error_count = 8 AND file_name = 'obec.xlsx'
+            FROM oom_import WHERE id = (v_save ->> 'import_id')::uuid), 'záznam importu';
+  ASSERT (SELECT count(*) FROM audit_log WHERE import_id = (v_save ->> 'import_id')::uuid AND source = 'import' AND table_name = 'oom') = 2,
+         'audit: 2 OOM so zdrojom import';
+  UPDATE lookup_value SET hidden_at = NULL WHERE list_code = 'fakturacne_obdobie' AND code = 'rocne';
+
+  -- bez práva importovať (Marketing)
+  PERFORM set_config('app.user_id', '00000000-0000-4000-8000-000000003902', true);
+  BEGIN
+    PERFORM oom_import_run(crm_default_org(), v_rows, false);
+    RAISE EXCEPTION 'CHYBA: import bez práva prešiel';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM set_config('app.user_id', '', true);
+  RAISE NOTICE 'OK: import OOM (náhľad bez zápisu, nové/zmena/bez zmeny/chyby, skrytá hodnota, pomlčka, zákazník, duplicita, počty, audit, právo)';
+END;
+$$;
+
+-- O20. Odložený prepočet stavu zákazníka platí iba počas importu: import prepočíta zákazníka raz na konci,
+--      bežná zmena stavu OOM (karta) hneď
+DO $$
+DECLARE
+  f   constant uuid := '00000000-0000-4000-8000-000000003501';
+  v_o uuid;
+  v_s jsonb;
+  v_st text;
+BEGIN
+  UPDATE app_setting SET value = 'true' WHERE key = 'customer_status_auto';
+  INSERT INTO company (id, name, ico, is_customer, is_partner) VALUES (f, 'Prepočet po importe s.r.o.', '57575757', false, true);
+  PERFORM set_config('app.user_id', (SELECT id FROM app_user WHERE email = 'peter@greenlogy.com')::text, true);
+
+  v_s := oom_import_run(crm_default_org(), jsonb_build_array(jsonb_build_object('row', 2, 'eic', '24ZZS000TEST750D', 'ico', '57575757',
+           'fields', jsonb_build_object('type', 'spotreba', 'name', 'Prepočet'))), true, 'prepocet.xlsx',
+           '{"riadkov": 1, "nove": 1, "zmena": 0, "bez_zmeny": 0, "chyba": 0}');
+  ASSERT v_s ->> 'import_id' IS NOT NULL, format('import uložený: %s', v_s);
+  ASSERT coalesce(current_setting('crm.oom_bulk', true), '') <> 'on', 'po importe je odložený prepočet vypnutý';
+  ASSERT (SELECT is_customer AND status = 'cakajuci_zakaznik' FROM company WHERE id = f), 'import: zákazník prepočítaný na konci (Čakajúci)';
+
+  -- bežná zmena stavu na karte (mimo importu) → stav zákazníka sa zmení hneď
+  SELECT id INTO v_o FROM oom WHERE eic = '24ZZS000TEST750D';
+  PERFORM oom_set_status(v_o, 'zrusene', current_date);
+  SELECT status INTO v_st FROM company WHERE id = f;
+  ASSERT v_st <> 'cakajuci_zakaznik', format('zmena stavu OOM prepočítala zákazníka hneď (%s)', v_st);
+  ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'company' AND record_id = f AND source = 'system'
+                  AND import_id IS NULL AND diff -> 'status' ->> 'old' = 'cakajuci_zakaznik'),
+         'zmena stavu zákazníka v audite ako Systém, bez importu';
+
+  PERFORM set_config('app.user_id', '', true);
+  UPDATE app_setting SET value = 'false' WHERE key = 'customer_status_auto';
+  RAISE NOTICE 'OK: odložený prepočet iba počas importu; zmena stavu OOM na karte prepočíta zákazníka hneď (%)', v_st;
+END;
+$$;

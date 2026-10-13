@@ -1,4 +1,5 @@
--- Zmazanie testovacích dát modulu Odberné miesta (oom-test.sql): iba záznamy s id 7e570000-….
+-- Zmazanie testovacích dát modulu Odberné miesta (oom-test.sql): záznamy s id 7e570000-… a OOM ich zákazníkov
+-- (aj založené pri skúškach, napr. importom).
 -- Audit zmien ostáva (nedá sa mazať); záznamy v ňom sú vymyslené.
 
 \set ON_ERROR_STOP on
@@ -6,10 +7,16 @@ BEGIN;
 SET LOCAL app.change_source = 'system';
 SET LOCAL crm.oom_system = 'on';
 
-DELETE FROM oom_contact  WHERE oom_id::text LIKE '7e570000-%' OR contact_id::text LIKE '7e570000-%';
-DELETE FROM oom_device   WHERE oom_id::text LIKE '7e570000-%';
-DELETE FROM oom_customer WHERE oom_id::text LIKE '7e570000-%';
-DELETE FROM oom          WHERE id::text LIKE '7e570000-%';
+-- OOM testovacích dát + OOM, ktoré vznikli pri skúškach (import, nové OOM) u testovacích zákazníkov
+CREATE TEMP TABLE t_oom ON COMMIT DROP AS
+  SELECT id FROM oom WHERE id::text LIKE '7e570000-%'
+  UNION SELECT oom_id FROM oom_customer WHERE company_id::text LIKE '7e570000-%' OR person_id::text LIKE '7e570000-%';
+
+DELETE FROM oom_contact  WHERE oom_id IN (SELECT id FROM t_oom) OR contact_id::text LIKE '7e570000-%';
+DELETE FROM oom_device   WHERE oom_id IN (SELECT id FROM t_oom);
+DELETE FROM oom_planned_change WHERE oom_id IN (SELECT id FROM t_oom);
+DELETE FROM oom_customer WHERE oom_id IN (SELECT id FROM t_oom);
+DELETE FROM oom          WHERE id IN (SELECT id FROM t_oom);
 DELETE FROM company_contact WHERE company_id::text LIKE '7e570000-%' OR contact_id::text LIKE '7e570000-%';
 DELETE FROM contact WHERE id::text LIKE '7e570000-%';
 DELETE FROM company WHERE id::text LIKE '7e570000-%';

@@ -8,6 +8,7 @@ import type { Sql } from '../db';
 import { listContacts, ROLE_FILTER } from '../queries/contacts';
 import { listCustomers, SEGMENT_FILTERS, STATUS_FILTERS } from '../queries/customers';
 import { listOom, OOM_CHIPS, OOM_TYPES } from '../queries/oom';
+import { customLabel, OOM_COLUMNS, READONLY_SUFFIX } from './oom-import';
 import { type AppEnv, UUID } from '../types';
 import { BadRequest, Forbidden } from '../validate';
 import { type Cell, xlsx } from '../xlsx';
@@ -166,24 +167,74 @@ exportRoutes.get('/oom/export', async (c) => {
   if ((owner && !UUID.test(owner)) || (org && !UUID.test(org))) throw new BadRequest('Neplatný filter.');
 
   const data = await listOom(sql, { q, chip, type, pds, owner, org, cf, page: 1 }, MAX_ROWS);
-  const defs = await listDefs(sql, ['oom']);
+  // Stĺpce ako šablóna importu (export → úprava v Exceli → import); hodnoty číselníkov názvom.
+  const ids = data.items.map((o) => o.id).join(',');
+  const details = ids
+    ? await sql`
+        SELECT o.*, coalesce(o.company_id, o.person_id) AS customer_id, c.ico AS customer_ico,
+               CASE WHEN o.person_id IS NOT NULL THEN p.email END AS customer_email,
+               (SELECT label FROM lookup_value WHERE list_code = 'pds' AND code = o.pds) AS pds_l,
+               (SELECT label FROM lookup_value WHERE list_code = 'sadzba_distribucie' AND code = o.pds_tariff) AS tariff_l,
+               (SELECT label FROM lookup_value WHERE list_code = 'typ_merania' AND code = o.metering_type) AS metering_l,
+               (SELECT label FROM lookup_value WHERE list_code = 'fakturacne_obdobie' AND code = o.billing_period) AS billing_l,
+               (SELECT label FROM lookup_value WHERE list_code = 'sposob_zaloh' AND code = o.advance_payment_method) AS advance_l,
+               (SELECT label FROM lookup_value WHERE list_code = 'typ_vykupnej_zmluvy' AND code = o.feed_in_contract_type) AS feed_in_l
+          FROM oom o
+          LEFT JOIN company c ON c.id = o.company_id
+          LEFT JOIN contact p ON p.id = o.person_id
+         WHERE o.id = ANY (string_to_array(${ids}, ',')::uuid[])`
+    : [];
+  const byId = new Map(details.map((d) => [d.id as string, d]));
+  // všetky vlastné polia OOM (ako šablóna), nielen „zobraziť v zozname“; výber viac a odkaz iba na čítanie
+  const defs = await sql<Def[]>`
+    SELECT f.key, f.label, f.entity::text AS entity, f.field_type::text AS field_type,
+           coalesce((SELECT json_agg(json_build_object('id', o.id, 'label', o.label)) FROM custom_field_option o
+                      WHERE o.field_id = f.id), '[]') AS options
+      FROM custom_field f
+     WHERE f.entity = 'oom' AND f.archived_at IS NULL
+     ORDER BY f.sort_order, lower(f.label)`;
+  const cdefs = defs.filter((d) => d.field_type !== 'vyber_viac' && d.field_type !== 'odkaz');
+  const extra = defs.filter((d) => !cdefs.some((x) => x.key === d.key));
+  const ro = (label: string) => label + READONLY_SUFFIX;
   const header = [
-    'EIC', 'Názov', 'Ulica', 'Súpisné číslo', 'Orientačné číslo', 'PSČ', 'Obec', 'Zákazník', 'Firma / domácnosť', 'IČO zákazníka',
-    'Typ', 'Stav', 'PDS', 'Sadzba', 'Napäťová úroveň', 'Plánovaný objem MWh', 'Dodávka od', 'Dodávka do',
-    'Vlastník', 'Spoločnosť', 'Prechod sa zasekol', 'Plánovaná zmena', 'Prepis od', ...defs.map((d) => d.label),
+    ...OOM_COLUMNS.map((col) => col.label), ...cdefs.map(customLabel),
+    ro('Zákazník'), ro('Stav'), ro('Vlastník'), ro('Spoločnosť'), ro('Dodávka do'), ro('Prechod sa zasekol'),
+    ro('Plánovaná zmena'), ro('Prepis od'), ...extra.map((d) => ro(d.label)),
   ];
   const date = (v: string | null) => (v ? v.split('-').reverse().map(Number).join('. ') : null);
-  const rows: Cell[][] = data.items.map((o) => [
-    o.eic, o.name, o.address_street, o.address_number_supisne, o.address_number_orientacne, o.address_zip, o.address_city,
-    o.customer_name, o.customer_type === 'B2B' ? 'firma' : 'domácnosť', o.customer_ico,
-    OOM_TYPE_LABEL[o.type] ?? o.type, OOM_STATUS_LABEL[o.status] ?? o.status, o.pds_label, o.pds_tariff_label,
-    o.voltage_level ? String(o.voltage_level).toUpperCase() : null,
-    o.planned_mwh === null ? null : Number(o.planned_mwh), date(o.supply_from), date(o.supply_to),
-    o.owner_name, o.org_name, o.switch_stuck ? 'áno' : null,
-    o.plan_kind ? `${PLAN_LABEL[o.plan_kind]} k ${date(o.plan_date)}` : o.plan_failed ? 'plán zlyhal' : null,
-    o.transferred_from_name,
-    ...defs.map((d) => customCell(d, (o.custom ?? {})[d.key])),
-  ]);
+  const SOURCE_KIND_L: Record<string, string> = {
+    fve: 'FVE', voda: 'Voda', bioplyn: 'Bioplyn', biomasa: 'Biomasa', plyn: 'Plyn', vietor: 'Vietor', ostatne_oze: 'Ostatné OZE',
+  };
+  const CATEGORY_L: Record<string, string> = { maly_zdroj: 'Malý zdroj', lokalny_zdroj: 'Lokálny zdroj', vyrobny_zdroj: 'Výrobný zdroj' };
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const rows: Cell[][] = data.items.map((o) => {
+    const d = byId.get(o.id) ?? {};
+    const value: Record<string, Cell> = {
+      eic: o.eic, customer_id: d.customer_id, ico: d.customer_ico, email: d.customer_email,
+      type: OOM_TYPE_LABEL[o.type] ?? o.type, name: o.name, address_street: o.address_street,
+      address_number_supisne: o.address_number_supisne, address_number_orientacne: o.address_number_orientacne,
+      address_zip: o.address_zip, address_city: o.address_city, pds: d.pds_l, pds_tariff: d.tariff_l, pds_point_id: d.pds_point_id,
+      voltage_level: d.voltage_level ? String(d.voltage_level).toUpperCase() : null, metering_type: d.metering_l,
+      phases: num(d.phases), breaker_a: num(d.breaker_a), reserved_capacity_kw: num(d.reserved_capacity_kw),
+      max_reserved_capacity_kw: num(d.max_reserved_capacity_kw), capacity_reservation_method: d.capacity_reservation_method,
+      planned_consumption_vt_mwh: num(d.planned_consumption_vt_mwh), planned_consumption_nt_mwh: num(d.planned_consumption_nt_mwh),
+      planned_feed_in_mwh: num(d.planned_feed_in_mwh), supply_from: date(o.supply_from), price_regulation: d.price_regulation,
+      excise_tax: d.excise_tax, billing_period: d.billing_l, advance_payment_method: d.advance_l,
+      advance_payment_pct: num(d.advance_payment_pct), advance_payment_eur: num(d.advance_payment_eur),
+      source_kind: d.source_kind ? SOURCE_KIND_L[d.source_kind] : null, source_category: d.source_category ? CATEGORY_L[d.source_category] : null,
+      source_power_kw: num(d.source_power_kw), inverter_power_kw: num(d.inverter_power_kw), panels_power_kw: num(d.panels_power_kw),
+      feed_in_contract_type: d.feed_in_l,
+    };
+    return [
+      ...OOM_COLUMNS.map((col) => value[col.key] ?? null),
+      ...cdefs.map((cd) => customCell(cd, (o.custom ?? {})[cd.key])),
+      o.customer_name, OOM_STATUS_LABEL[o.status] ?? o.status, o.owner_name, o.org_name, date(o.supply_to),
+      o.switch_stuck ? 'áno' : null,
+      o.plan_kind ? `${PLAN_LABEL[o.plan_kind]} k ${date(o.plan_date)}` : o.plan_failed ? 'plán zlyhal' : null,
+      o.transferred_from_name,
+      ...extra.map((cd) => customCell(cd, (o.custom ?? {})[cd.key])),
+    ];
+  });
   await sql`
     INSERT INTO export_log (user_id, module, filter, row_count)
     VALUES (${c.var.userId}, 'odberne_miesta', ${sql.json({ list: 'oom', q, stav: chip, typ: type, pds, owner, org, cf: cf ?? '' })}, ${rows.length})`;

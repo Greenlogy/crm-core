@@ -6,6 +6,7 @@ import { ContactsPage } from './pages/ContactsPage';
 import { ContractPage } from './pages/ContractPage';
 import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
+import { OomImportPage } from './pages/OomImportPage';
 import { OomListPage } from './pages/OomListPage';
 import { OomPage } from './pages/OomPage';
 import { PersonPage } from './pages/PersonPage';
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
       { path: 'osoby/:id', element: <PersonPage /> },
       { path: 'domacnosti/:id', element: <OldPersonRedirect /> },
       { path: 'oom', element: <OomListPage /> },
+      { path: 'oom/import', element: <OomImportPage /> },
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
       {
