@@ -69,8 +69,11 @@ const applicable = (defs: FieldDef[], entity: string, orgId: string, custom: Rec
 
 // --- Karta ------------------------------------------------------------------------------------
 
+// Cesta API pre zápis hodnôt podľa záznamu
+const CUSTOM_PATH: Record<'firma' | 'osoba' | 'oom', string> = { firma: 'companies', osoba: 'persons', oom: 'oom' };
+
 export function CustomFieldsCard(props: {
-  entity: 'firma' | 'osoba';
+  entity: 'firma' | 'osoba' | 'oom';
   recordId: string;
   orgId: string;
   custom: Record<string, unknown>;
@@ -139,7 +142,7 @@ export function CustomFieldsCard(props: {
 }
 
 function CustomFieldsPanel(props: {
-  entity: 'firma' | 'osoba';
+  entity: 'firma' | 'osoba' | 'oom';
   recordId: string;
   defs: FieldDef[];
   custom: Record<string, unknown>;
@@ -168,7 +171,7 @@ function CustomFieldsPanel(props: {
     );
     if (Object.keys(changed).length === 0) return props.onClose();
     const ok = await save.run(() =>
-      send('PATCH', `/api/${props.entity === 'firma' ? 'companies' : 'persons'}/${props.recordId}/custom`, { values: changed }),
+      send('PATCH', `/api/${CUSTOM_PATH[props.entity]}/${props.recordId}/custom`, { values: changed }),
     );
     if (ok) props.onSaved();
   };

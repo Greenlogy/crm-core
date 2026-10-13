@@ -1,6 +1,7 @@
 // Zoznam a karta odberného miesta – modul Odberné miesta (migrácie 0013–0015, dizajn 17 a 18).
 // Zoznam ide z pohľadu oom_v; práva („iba svoje“, spoločnosti) stráži databáza (RLS), API ich neopakuje.
 
+import { customCondition, parseCustomFilter } from '../custom';
 import type { Sql } from '../db';
 
 export const OOM_PAGE_SIZE = 50;
@@ -9,11 +10,12 @@ export const OOM_TYPES = ['spotreba', 'vyroba', 'sharing'] as const;
 // '' = všetky; stav; 'prepisane' = OOM s prepisom na iného odberateľa; 'zasekol' = prechod sa zasekol
 export const OOM_CHIPS = new Set<string>(['', ...OOM_STATUSES, 'prepisane', 'zasekol', 'zlyhal']);
 
-export type OomFilter = { q: string; chip: string; type: string; pds: string; owner: string; org: string; page: number };
+export type OomFilter = { q: string; chip: string; type: string; pds: string; owner: string; org: string; cf?: string; page: number };
 
 export async function listOom(sql: Sql, f: OomFilter, pageSize = OOM_PAGE_SIZE) {
   const like = `%${f.q}%`;
   const eic = f.q.toUpperCase().replace(/\s/g, '');
+  const { cond: customCond } = await customCondition(sql, ['oom'], parseCustomFilter(f.cf), sql`v.custom`);
   const chipCond =
     f.chip === ''
       ? sql`TRUE`
@@ -31,7 +33,8 @@ export async function listOom(sql: Sql, f: OomFilter, pageSize = OOM_PAGE_SIZE) 
     AND (${f.type} = '' OR v.type::text = ${f.type})
     AND (${f.pds} = '' OR v.pds = ${f.pds})
     AND (${f.owner} = '' OR v.owner_id::text = ${f.owner})
-    AND (${f.org} = '' OR v.org_id::text = ${f.org})`;
+    AND (${f.org} = '' OR v.org_id::text = ${f.org})
+    AND ${customCond}`;
 
   const [rows, counts] = await Promise.all([
     sql`
@@ -39,7 +42,8 @@ export async function listOom(sql: Sql, f: OomFilter, pageSize = OOM_PAGE_SIZE) 
              v.address_city, v.address_zip, v.type, v.status, v.company_id, v.person_id, v.customer_type, v.customer_name,
              v.owner_id, v.owner_name, v.org_id, g.legal_name AS org_name, v.pds, v.pds_label, v.pds_tariff_label,
              v.planned_mwh, v.supply_from, v.supply_to, v.switch_stuck, to_jsonb(v.active_missing) AS active_missing,
-             v.transferred_from_name, v.transferred_on, v.plan_kind, v.plan_date, v.plan_failed,
+             v.transferred_from_name, v.transferred_on, v.plan_kind, v.plan_date, v.plan_failed, v.custom,
+             v.voltage_level, (SELECT c.ico FROM company c WHERE c.id = v.company_id) AS customer_ico,
              count(*) OVER ()::int AS total
         FROM oom_v v
         JOIN org g ON g.id = v.org_id
@@ -209,5 +213,20 @@ export async function oomCard(sql: Sql, id: string) {
          WHERE id = ANY (string_to_array(${[...personIds].join(',')}, ',')::uuid[])`
     : [];
 
-  return { ...oom, links, devices, contacts, deals, prices, timeline, plans, names: Object.fromEntries(names.map((n) => [n.id, n.name])) };
+  // Vlastné polia typu odkaz: názvy odkazovaných záznamov (ako pri zákazníkoch)
+  const refs = await sql`
+    SELECT r.id, coalesce(c.name, concat_ws(' ', p.first_name, p.last_name), o2.eic) AS label,
+           CASE WHEN c.id IS NOT NULL THEN 'firma' WHEN p.id IS NOT NULL THEN 'osoba' END AS entity
+      FROM (SELECT DISTINCT (e.value #>> '{}')::uuid AS id
+              FROM jsonb_each(${sql.json((oom.custom ?? {}) as Record<string, never>)}::jsonb) e
+              JOIN custom_field f ON f.key = e.key AND f.entity = 'oom' AND f.field_type = 'odkaz'
+             WHERE jsonb_typeof(e.value) = 'string') r
+      LEFT JOIN company c ON c.id = r.id
+      LEFT JOIN contact p ON p.id = r.id
+      LEFT JOIN oom o2 ON o2.id = r.id`;
+
+  return {
+    ...oom, links, devices, contacts, deals, prices, timeline, plans, custom_refs: refs,
+    names: Object.fromEntries(names.map((n) => [n.id, n.name])),
+  };
 }

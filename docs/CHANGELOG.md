@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-13
+
+- Nastavenia → Audit: prepínač „Exporty“ (kto, kedy, aký zoznam, filter, počet riadkov; `GET /api/settings/audit/exports`). Karta OOM: adminovi poznámka, kde pridať vlastné polia, kým žiadne nie sú
+- Modul 2 OOM, F3 (nasadené na Test, Peter): vlastné polia OOM na karte po sekciách („Ďalšie údaje“, úprava podľa práv; pri Aktívnom OOM iba s právom upravovať Aktívne), v zozname ako stĺpce a filtre, na časovej osi s názvom poľa; `PATCH /api/oom/:id/custom`; export zoznamu OOM `GET /api/oom/export` (.xlsx, právo „exportovať“ v module Odberné miesta, záznam v `export_log`, EIC / IČO / PSČ ako text, vlastné polia „v zozname“ ako stĺpce); v Nastaveniach → Vlastné polia úplnejší zoznam polí jadra OOM
 ## 2026-10-12
 
 - Modul 2 OOM, F2c (lokálne overené; nasadenie a scenár na Teste Peter): migrácia `0017_oom_delete_plany` (zmazanie OOM zmaže aj jeho plány – oprava, test 111 kontrol, overené nanečisto); API zariadenia (`/oom/:id/devices`, `/oom-devices/:id`), kontaktné osoby (`/oom/:id/contacts`, `/oom-contacts/:id`, kandidáti z firmy zákazníka), zmazanie OOM (`DELETE /oom/:id`, admin); Nastavenia: lehoty „prechod sa zasekol“ pri spoločnosti (obrazovka 11), sadzby s výberom a filtrom PDS a IČO pri PDS (Číselníky); web `components/oom-children.tsx` (zariadenia, kontaktné osoby), tlačidlo Zmazať (admin), časová os s názvami hodnôt

@@ -7,7 +7,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, ErrorState, Pill, Skeleton, Source, StatusPill } from '../components/ui';
 import { useApi, type OomFilters, type OomList, type OomListItem } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
-import { useMe } from '../lib/me';
+import { permission, useMe } from '../lib/me';
+import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-fields';
 import { label, OOM_STATUS, OOM_TYPE } from '../lib/labels';
 import { oomAddress } from './OomPage';
 import { planText } from '../components/oom-actions';
@@ -46,12 +47,23 @@ export function OomListPage() {
   const owner = params.get('vlastnik') ?? '';
   const org = params.get('spolocnost') ?? '';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
+  const cfRaw = params.get('cf') ?? '';
+  const cf: Record<string, string> = (() => {
+    try {
+      return cfRaw ? JSON.parse(cfRaw) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const defs = useFieldDefs('oom');
+  const listDefs = defs.filter((d) => d.show_in_list && !d.archived_at);
+  const canExport = permission(me, 'odberne_miesta').export;
   const [input, setInput] = useState(q);
   const canCreate = useCanCreateOom();
   const [creating, setCreating] = useState(false);
 
   const update = (next: Record<string, string>) => {
-    const merged = { q, stav: chip, typ: type, pds, vlastnik: owner, spolocnost: org, page: String(page), ...next };
+    const merged = { q, stav: chip, typ: type, pds, vlastnik: owner, spolocnost: org, cf: cfRaw, page: String(page), ...next };
     setParams(Object.fromEntries(Object.entries(merged).filter(([k, v]) => v && !(k === 'page' && v === '1'))), { replace: true });
   };
 
@@ -61,7 +73,7 @@ export function OomListPage() {
     return () => clearTimeout(t);
   }, [input]);
 
-  const query = new URLSearchParams({ q, stav: chip, typ: type, pds, owner, org, page: String(page) });
+  const query = new URLSearchParams({ q, stav: chip, typ: type, pds, owner, org, cf: cfRaw, page: String(page) });
   const { data, error, loading } = useApi<OomList>(`/api/oom?${query}`);
   const { data: filters } = useApi<OomFilters>('/api/oom-filters');
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -77,13 +89,18 @@ export function OomListPage() {
             <Source />
           </div>
         </div>
-        {canCreate && (
-          <div className="head-actions">
+        <div className="head-actions">
+          {canExport && (
+            <a className="btn" href={`/api/oom/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+              Export
+            </a>
+          )}
+          {canCreate && (
             <button type="button" className="btn primary" onClick={() => setCreating(true)}>
               Nové odberné miesto
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
       {creating && <OomCreatePanel onClose={() => setCreating(false)} />}
 
@@ -120,6 +137,7 @@ export function OomListPage() {
               </option>
             ))}
           </select>
+          <CustomFilters defs={defs} value={cf} onChange={(v) => update({ cf: Object.keys(v).length ? JSON.stringify(v) : '', page: '1' })} />
           {multiOrg && (
             <select className="input select" aria-label="Spoločnosť" value={org} onChange={(e) => update({ spolocnost: e.target.value, page: '1' })}>
               <option value="">Spoločnosť: všetky</option>
@@ -166,12 +184,17 @@ export function OomListPage() {
                   <th scope="col">Dodávka</th>
                   <th scope="col">Vlastník</th>
                   {multiOrg && <th scope="col">Spoločnosť</th>}
+                  {listDefs.map((d) => (
+                    <th key={d.id} scope="col">
+                      {d.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={multiOrg ? 9 : 8} className="muted">
+                    <td colSpan={(multiOrg ? 9 : 8) + listDefs.length} className="muted">
                       Žiadne odberné miesto nezodpovedá filtru.
                     </td>
                   </tr>
@@ -221,6 +244,9 @@ export function OomListPage() {
                     <td>{supply(o)}</td>
                     <td>{text(o.owner_name)}</td>
                     {multiOrg && <td>{o.org_name}</td>}
+                    {listDefs.map((d) => (
+                      <td key={d.id}>{formatCustom(d, o.custom?.[d.key])}</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

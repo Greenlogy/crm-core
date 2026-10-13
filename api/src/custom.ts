@@ -1,11 +1,11 @@
-// Vlastné polia v module Zákazníci (F3): filtre zoznamov podľa polí „dá sa filtrovať“.
+// Vlastné polia v zoznamoch (Zákazníci F3, Odberné miesta F3): filtre podľa polí „dá sa filtrovať“.
 // Hodnoty sú v stĺpci custom (jsonb); typ a pravidlá stráži databáza (custom_values_check, 0007).
 
 import type { Fragment } from 'postgres';
 import type { Sql } from './db';
 import { BadRequest } from './validate';
 
-export type Entity = 'firma' | 'osoba';
+export type Entity = 'firma' | 'osoba' | 'oom';
 
 /** ?cf={"kluc":"hodnota",…} → objekt; prázdne hodnoty sa vynechajú. */
 export function parseCustomFilter(raw: string | undefined): Record<string, string> {

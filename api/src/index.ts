@@ -167,7 +167,7 @@ app.get('/oom', async (c) => {
   if (!/^[a-z0-9_]{0,63}$/.test(pds)) return c.json({ error: 'Neplatné PDS.' }, 400);
   if (owner !== '' && !UUID.test(owner)) return c.json({ error: 'Neplatný vlastník.' }, 400);
   if (org !== '' && !UUID.test(org)) return c.json({ error: 'Neplatná spoločnosť.' }, 400);
-  return c.json(await listOom(c.var.sql, { q, chip, type, pds, owner, org, page }));
+  return c.json(await listOom(c.var.sql, { q, chip, type, pds, owner, org, cf: c.req.query('cf'), page }));
 });
 
 app.get('/oom-filters', async (c) => c.json(await oomFilters(c.var.sql)));

@@ -95,3 +95,25 @@ auditSettings.get('/audit', async (c) => {
     users,
   });
 });
+
+// Exporty zoznamov (export_log): kto, kedy, aký zoznam, filter a počet riadkov – bez exportovaných údajov.
+auditSettings.get('/audit/exports', async (c) => {
+  const user = c.req.query('user') ?? '';
+  const from = c.req.query('from') ?? '';
+  const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
+  if (user !== '' && !UUID.test(user)) throw new BadRequest('Neplatný používateľ.');
+  if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) throw new BadRequest('Dátum zadaj ako RRRR-MM-DD.');
+  const sql = c.var.sql;
+  const [rows, users] = await Promise.all([
+    sql`
+      SELECT e.id, e.created_at, e.module, e.filter, e.row_count, u.name AS user_name, count(*) OVER ()::int AS total
+        FROM export_log e
+        LEFT JOIN app_user u ON u.id = e.user_id
+       WHERE (${user} = '' OR e.user_id::text = ${user})
+         AND (${from} = '' OR e.created_at >= ${from || '1970-01-01'}::date)
+       ORDER BY e.created_at DESC, e.id DESC
+       LIMIT ${PAGE} OFFSET ${(page - 1) * PAGE}`,
+    sql`SELECT DISTINCT u.id, u.name FROM export_log e JOIN app_user u ON u.id = e.user_id ORDER BY u.name`,
+  ]);
+  return c.json({ page, pageSize: PAGE, total: rows[0]?.total ?? 0, items: rows.map(({ total: _t, ...r }) => r), users });
+});

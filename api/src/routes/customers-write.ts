@@ -409,7 +409,8 @@ function customPatch(b: Body): { set: Record<string, unknown>; remove: string[] 
   return { set, remove };
 }
 
-for (const [path, table] of [['companies', 'company'], ['persons', 'contact']] as const) {
+// OOM (modul Odberné miesta, F3): pri Aktívnom OOM iba s právom „upravovať Aktívne OOM“ (databáza, 0015).
+for (const [path, table] of [['companies', 'company'], ['persons', 'contact'], ['oom', 'oom']] as const) {
   customersWrite.patch(`/${path}/:id/custom`, async (c) => {
     const recordId = id(c.req.param('id'));
     const sql = c.var.sql;

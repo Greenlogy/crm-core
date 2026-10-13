@@ -1,8 +1,9 @@
 // Nastavenia – Audit (dizajn 16): kto, čo a kedy zmenil, pôvodná a nová hodnota.
 // Audit sa nedá upraviť ani zmazať (databáza). „Systém“ = zmena bez prihláseného používateľa
-// (výpočet CRM, migrácia).
+// (výpočet CRM, migrácia). Prepínač „Exporty“: kto, kedy a čo exportoval (export_log, bez údajov).
 
 import { useState } from 'react';
+import { Segmented } from '../../components/form';
 import { ErrorState, Pill, Skeleton } from '../../components/ui';
 import { useApi } from '../../lib/api';
 import { date, lastSeen } from '../../lib/format';
@@ -55,6 +56,27 @@ const fieldLabel = (f: string) =>
   f.startsWith('custom.') ? `Vlastné pole ${f.slice(7)}` : (COLUMN_LABEL[f] ?? f);
 
 export function AuditPage() {
+  const [view, setView] = useState<'zmeny' | 'exporty'>('zmeny');
+  return (
+    <>
+      <SettingsHead title="Audit" sub={view === 'zmeny' ? 'kto, čo a kedy zmenil' : 'kto, kedy a čo exportoval'} />
+      <div style={{ marginBottom: 12 }}>
+        <Segmented
+          label="Audit"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'zmeny', label: 'Zmeny' },
+            { value: 'exporty', label: 'Exporty' },
+          ]}
+        />
+      </div>
+      {view === 'zmeny' ? <Changes /> : <Exports />}
+    </>
+  );
+}
+
+function Changes() {
   const [user, setUser] = useState('');
   const [kind, setKind] = useState('');
   const [period, setPeriod] = useState<Period>('7');
@@ -71,7 +93,6 @@ export function AuditPage() {
 
   return (
     <>
-      <SettingsHead title="Audit" sub="kto, čo a kedy zmenil" />
       <section className="card">
         <div className="toolbar">
           <input
@@ -186,5 +207,119 @@ export function AuditPage() {
         </div>
       </section>
     </>
+  );
+}
+
+// --- Exporty zoznamov ---
+
+type ExportRow = { id: string; created_at: string; module: string; filter: Record<string, string>; row_count: number; user_name: string | null };
+type ExportData = { page: number; pageSize: number; total: number; items: ExportRow[]; users: { id: string; name: string }[] };
+
+const LIST_LABEL: Record<string, string> = { zakaznici: 'Zákazníci', kontakty: 'Kontakty', oom: 'Odberné miesta' };
+const FILTER_LABEL: Record<string, string> = {
+  q: 'hľadanie',
+  status: 'stav',
+  stav: 'stav',
+  segment: 'segment',
+  role: 'rola',
+  typ: 'typ',
+  pds: 'PDS',
+  owner: 'vlastník',
+  org: 'spoločnosť',
+  cf: 'vlastné polia',
+};
+
+/** Filter exportu čitateľne: iba vyplnené časti (id vlastníka a spoločnosti sa neukazujú, iba že bol filter). */
+function filterText(f: Record<string, string>): string {
+  const parts = Object.entries(f)
+    .filter(([k, v]) => k !== 'list' && v)
+    .map(([k, v]) => (k === 'owner' || k === 'org' || k === 'cf' ? (FILTER_LABEL[k] ?? k) : `${FILTER_LABEL[k] ?? k}: ${v}`));
+  return parts.length ? parts.join(', ') : 'bez filtra';
+}
+
+function Exports() {
+  const [user, setUser] = useState('');
+  const [period, setPeriod] = useState<Period>('30');
+  const [page, setPage] = useState(1);
+  const params = new URLSearchParams({ user, page: String(page), ...(period ? { from: daysAgo(Number(period)) } : {}) });
+  const data = useApi<ExportData>(`/api/settings/audit/exports?${params}`);
+  const d = data.data;
+  const pages = d ? Math.max(1, Math.ceil(d.total / d.pageSize)) : 1;
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <select className="input" aria-label="Kto" value={user} onChange={(e) => { setUser(e.target.value); setPage(1); }}>
+          <option value="">Kto: všetci</option>
+          {d?.users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+        <select className="input" aria-label="Obdobie" value={period} onChange={(e) => { setPeriod(e.target.value as Period); setPage(1); }}>
+          <option value="7">Obdobie: posledných 7 dní</option>
+          <option value="30">Posledných 30 dní</option>
+          <option value="365">Posledný rok</option>
+          <option value="">Celé obdobie</option>
+        </select>
+      </div>
+      {data.error ? (
+        <div className="card-body">
+          <ErrorState error={data.error} />
+        </div>
+      ) : !d ? (
+        <div className="card-body">
+          <Skeleton lines={4} />
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Kedy</th>
+                <th>Kto</th>
+                <th>Zoznam</th>
+                <th>Filter</th>
+                <th className="num">Riadkov</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.items.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    Žiadny export v tomto období.
+                  </td>
+                </tr>
+              )}
+              {d.items.map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    {date(e.created_at)} {time(e.created_at)}
+                  </td>
+                  <td>{e.user_name ?? '–'}</td>
+                  <td>{LIST_LABEL[e.filter.list] ?? e.module}</td>
+                  <td>{filterText(e.filter)}</td>
+                  <td className="num">{e.row_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="pager">
+        <span className="caption">{d ? `${d.total} ${d.total === 1 ? 'export' : d.total >= 2 && d.total <= 4 ? 'exporty' : 'exportov'}` : ''} · Exportované údaje sa neukladajú, iba kto, kedy a s akým filtrom.</span>
+        <span className="row-actions">
+          <button type="button" className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            Predchádzajúca
+          </button>
+          <span className="caption">
+            {page} / {pages}
+          </span>
+          <button type="button" className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+            Ďalšia
+          </button>
+        </span>
+      </div>
+    </section>
   );
 }

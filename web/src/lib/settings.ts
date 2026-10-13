@@ -197,7 +197,7 @@ export const FIELD_TYPES: { value: FieldType; label: string }[] = [
 export const CORE_FIELDS: Record<Entity, string[]> = {
   firma: ['Názov', 'IČO / OIB', 'Krajina', 'DIČ', 'IČ DPH', 'Sídlo', 'Označenie (zákazník, partner, dodávateľ)', 'Vlastník', 'Stav'],
   osoba: ['Meno', 'Priezvisko', 'E-mail', 'Telefón', 'Mobil', 'Domácnosť', 'Vlastník', 'Stav', 'Nechce marketing'],
-  oom: ['EIC', 'Typ', 'Stav', 'Adresa', 'Distribúcia', 'Plánovaná spotreba'],
+  oom: ['EIC', 'Typ', 'Stav', 'Názov', 'Adresa', 'Zákazník', 'PDS a sadzba', 'Napäťová úroveň', 'Meranie a istič', 'Fakturácia a zálohy', 'Plánovaná spotreba a výkup', 'Výroba', 'Dodávka a prechod'],
   deal: ['Názov', 'Pipeline', 'Stage', 'Vlastník', 'Očakávané uzavretie'],
   zmluva: ['Číslo', 'Stav', 'Platnosť od – do', 'Podpísaná'],
   ponuka: ['Verzia', 'Stav', 'Platná do', 'Suma'],

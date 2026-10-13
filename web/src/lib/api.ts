@@ -370,6 +370,7 @@ export type OomCard = {
   plan_id: string | null;
   plan_failed: boolean;
   plans: OomPlan[];
+  custom_refs: { id: string; label: string | null; entity: string | null }[];
   links: OomLink[];
   devices: OomDevice[];
   contacts: {
@@ -421,6 +422,9 @@ export type OomListItem = {
   plan_kind: OomPlan['kind'] | null;
   plan_date: string | null;
   plan_failed: boolean;
+  custom: Record<string, unknown>;
+  customer_ico: string | null;
+  voltage_level: string | null;
 };
 
 export type OomList = {

@@ -1,11 +1,13 @@
-// Export zoznamov Zákazníci a Kontakty do .xlsx (rozhodnutie 2026-10-12): iba tímy s právom „exportovať“
-// v module Zákazníci; každý export sa zapíše do export_log (kto, kedy, filter, počet riadkov – bez údajov).
+// Export zoznamov Zákazníci, Kontakty a Odberné miesta do .xlsx (rozhodnutie 2026-10-12): iba tímy s právom
+// „exportovať“ v danom module; každý export sa zapíše do export_log (kto, kedy, filter, počet riadkov – bez údajov).
+// IČO, telefóny, EIC a PSČ idú ako text (bez straty úvodných núl).
 // Filtre sú rovnaké ako v zozname; exportuje sa najviac MAX_ROWS riadkov.
 
 import { Hono } from 'hono';
 import type { Sql } from '../db';
 import { listContacts, ROLE_FILTER } from '../queries/contacts';
 import { listCustomers, SEGMENT_FILTERS, STATUS_FILTERS } from '../queries/customers';
+import { listOom, OOM_CHIPS, OOM_TYPES } from '../queries/oom';
 import { type AppEnv, UUID } from '../types';
 import { BadRequest, Forbidden } from '../validate';
 import { type Cell, xlsx } from '../xlsx';
@@ -26,9 +28,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 type Def = { key: string; label: string; entity: string; field_type: string; options: { id: string; label: string }[] };
 
-async function canExport(sql: Sql, userId: string): Promise<boolean> {
+async function canExport(sql: Sql, userId: string, module: 'zakaznici' | 'odberne_miesta' = 'zakaznici'): Promise<boolean> {
   const [r] = await sql<{ ok: boolean }[]>`
-    SELECT p.can_export AS ok FROM app_user u JOIN team_permission p ON p.team_id = u.team_id AND p.module = 'zakaznici'
+    SELECT p.can_export AS ok FROM app_user u JOIN team_permission p ON p.team_id = u.team_id AND p.module = ${module}::crm_module
      WHERE u.id = ${userId} AND u.status = 'aktivny'`;
   return !!r?.ok;
 }
@@ -132,4 +134,58 @@ exportRoutes.get('/contacts/export', async (c) => {
     INSERT INTO export_log (user_id, module, filter, row_count)
     VALUES (${c.var.userId}, 'zakaznici', ${sql.json({ list: 'kontakty', q, role, cf: cf ?? '' })}, ${rows.length})`;
   return file('kontakty', xlsx('Kontakty', header, rows));
+});
+
+// --- Odberné miesta (modul 2, F3) ---
+
+const OOM_STATUS_LABEL: Record<string, string> = {
+  pripravovane: 'Pripravované',
+  aktivne: 'Aktívne',
+  odidene: 'Odídené',
+  zrusene: 'Zrušené',
+  prepisane: 'Prepísané',
+};
+const OOM_TYPE_LABEL: Record<string, string> = { spotreba: 'Spotreba', vyroba: 'Výroba', sharing: 'Sharing' };
+const PLAN_LABEL: Record<string, string> = { prepis: 'prepis', odchod: 'odchod', zrusenie: 'zrušenie' };
+
+exportRoutes.get('/oom/export', async (c) => {
+  const sql = c.var.sql;
+  if (!(await canExport(sql, c.var.userId, 'odberne_miesta'))) {
+    throw new Forbidden('Export odberných miest nemáte povolený (Nastavenia → Tímy a práva).');
+  }
+  const q = (c.req.query('q') ?? '').trim().slice(0, 100);
+  const chip = c.req.query('stav') ?? '';
+  const type = c.req.query('typ') ?? '';
+  const pds = c.req.query('pds') ?? '';
+  const owner = c.req.query('owner') ?? '';
+  const org = c.req.query('org') ?? '';
+  const cf = c.req.query('cf');
+  if (!OOM_CHIPS.has(chip) || (type !== '' && !(OOM_TYPES as readonly string[]).includes(type)) || !/^[a-z0-9_]{0,63}$/.test(pds)) {
+    throw new BadRequest('Neplatný filter.');
+  }
+  if ((owner && !UUID.test(owner)) || (org && !UUID.test(org))) throw new BadRequest('Neplatný filter.');
+
+  const data = await listOom(sql, { q, chip, type, pds, owner, org, cf, page: 1 }, MAX_ROWS);
+  const defs = await listDefs(sql, ['oom']);
+  const header = [
+    'EIC', 'Názov', 'Ulica', 'Súpisné číslo', 'Orientačné číslo', 'PSČ', 'Obec', 'Zákazník', 'Firma / domácnosť', 'IČO zákazníka',
+    'Typ', 'Stav', 'PDS', 'Sadzba', 'Napäťová úroveň', 'Plánovaný objem MWh', 'Dodávka od', 'Dodávka do',
+    'Vlastník', 'Spoločnosť', 'Prechod sa zasekol', 'Plánovaná zmena', 'Prepis od', ...defs.map((d) => d.label),
+  ];
+  const date = (v: string | null) => (v ? v.split('-').reverse().map(Number).join('. ') : null);
+  const rows: Cell[][] = data.items.map((o) => [
+    o.eic, o.name, o.address_street, o.address_number_supisne, o.address_number_orientacne, o.address_zip, o.address_city,
+    o.customer_name, o.customer_type === 'B2B' ? 'firma' : 'domácnosť', o.customer_ico,
+    OOM_TYPE_LABEL[o.type] ?? o.type, OOM_STATUS_LABEL[o.status] ?? o.status, o.pds_label, o.pds_tariff_label,
+    o.voltage_level ? String(o.voltage_level).toUpperCase() : null,
+    o.planned_mwh === null ? null : Number(o.planned_mwh), date(o.supply_from), date(o.supply_to),
+    o.owner_name, o.org_name, o.switch_stuck ? 'áno' : null,
+    o.plan_kind ? `${PLAN_LABEL[o.plan_kind]} k ${date(o.plan_date)}` : o.plan_failed ? 'plán zlyhal' : null,
+    o.transferred_from_name,
+    ...defs.map((d) => customCell(d, (o.custom ?? {})[d.key])),
+  ]);
+  await sql`
+    INSERT INTO export_log (user_id, module, filter, row_count)
+    VALUES (${c.var.userId}, 'odberne_miesta', ${sql.json({ list: 'oom', q, stav: chip, typ: type, pds, owner, org, cf: cf ?? '' })}, ${rows.length})`;
+  return file('odberne-miesta', xlsx('Odberné miesta', header, rows));
 });

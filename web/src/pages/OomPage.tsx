@@ -4,10 +4,12 @@
 
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ContactsCard, DevicesCard } from '../components/oom-children';
+import { CustomFieldsCard, formatCustom, useFieldDefs, type FieldDef } from '../components/custom-fields';
+import { canEditOomData, ContactsCard, DevicesCard } from '../components/oom-children';
 import { OomActions, PLAN_DATE_LABEL, PLAN_KIND, PlanBanner } from '../components/oom-actions';
 import { BackLink, Card, Empty, ErrorState, HubSpotLink, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
+import { useMe } from '../lib/me';
 import { date, eurMonth, eurMwh, kw, mwh, num, pct, period, sumNum, text } from '../lib/format';
 import {
   dealTone,
@@ -196,6 +198,16 @@ function Overview(props: { o: OomCard; onChanged: () => void }) {
             />
           </Card>
         )}
+        <NoCustomFieldsHint />
+        <CustomFieldsCard
+          entity="oom"
+          recordId={o.id}
+          orgId={o.org_id}
+          custom={o.custom ?? {}}
+          refs={o.custom_refs}
+          canEditRecord={canEditOomData(o)}
+          onSaved={props.onChanged}
+        />
         <Card title="Spoločnosť">
           <Rows stacked rows={[['Spoločnosť skupiny', o.org_name]]} />
         </Card>
@@ -355,7 +367,7 @@ const val = (v: unknown, field?: string) => {
 
 type Event = { key: string; icon: string; title: ReactNode; at: string; meta: string };
 
-function describe(o: OomCard): Event[] {
+function describe(o: OomCard, defs: FieldDef[]): Event[] {
   const ev = o.timeline;
   const names = o.names;
   const customer = (d: Record<string, unknown>) => {
@@ -383,8 +395,20 @@ function describe(o: OomCard): Event[] {
       if (keys.length === 0) continue;
       const parts = keys.slice(0, 3).map((k) => {
         const c = change(k);
-        const name = k.startsWith('custom.') ? `vlastné pole ${k.slice(7)}` : (FIELD_LABEL[k] ?? k);
-        return `${name} ${val(c?.old, k)} → ${val(c?.new, k)}`;
+        if (k.startsWith('custom.')) {
+          // vlastné pole: názov a hodnota podľa definície (výber → názov hodnoty, áno/nie → áno/nie)
+          const def = defs.find((d) => d.key === k.slice(7));
+          const show = (v: unknown) =>
+            v === null || v === undefined
+              ? '–'
+              : !def
+                ? val(v)
+                : def.field_type === 'odkaz'
+                  ? (o.custom_refs.find((r) => r.id === v)?.label ?? '(odkaz)')
+                  : String(formatCustom(def, v));
+          return `${def?.label ?? k.slice(7)} ${show(c?.old)} → ${show(c?.new)}`;
+        }
+        return `${FIELD_LABEL[k] ?? k} ${val(c?.old, k)} → ${val(c?.new, k)}`;
       });
       out.push({
         key: e.id,
@@ -469,7 +493,7 @@ function describe(o: OomCard): Event[] {
 const OOM_STATUS_TEXT: Record<string, string> = Object.fromEntries(Object.entries(OOM_STATUS).map(([k, v]) => [k, v.label]));
 
 function TimelineCard(props: { o: OomCard }) {
-  const events = describe(props.o);
+  const events = describe(props.o, useFieldDefs('oom'));
   return (
     <Card title="Časová os">
       {events.length === 0 ? (
@@ -561,5 +585,20 @@ function ContractsTab(props: { o: OomCard }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+/** Adminovi: OOM zatiaľ nemá vlastné polia – kde ich pridať (ostatní nevidia nič). */
+function NoCustomFieldsHint() {
+  const me = useMe();
+  const defs = useApi<{ items: FieldDef[] }>('/api/custom-fields?entity=oom').data;
+  if (!me.is_admin || !defs || defs.items.length > 0) return null;
+  return (
+    <Card title="Ďalšie údaje">
+      <Empty>
+        Vlastné polia odberných miest zatiaľ nie sú. Pridáte ich v <Link to="/nastavenia/vlastne-polia">Nastaveniach → Vlastné polia</Link>{' '}
+        (záznam Odberné miesto).
+      </Empty>
+    </Card>
   );
 }
