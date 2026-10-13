@@ -16,7 +16,7 @@ export const oomImport = new Hono<AppEnv>();
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_ROWS = 5000;
 
-type Kind = 'eic' | 'customer_id' | 'ico' | 'email' | 'text' | 'zip' | 'num' | 'int' | 'date' | 'lookup' | 'enum';
+type Kind = 'eic' | 'customer_id' | 'ico' | 'email' | 'text' | 'zip' | 'num' | 'int' | 'date' | 'lookup' | 'enum' | 'bool';
 type Col = { key: string; label: string; kind: Kind; values?: Record<string, string>; hint: string; required?: boolean };
 
 const OOM_TYPE: Record<string, string> = { spotreba: 'spotreba', vyroba: 'vyroba', 'výroba': 'vyroba', sharing: 'sharing' };
@@ -26,6 +26,8 @@ const SOURCE_KIND: Record<string, string> = {
   bioplyn: 'bioplyn', biomasa: 'biomasa', plyn: 'plyn', 'plynová elektráreň': 'plyn', vietor: 'vietor',
   'veterná elektráreň': 'vietor', 'ostatné oze': 'ostatne_oze', ostatne_oze: 'ostatne_oze',
 };
+/** Cenová regulácia ANO / NIE (0019); prázdna bunka = bez zmeny. */
+const YES_NO: Record<string, boolean> = { ano: true, 'áno': true, nie: false };
 const SOURCE_CATEGORY: Record<string, string> = {
   'malý zdroj': 'maly_zdroj', 'maly zdroj': 'maly_zdroj', 'lokálny zdroj': 'lokalny_zdroj', 'lokalny zdroj': 'lokalny_zdroj',
   'výrobný zdroj': 'vyrobny_zdroj', 'vyrobny zdroj': 'vyrobny_zdroj',
@@ -58,7 +60,7 @@ export const OOM_COLUMNS: Col[] = [
   { key: 'planned_consumption_nt_mwh', label: 'Plánovaná spotreba NT [MWh]', kind: 'num', hint: '' },
   { key: 'planned_feed_in_mwh', label: 'Plánovaný výkup [MWh]', kind: 'num', hint: 'pri výrobe' },
   { key: 'supply_from', label: 'Dodávka od', kind: 'date', hint: 'dátum (1. 1. 2027); kroky prechodu sa zadávajú na karte OOM' },
-  { key: 'price_regulation', label: 'Cenová regulácia', kind: 'text', hint: '' },
+  { key: 'price_regulation', label: 'Cenová regulácia', kind: 'bool', hint: 'ANO alebo NIE (domácnosť: nárok na energopomoc; firma: cenník pre malé podniky)' },
   { key: 'excise_tax', label: 'Spotrebná daň', kind: 'text', hint: '' },
   { key: 'billing_period', label: 'Fakturačné obdobie', kind: 'lookup', hint: 'Mesačne, Ročne, Ročne s odkladom k termínu odpočtu' },
   { key: 'advance_payment_method', label: 'Zálohy', kind: 'lookup', hint: 'napr. Bez záloh, Mesačné zálohy' },
@@ -90,6 +92,8 @@ async function customDefs(sql: Sql, org: string): Promise<CustomDef[]> {
 export const customLabel = (d: { label: string }) =>
   OOM_COLUMNS.some((c) => norm(c.label) === norm(d.label)) ? `${d.label} (vlastné pole)` : d.label;
 
+const yesNo = (v: string | null) => (v === 'true' ? 'ANO' : v === 'false' ? 'NIE' : v);
+
 async function canImport(sql: Sql): Promise<boolean> {
   const [r] = await sql<{ ok: boolean }[]>`SELECT crm_can_import('odberne_miesta') AS ok`;
   return !!r?.ok;
@@ -105,7 +109,7 @@ type ParsedRow = {
   customer_id: string | null;
   ico: string | null;
   email: string | null;
-  fields: Record<string, string | number>;
+  fields: Record<string, string | number | boolean>;
   custom: Record<string, string | number>;
   parse_errors: string[];
 };
@@ -236,6 +240,12 @@ function parseWorkbook(bytes: Uint8Array, defs: CustomDef[]): Parsed {
           else out.parse_errors.push(`${col.label}: neplatný dátum „${text}“.`);
           break;
         }
+        case 'bool': {
+          const b = YES_NO[norm(text)];
+          if (b === undefined) out.parse_errors.push(`${col.label}: ANO alebo NIE, nie „${text}“.`);
+          else out.fields[col.key] = b;
+          break;
+        }
         case 'enum': {
           const v = col.values![norm(text)];
           if (v) out.fields[col.key] = v;
@@ -354,7 +364,14 @@ oomImport.post('/oom-import/preview', async (c) => {
     ignored_columns: parsed.ignored,
     counts: res.counts,
     timing_ms: { citanie: t1 - t0, kontrola: Date.now() - t1 },
-    rows: (res.rows ?? []).map((r) => ({ ...r, changes: (r.changes ?? []).map((ch) => ({ ...ch, label: labels.get(ch.field) ?? ch.field })) })),
+    rows: (res.rows ?? []).map((r) => ({
+      ...r,
+      changes: (r.changes ?? []).map((ch) => ({
+        ...ch,
+        ...(ch.field === 'price_regulation' ? { old: yesNo(ch.old), new: yesNo(ch.new) } : {}),
+        label: labels.get(ch.field) ?? ch.field,
+      })),
+    })),
   });
 });
 

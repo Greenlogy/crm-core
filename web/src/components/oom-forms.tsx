@@ -50,6 +50,7 @@ function changed(initial: Values, now: Values): Record<string, unknown> {
   for (const [k, v] of Object.entries(now)) {
     if (v === initial[k]) continue;
     if (k === 'phases') out[k] = v === '' ? null : Number(v);
+    else if (k === 'price_regulation') out[k] = v === '' ? null : v === 'true';
     else out[k] = v === '' ? null : v;
   }
   return out;
@@ -185,7 +186,11 @@ function OomFields(props: { v: Values; set: (k: string, val: string | boolean) =
         </Section>
       )}
       <Section title="Fakturácia">
-        {text('price_regulation', 'Cenová regulácia', { max: 80 })}
+        {select('price_regulation', 'Cenová regulácia', [
+          { value: '', label: '– nevyplnené' },
+          { value: 'true', label: 'ANO' },
+          { value: 'false', label: 'NIE' },
+        ], 'domácnosť: nárok na energopomoc; firma: cenník pre malé podniky')}
         {text('excise_tax', 'Spotrebná daň', { max: 80 })}
         {select('billing_period', 'Fakturačné obdobie', opts(options?.fakturacne_obdobie, String(v.billing_period)))}
         {select('advance_payment_method', 'Zálohy', opts(options?.sposob_zaloh, String(v.advance_payment_method)))}

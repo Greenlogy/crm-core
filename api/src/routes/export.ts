@@ -218,7 +218,7 @@ exportRoutes.get('/oom/export', async (c) => {
       phases: num(d.phases), breaker_a: num(d.breaker_a), reserved_capacity_kw: num(d.reserved_capacity_kw),
       max_reserved_capacity_kw: num(d.max_reserved_capacity_kw), capacity_reservation_method: d.capacity_reservation_method,
       planned_consumption_vt_mwh: num(d.planned_consumption_vt_mwh), planned_consumption_nt_mwh: num(d.planned_consumption_nt_mwh),
-      planned_feed_in_mwh: num(d.planned_feed_in_mwh), supply_from: date(o.supply_from), price_regulation: d.price_regulation,
+      planned_feed_in_mwh: num(d.planned_feed_in_mwh), supply_from: date(o.supply_from), price_regulation: d.price_regulation === null || d.price_regulation === undefined ? null : d.price_regulation ? 'ANO' : 'NIE',
       excise_tax: d.excise_tax, billing_period: d.billing_l, advance_payment_method: d.advance_l,
       advance_payment_pct: num(d.advance_payment_pct), advance_payment_eur: num(d.advance_payment_eur),
       source_kind: d.source_kind ? SOURCE_KIND_L[d.source_kind] : null, source_category: d.source_category ? CATEGORY_L[d.source_category] : null,

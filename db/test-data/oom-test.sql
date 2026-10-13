@@ -141,7 +141,7 @@ UPDATE oom SET supply_from = '2027-01-01', switch_notice_sent_on = '2026-10-05' 
 SELECT pg_temp.oom(15, 108, NULL, 'sharing', 'aktivne', 'Sklad – zdieľanie', 'Nitrianska 5', 'Nitra', '94901', 'zsd', 'zsd_d3', '2025-01-01', 21, NULL, 4.5);
 
 -- Zbúraná: OOM zrušené 31. 12. 2025 (Zrušený zákazník, archív)
-SELECT pg_temp.oom(16, 109, NULL, 'spotreba', 'aktivne', 'Stará hala', 'Staničná 9', 'Topoľčany', '95501', 'zsd', 'zsd_c1', '2022-01-01', 85, 20);
+SELECT pg_temp.oom(16, 109, NULL, 'spotreba', 'aktivne', 'Stará hala', 'Staničná 9', 'Topoľčany', '95501', 'zsd', 'zsd_c2_x3', '2022-01-01', 85, 20);
 SELECT oom_set_status(pg_temp.id(16), 'zrusene', '2025-12-31');
 
 -- Malý: dom (spotreba) a FVE na dome (výroba → domácnosť výrobca), zariadenia

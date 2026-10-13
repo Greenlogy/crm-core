@@ -175,7 +175,7 @@ function Overview(props: { o: OomCard; onChanged: () => void }) {
           <Rows
             stacked
             rows={[
-              ['Cenová regulácia', text(o.price_regulation)],
+              ['Cenová regulácia', regulation(o.price_regulation)],
               ['Spotrebná daň', text(o.excise_tax)],
               ['Fakturačné obdobie', text(o.billing_period_label)],
               ['Zálohy', text(o.advance_payment_method_label)],
@@ -357,7 +357,12 @@ const VALUE_LABEL: Record<string, Record<string, string>> = {
   type: Object.fromEntries(Object.entries(OOM_TYPE)),
 };
 
+/** Cenová regulácia: ANO / NIE / nevyplnené (0019); v audite môže byť aj text pred prevodom. */
+const regulation = (v: unknown) =>
+  v === true || v === 'true' ? 'ANO' : v === false || v === 'false' ? 'NIE' : v === null || v === undefined || v === '' ? '–' : String(v);
+
 const val = (v: unknown, field?: string) => {
+  if (field === 'price_regulation') return regulation(v);
   if (v === null || v === undefined || v === '') return '–';
   if (field && typeof v === 'string' && VALUE_LABEL[field]?.[v]) return VALUE_LABEL[field][v];
   if (typeof v === 'boolean') return v ? 'áno' : 'nie';

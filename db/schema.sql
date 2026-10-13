@@ -457,35 +457,45 @@ CREATE TYPE public.price_direction AS ENUM (
 
 
 --
--- Name: pricing_model; Type: TYPE; Schema: public; Owner: -
+-- Name: price_model; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.pricing_model AS ENUM (
+CREATE TYPE public.price_model AS ENUM (
+    'cennik',
     'fix',
-    'spot_aditiv',
-    'index_spot'
+    'spot_plus_eur',
+    'spot_minus_eur',
+    'spot_minus_pct',
+    'cena_diela'
 );
 
 
 --
--- Name: product_kind; Type: TYPE; Schema: public; Owner: -
+-- Name: product_category; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.product_kind AS ENUM (
-    'dodavka',
-    'vykup',
-    'sluzba',
+CREATE TYPE public.product_category AS ENUM (
+    'dodavka_domacnost',
+    'dodavka_maly_podnik',
+    'dodavka_firma',
+    'vykup_firma',
+    'velkoobchod',
+    'zem',
+    'vbattery',
+    'viwa',
+    'instalacia_fve',
     'poplatok'
 );
 
 
 --
--- Name: product_unit; Type: TYPE; Schema: public; Owner: -
+-- Name: product_status; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.product_unit AS ENUM (
-    'eur_mwh',
-    'eur_mesiac'
+CREATE TYPE public.product_status AS ENUM (
+    'predava_sa',
+    'dobieha',
+    'ukonceny'
 );
 
 
@@ -542,6 +552,18 @@ CREATE TYPE public.switch_message_type AS ENUM (
 CREATE TYPE public.switch_segment AS ENUM (
     'domacnost',
     'organizacia'
+);
+
+
+--
+-- Name: tariff_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.tariff_type AS ENUM (
+    'jednotarif',
+    'dvojtarif',
+    'nemerany',
+    'netyka_sa'
 );
 
 
@@ -2244,7 +2266,7 @@ CREATE TABLE public.oom (
     reserved_capacity_kw numeric(12,3),
     max_reserved_capacity_kw numeric(12,3),
     capacity_reservation_method text,
-    price_regulation text,
+    price_regulation boolean,
     excise_tax text,
     billing_period text,
     advance_payment_method text,
@@ -2321,6 +2343,13 @@ COMMENT ON COLUMN public.oom.pds_tariff IS 'kód z číselníka sadzba_distribuc
 --
 
 COMMENT ON COLUMN public.oom.metering_type IS 'kód z číselníka typ_merania';
+
+
+--
+-- Name: COLUMN oom.price_regulation; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.price_regulation IS 'cenová regulácia: true = ANO, false = NIE, NULL = nevyplnené; domácnosť = nárok na energopomoc, firma = cenník pre malé podniky';
 
 
 --
@@ -3510,6 +3539,19 @@ $$;
 
 
 --
+-- Name: oom_tariff_scope(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_tariff_scope(p_pds text) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce((SELECT code FROM tariff_scope WHERE pds_code = p_pds),
+                  (SELECT code FROM tariff_scope WHERE pds_code IS NULL))
+$$;
+
+
+--
 -- Name: oom_transfer(uuid, uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3614,6 +3656,86 @@ $$;
 
 
 --
+-- Name: product_candidates(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.product_candidates(p_oom_id uuid) RETURNS TABLE(product_id uuid, rank smallint, is_only boolean, is_addon boolean)
+    LANGUAGE sql STABLE
+    AS $$
+  WITH o AS (
+    SELECT o.org_id, o.price_regulation,
+           coalesce(o.planned_consumption_nt_mwh, 0) > 0 AS has_nt,
+           CASE WHEN o.person_id IS NOT NULL THEN 'domacnost' ELSE 'firma' END::customer_segment AS segment,
+           oom_tariff_scope(o.pds) AS scope,
+           tariff_base(o.pds_tariff, o.pds) AS tariff
+      FROM oom o
+     WHERE o.id = p_oom_id AND o.pds IS NOT NULL AND o.pds_tariff IS NOT NULL
+  ), c AS (
+    SELECT p.id, p.category = 'zem' AS is_addon, p.sort_order, p.name,
+           CASE WHEN p.category = 'zem' THEN 1
+                WHEN (p.tariff_type = 'dvojtarif') = o.has_nt THEN 1
+                ELSE 2 END::smallint AS rank
+      FROM o
+      JOIN product p ON p.org_id = o.org_id AND p.status = 'predava_sa' AND p.segment = o.segment
+                    AND (p.price_regulation IS NULL OR o.price_regulation IS NULL
+                         OR p.price_regulation = o.price_regulation)
+     WHERE EXISTS (SELECT 1 FROM product_tariff t
+                    WHERE t.product_id = p.id AND t.scope_code = o.scope AND t.tariff_code = o.tariff)
+  )
+  SELECT id, rank, NOT is_addon AND count(*) FILTER (WHERE NOT is_addon) OVER () = 1, is_addon
+    FROM c
+   ORDER BY is_addon, rank, sort_order, name
+$$;
+
+
+--
+-- Name: product_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.product_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Produkt sa nemaže, iba ukončí (stav Ukončený).' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.code <> OLD.code OR NEW.org_id <> OLD.org_id THEN
+    RAISE EXCEPTION 'Kód a spoločnosť produktu sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: product_tariff_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.product_tariff_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_scope tariff_scope;
+  v_org   uuid := (SELECT org_id FROM product WHERE id = NEW.product_id);
+BEGIN
+  SELECT * INTO v_scope FROM tariff_scope WHERE code = NEW.scope_code;
+  IF NOT EXISTS (
+       SELECT 1 FROM lookup_value v
+        WHERE v.list_code = 'sadzba_distribucie' AND v.hidden_at IS NULL
+          AND (v.org_id IS NULL OR v.org_id = v_org)
+          AND tariff_base(v.code, v.parent_code) = NEW.tariff_code
+          AND CASE WHEN v_scope.pds_code IS NOT NULL THEN v.parent_code = v_scope.pds_code
+                   ELSE v.parent_code NOT IN (SELECT pds_code FROM tariff_scope WHERE pds_code IS NOT NULL) END) THEN
+    RAISE EXCEPTION 'Sadzba „%“ nie je v číselníku pre rozsah %.', NEW.tariff_code, v_scope.name
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: record_org_fill(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3665,6 +3787,35 @@ CREATE FUNCTION public.set_updated_at() RETURNS trigger
     AS $$
 BEGIN
   NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: tariff_base(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.tariff_base(p_code text, p_parent text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN left(p_code, length(p_parent) + 1) = p_parent || '_' THEN substr(p_code, length(p_parent) + 2) END
+$$;
+
+
+--
+-- Name: tariff_scope_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.tariff_scope_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.pds_code IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM lookup_value WHERE list_code = 'pds' AND code = NEW.pds_code) THEN
+    RAISE EXCEPTION 'PDS „%“ nie je v číselníku.', NEW.pds_code USING ERRCODE = 'foreign_key_violation';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -5383,32 +5534,103 @@ CREATE TABLE public.product (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     code text NOT NULL,
     name text NOT NULL,
-    kind public.product_kind NOT NULL,
-    pricing_model public.pricing_model,
-    unit public.product_unit NOT NULL,
-    list_price numeric(12,4),
-    valid_from date,
-    valid_to date,
     hubspot_product_id text,
     hubspot_contract_codes text[],
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT product_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from)))
+    org_id uuid NOT NULL,
+    category public.product_category NOT NULL,
+    segment public.customer_segment NOT NULL,
+    vat_rate numeric(5,2),
+    tariff_type public.tariff_type DEFAULT 'netyka_sa'::public.tariff_type NOT NULL,
+    price_models public.price_model[] NOT NULL,
+    price_regulation boolean,
+    status public.product_status DEFAULT 'predava_sa'::public.product_status NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    CONSTRAINT product_cena_diela_check CHECK ((('cena_diela'::public.price_model = ANY (price_models)) = (category = 'instalacia_fve'::public.product_category))),
+    CONSTRAINT product_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,60}$'::text)),
+    CONSTRAINT product_price_models_check CHECK (((cardinality(price_models) >= 1) AND (array_position(price_models, NULL::public.price_model) IS NULL))),
+    CONSTRAINT product_segment_check CHECK ((segment = ANY (ARRAY['domacnost'::public.customer_segment, 'firma'::public.customer_segment]))),
+    CONSTRAINT product_vat_check CHECK (((vat_rate >= (0)::numeric) AND (vat_rate <= (100)::numeric))),
+    CONSTRAINT product_vat_required CHECK (((vat_rate IS NOT NULL) OR (category = 'instalacia_fve'::public.product_category)))
 );
 
 
 --
--- Name: COLUMN product.pricing_model; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE product; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.product.pricing_model IS 'pri SPOT produktoch je aditív v contract_price.additive_eur_mwh';
+COMMENT ON TABLE public.product IS 'katalóg produktov; ceny sú v cenníku (0020); produkt sa nemaže, iba ukončí (status)';
 
 
 --
--- Name: COLUMN product.list_price; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN product.code; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.product.list_price IS 'v jednotke podľa unit (€/MWh alebo €/mesiac)';
+COMMENT ON COLUMN public.product.code IS 'nemenný kód, napr. green_dd3_nie';
+
+
+--
+-- Name: COLUMN product.vat_rate; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.vat_rate IS 'sadzba DPH v % (elektrina a ZEM 19, služby 23); NULL iba inštalácia FVE (DPH podľa diela)';
+
+
+--
+-- Name: COLUMN product.tariff_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.tariff_type IS 'jednotarif / dvojtarif / nemeraný / netýka sa; poradie návrhu produktov podľa plánovanej spotreby NT';
+
+
+--
+-- Name: COLUMN product.price_models; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.price_models IS 'povolené cenové modely; individuálna cena na zmluve (modul 4) má práve jeden';
+
+
+--
+-- Name: COLUMN product.price_regulation; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.price_regulation IS 'NULL = nezáleží; true = ANO (domácnosť s energopomocou, malý podnik), false = NIE';
+
+
+--
+-- Name: COLUMN product.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.status IS 'predava_sa; dobieha = existujúce zmluvy bežia, nové nie; ukonceny';
+
+
+--
+-- Name: product_tariff; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_tariff (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    product_id uuid NOT NULL,
+    scope_code text NOT NULL,
+    tariff_code text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE product_tariff; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.product_tariff IS 'párovanie produkt ↔ sadzba distribúcie v rozsahu PDS (obrazovka 24)';
+
+
+--
+-- Name: COLUMN product_tariff.tariff_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product_tariff.tariff_code IS 'kód sadzby bez PDS, napr. d3, c2_x3 (tariff_base)';
 
 
 --
@@ -5503,6 +5725,35 @@ CREATE TABLE public.sync_run (
     records_updated integer,
     errors jsonb
 );
+
+
+--
+-- Name: tariff_scope; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.tariff_scope (
+    code text NOT NULL,
+    name text NOT NULL,
+    pds_code text,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tariff_scope_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,40}$'::text))
+);
+
+
+--
+-- Name: TABLE tariff_scope; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.tariff_scope IS 'rozsah párovania sadzieb: PDS s vlastným párovaním (pds_code) alebo práve jeden spoločný rozsah (pds_code NULL)';
+
+
+--
+-- Name: COLUMN tariff_scope.pds_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.tariff_scope.pds_code IS 'kód z číselníka pds; PDS s vlastným rozsahom nikdy nepoužije spoločné riadky';
 
 
 --
@@ -6305,6 +6556,22 @@ ALTER TABLE ONLY public.product
 
 
 --
+-- Name: product_tariff product_tariff_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_tariff
+    ADD CONSTRAINT product_tariff_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_tariff product_tariff_product_id_scope_code_tariff_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_tariff
+    ADD CONSTRAINT product_tariff_product_id_scope_code_tariff_code_key UNIQUE (product_id, scope_code, tariff_code);
+
+
+--
 -- Name: referral referral_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6374,6 +6641,22 @@ ALTER TABLE ONLY public.supplier_switch
 
 ALTER TABLE ONLY public.sync_run
     ADD CONSTRAINT sync_run_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tariff_scope tariff_scope_pds_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tariff_scope
+    ADD CONSTRAINT tariff_scope_pds_code_key UNIQUE (pds_code);
+
+
+--
+-- Name: tariff_scope tariff_scope_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tariff_scope
+    ADD CONSTRAINT tariff_scope_pkey PRIMARY KEY (code);
 
 
 --
@@ -7073,6 +7356,20 @@ CREATE INDEX product_hubspot_product_id_idx ON public.product USING btree (hubsp
 
 
 --
+-- Name: product_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX product_org_id_idx ON public.product USING btree (org_id);
+
+
+--
+-- Name: product_tariff_lookup_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX product_tariff_lookup_idx ON public.product_tariff USING btree (scope_code, tariff_code);
+
+
+--
 -- Name: referral_deal_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7105,6 +7402,13 @@ CREATE INDEX supplier_switch_oom_id_idx ON public.supplier_switch USING btree (o
 --
 
 CREATE INDEX sync_run_started_at_idx ON public.sync_run USING btree (source, started_at);
+
+
+--
+-- Name: tariff_scope_one_common; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX tariff_scope_one_common ON public.tariff_scope USING btree (((pds_code IS NULL))) WHERE (pds_code IS NULL);
 
 
 --
@@ -7451,6 +7755,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.product FOR 
 
 
 --
+-- Name: product_tariff trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.product_tariff FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: referral trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -7476,6 +7787,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.sla_record F
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.supplier_switch FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: tariff_scope trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.tariff_scope FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -7532,6 +7850,20 @@ CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.oom_contact FOR EACH 
 --
 
 CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.oom_customer FOR EACH ROW EXECUTE FUNCTION public.oom_customer_check();
+
+
+--
+-- Name: product_tariff trg_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE OF scope_code, tariff_code ON public.product_tariff FOR EACH ROW EXECUTE FUNCTION public.product_tariff_check();
+
+
+--
+-- Name: tariff_scope trg_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.tariff_scope FOR EACH ROW EXECUTE FUNCTION public.tariff_scope_check();
 
 
 --
@@ -7644,6 +7976,13 @@ CREATE TRIGGER trg_guard BEFORE DELETE ON public.custom_field_option FOR EACH RO
 --
 
 CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.lookup_value_guard();
+
+
+--
+-- Name: product trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.product FOR EACH ROW EXECUTE FUNCTION public.product_guard();
 
 
 --
@@ -8137,6 +8476,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.product FOR EACH ROW E
 
 
 --
+-- Name: product_tariff trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.product_tariff FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: referral trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8162,6 +8508,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.sla_record FOR EACH RO
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.supplier_switch FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: tariff_scope trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.tariff_scope FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -8917,6 +9270,30 @@ ALTER TABLE ONLY public.pipeline_stage_required_field
 
 
 --
+-- Name: product product_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product
+    ADD CONSTRAINT product_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: product_tariff product_tariff_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_tariff
+    ADD CONSTRAINT product_tariff_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+
+
+--
+-- Name: product_tariff product_tariff_scope_code_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_tariff
+    ADD CONSTRAINT product_tariff_scope_code_fkey FOREIGN KEY (scope_code) REFERENCES public.tariff_scope(code);
+
+
+--
 -- Name: referral referral_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9355,6 +9732,73 @@ ALTER TABLE public.pipeline_stage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pipeline_stage_required_field ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: product; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.product ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: product product_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_insert ON public.product FOR INSERT WITH CHECK ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: product product_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_read ON public.product FOR SELECT USING ((( SELECT public.crm_session_ok() AS crm_session_ok) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: product_tariff; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.product_tariff ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: product_tariff product_tariff_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_tariff_delete ON public.product_tariff FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: product_tariff product_tariff_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_tariff_insert ON public.product_tariff FOR INSERT WITH CHECK ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (EXISTS ( SELECT 1
+   FROM public.product p
+  WHERE (p.id = product_tariff.product_id)))));
+
+
+--
+-- Name: product_tariff product_tariff_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_tariff_read ON public.product_tariff FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.product p
+  WHERE (p.id = product_tariff.product_id))));
+
+
+--
+-- Name: product_tariff product_tariff_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_tariff_update ON public.product_tariff FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (EXISTS ( SELECT 1
+   FROM public.product p
+  WHERE (p.id = product_tariff.product_id)))));
+
+
+--
+-- Name: product product_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY product_update ON public.product FOR UPDATE USING ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])))) WITH CHECK ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
 -- Name: org_day_off settings_day_off_kind_del; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -9422,6 +9866,13 @@ CREATE POLICY settings_delete ON public.org_work_hours FOR DELETE USING (( SELEC
 --
 
 CREATE POLICY settings_delete ON public.pipeline_stage_required_field FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: tariff_scope settings_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_delete ON public.tariff_scope FOR DELETE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer));
 
 
 --
@@ -9527,6 +9978,13 @@ CREATE POLICY settings_insert ON public.pipeline_stage FOR INSERT WITH CHECK (( 
 --
 
 CREATE POLICY settings_insert ON public.pipeline_stage_required_field FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
+-- Name: tariff_scope settings_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_insert ON public.tariff_scope FOR INSERT WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
 
 
 --
@@ -9670,6 +10128,13 @@ CREATE POLICY settings_read ON public.pipeline_stage_required_field FOR SELECT U
 
 
 --
+-- Name: tariff_scope settings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_read ON public.tariff_scope FOR SELECT USING (( SELECT public.crm_session_ok() AS crm_session_ok));
+
+
+--
 -- Name: team settings_read; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -9789,6 +10254,13 @@ CREATE POLICY settings_update ON public.pipeline_stage_required_field FOR UPDATE
 
 
 --
+-- Name: tariff_scope settings_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY settings_update ON public.tariff_scope FOR UPDATE USING (( SELECT public.crm_settings_writer() AS crm_settings_writer)) WITH CHECK (( SELECT public.crm_settings_writer() AS crm_settings_writer));
+
+
+--
 -- Name: team settings_update; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -9807,6 +10279,12 @@ CREATE POLICY settings_update ON public.team_permission FOR UPDATE USING (( SELE
 --
 
 ALTER TABLE public.supplier_switch ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tariff_scope; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.tariff_scope ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: team; Type: ROW SECURITY; Schema: public; Owner: -
@@ -9849,4 +10327,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0015'),
     ('0016'),
     ('0017'),
-    ('0018');
+    ('0018'),
+    ('0019');

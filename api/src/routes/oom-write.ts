@@ -127,7 +127,7 @@ const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cas
   reserved_capacity_kw: { kind: 'num', label: 'Rezervovaná kapacita' },
   max_reserved_capacity_kw: { kind: 'num', label: 'Max. rezervovaná kapacita' },
   capacity_reservation_method: { kind: 'text', label: 'Spôsob rezervácie kapacity', max: 80 },
-  price_regulation: { kind: 'text', label: 'Cenová regulácia', max: 80 },
+  price_regulation: { kind: 'bool', label: 'Cenová regulácia' },   // ANO / NIE / null = nevyplnené (0019)
   excise_tax: { kind: 'text', label: 'Spotrebná daň', max: 80 },
   billing_period: { kind: 'code', label: 'Fakturačné obdobie' },
   advance_payment_method: { kind: 'code', label: 'Zálohy' },

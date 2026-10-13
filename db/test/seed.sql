@@ -68,9 +68,11 @@ INSERT INTO oom (id, company_id, person_id, eic, type, status, name, address_cit
 SELECT oom_set_status('00000000-0000-4000-8000-000000000304', 'zrusene', '2025-06-30');
 
 -- Produkty
-INSERT INTO product (id, code, name, kind, pricing_model, unit, list_price) VALUES
-  ('00000000-0000-4000-8000-000000000401', 'TEST_E_1T_FIX', 'Test elektrina 1T FIX', 'dodavka', 'fix', 'eur_mwh', 189.0000),
-  ('00000000-0000-4000-8000-000000000402', 'TEST_E_OM', 'Test poplatok za OM', 'poplatok', NULL, 'eur_mesiac', 3.0000);
+INSERT INTO product (id, org_id, code, name, category, segment, vat_rate, price_models) VALUES
+  ('00000000-0000-4000-8000-000000000401', crm_default_org(), 'test_dodavka_b2b', 'Test dodávka B2B',
+   'dodavka_firma', 'firma', 19.00, '{fix,spot_plus_eur}'),
+  ('00000000-0000-4000-8000-000000000402', crm_default_org(), 'test_poplatok_om_b2b', 'Test mesačná platba za OM – firmy',
+   'poplatok', 'firma', 19.00, '{cennik}');
 
 -- Pipelines a štádiá
 INSERT INTO pipeline (id, name, kind) VALUES

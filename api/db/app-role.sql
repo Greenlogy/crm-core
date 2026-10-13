@@ -42,6 +42,8 @@ REVOKE INSERT, UPDATE ON app_setting FROM crm_app;     -- nastavenia systému me
 GRANT DELETE ON company_contact, deal_contact, deal_oom, offer_item, oom_device, oom_contact,
   app_user_org, org_day_off, org_logo, org_work_hours, custom_field_team, pipeline_stage_required_field,
   custom_field_section TO crm_app;
+-- Párovanie produkt ↔ sadzba a rozsahy PDS (0019; RLS: iba admin). Produkt sa nemaže nikdy.
+GRANT DELETE ON product_tariff, tariff_scope TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

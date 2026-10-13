@@ -327,7 +327,7 @@ export type OomCard = {
   reserved_capacity_kw: Num;
   max_reserved_capacity_kw: Num;
   capacity_reservation_method: string | null;
-  price_regulation: string | null;
+  price_regulation: boolean | null;
   excise_tax: string | null;
   billing_period: string | null;
   billing_period_label: string | null;

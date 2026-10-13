@@ -48,7 +48,7 @@ Nerieši ceny a zmluvy (modul 4), produkty (modul 3) ani správy XML z OKTE a PD
 | --- | --- | --- |
 | Základ | EIC, typ, názov, adresa (ulica, súpisné a orientačné číslo, obec, PSČ) | EIC, typ, adresa |
 | Distribúcia | PDS, číslo OP, sadzba distribúcie, napäťová úroveň, typ merania, počet fáz, istič [A], rezervovaná kapacita [kW], maximálna rezervovaná kapacita [kW], interval / spôsob rezervácie kapacity | PDS, napäťová úroveň, sadzba |
-| Fakturácia | cenová regulácia, spotrebná daň, fakturačné obdobie, spôsob a výška záloh | – |
+| Fakturácia | cenová regulácia (ANO / NIE / nevyplnené – od `0019`, modul 3), spotrebná daň, fakturačné obdobie, spôsob a výška záloh | – |
 | Objemy | plánovaná spotreba VT a NT [MWh], plánovaný výkup [MWh] | plánovaná spotreba (pri spotrebe), plánovaný výkup (pri výrobe) |
 | Dodávka | dodávka od – do (do = neurčito, ak prázdne) | dodávka od |
 
