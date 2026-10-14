@@ -62,6 +62,10 @@ REVOKE UPDATE ON market_price_daily FROM crm_app;
 REVOKE INSERT, UPDATE ON contract, contract_oom, contract_price FROM crm_app;
 GRANT UPDATE (previous_contract_id, related_contract_id, close_reason, note, custom) ON contract TO crm_app;
 GRANT DELETE ON price_exception TO crm_app;
+-- 0026: importy zmlúv zapisuje iba funkcia importu (contract_import_run, vlastník); aplikácia ich iba číta.
+-- Balík VIWA zadá Servis (otázka 20), obchodníka zmluvy zmení vedenie – stráži contract_guard.
+REVOKE INSERT, UPDATE ON contract_import, contract_import_change FROM crm_app;
+GRANT UPDATE (viwa_package, owner_id) ON contract TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

@@ -453,47 +453,87 @@ export type OomList = {
 
 export type OomFilters = { pds: { code: string; label: string }[]; owners: { id: string; name: string }[] };
 
-export type ContractCard = {
+export type ContractListItem = {
   id: string;
-  number: string | null;
-  /** vypočítaný stav (CONTRACT_STATUS) */
-  status: string;
+  number: string;
   type: string;
   phase: string;
-  auto_prolong: boolean;
+  /** vypočítaný stav (CONTRACT_STATUS) */
+  state: string;
   valid_from: string | null;
   valid_to: string | null;
   effective_to: string | null;
-  signed_on: string | null;
-  qty_mwh: Num;
-  flags: string[];
-  payment_terms_days: number | null;
-  consumption_tolerance: Num;
-  advance_payment_pct: Num;
-  segment: string | null;
+  crm_valid_to: string | null;
+  auto_prolong: boolean;
+  customer_kind: 'company' | 'person';
+  customer_name: string | null;
   company_id: string | null;
   person_id: string | null;
-  customer_kind: 'company' | 'person';
-  customer_name: string;
-  deal_name: string | null;
-  deal_hubspot_id: string | null;
+  owner_id: string | null;
   owner_name: string | null;
-  pipeline: string | null;
-  stage: string | null;
-  ooms: Pick<
-    OomRow,
-    'id' | 'eic' | 'type' | 'status' | 'address_street' | 'address_city' | 'planned_consumption_vt_mwh' | 'planned_consumption_nt_mwh' | 'planned_feed_in_mwh'
-  >[];
-  prices: PriceRow[];
-  purchases: {
-    id: string;
-    product_code: string;
-    delivery_year: number;
-    priced_on: string;
-    price_eur_mwh: Num;
-    cockpit_ref: string | null;
-  }[];
+  oom_count: number;
+  qty_mwh: Num;
+  flags: string[];
+  org_id: string;
+  org_name: string;
 };
+export type ContractList = {
+  page: number;
+  pageSize: number;
+  total: number;
+  counts: Record<string, number>;
+  items: ContractListItem[];
+};
+
+export type ContractCard = ContractListItem & {
+  op_id: string | null;
+  signed_on: string | null;
+  small_business: boolean;
+  list_price: boolean;
+  viwa_package: string | null;
+  close_reason: string | null;
+  created_by_name: string | null;
+  note: string | null;
+  op_updated_at: string | null;
+  previous_contract_id: string | null;
+  previous_number: string | null;
+  related_contract_id: string | null;
+  related_number: string | null;
+  related_type: string | null;
+  can_edit: boolean;
+  can_change_owner: boolean;
+  ooms: {
+    id: string;
+    eic: string;
+    type: string;
+    status: string;
+    name: string | null;
+    address_street: string | null;
+    address_number_orientacne: string | null;
+    address_city: string | null;
+    voltage_level: string | null;
+    breaker_a: Num;
+    public_lighting: boolean;
+    price_regulation: boolean | null;
+    tariff_label: string | null;
+    product_name: string | null;
+    program_name: string | null;
+    qty_vt_mwh: Num;
+    qty_nt_mwh: Num;
+    source_power_kw: Num;
+    valid_from: string | null;
+    valid_to: string | null;
+    op_valid_to: string | null;
+    is_binding: boolean;
+    successor_id: string | null;
+    successor_number: string | null;
+  }[];
+  prices: (PriceRow & { product_name: string | null; op_product_name: string | null; source: string; price_list_name: string | null; price_list_version: string | null })[];
+  flag_rows: ContractFlagRow[];
+  imports: { import_id: string; action: 'nova' | 'zmena'; summary: string; created_at: string; op_file_name: string | null; xm_file_name: string | null; user_name: string | null }[];
+  predecessors: { id: string; number: string }[];
+};
+export type ContractFlagRow = { id: string; code: string; year: number | null; detail: string | null; raised_at: string; resolved_at: string | null; resolved_by_name: string | null };
 
 export class ApiError extends Error {
   status: number;

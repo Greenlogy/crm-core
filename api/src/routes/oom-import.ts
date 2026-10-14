@@ -165,6 +165,23 @@ function parseWorkbook(bytes: Uint8Array, defs: CustomDef[]): Parsed {
     }
     return -1;
   };
+  // export z XM Trade alebo Office portálu patrí do importu zmlúv (Zmluvy → Import), nie do šablóny OOM
+  const firstRow = (ws: XLSX.WorkSheet): string[] => {
+    if (!ws['!ref']) return [];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const out: string[] = [];
+    for (let c = range.s.c; c <= Math.min(range.e.c, range.s.c + 120); c++) out.push(norm(cellText(ws[XLSX.utils.encode_cell({ r: range.s.r, c })])));
+    return out;
+  };
+  for (const n of wb.SheetNames) {
+    const h = firstRow(wb.Sheets[n]);
+    if (h.includes('ean / eic om')) {
+      throw new BadRequest('Toto je export z XM Trade – nahrajte ho v Zmluvy → Import z Office portálu (pri prvom importe spolu s exportom zmlúv).');
+    }
+    if (h.includes('[zmluvahlavicka_cislo]') || h.includes('zmluvahlavicka_cislo')) {
+      throw new BadRequest('Toto je export zmlúv z Office portálu – nahrajte ho v Zmluvy → Import z Office portálu.');
+    }
+  }
   const name =
     wb.SheetNames.find((n) => norm(n) === 'oom' && headerRow(wb.Sheets[n]) >= 0) ??
     wb.SheetNames.find((n) => headerRow(wb.Sheets[n]) >= 0);

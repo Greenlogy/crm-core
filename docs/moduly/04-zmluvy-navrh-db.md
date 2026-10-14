@@ -1,8 +1,11 @@
 # Modul 4 – Zmluvy a ceny: návrh databázy
 
-Verzia 0.9 · 14. 10. 2026 · **`0023`, `0024` na `dev`; `0025_zmluvy_jadro` napísaná a overená nanečisto (časť 24)**.
+Verzia 0.12 · 14. 10. 2026 · **`0023`–`0025` na `dev` (podľa `db/schema.sql`, commit `b301345`); `0026_zmluvy_import` overená nanečisto (časť 25.7), na `dev` nespustená**.
 - v0.1 = návrh;
 - v0.2 = Petrove odpovede 1–6 k časti 16 a doplnky a, b: pomerné množstvo v neúplnom roku, produkty Green namiesto Dodávka B2B, zákazník založený importom a `Osoba_ID`, príznak verejného osvetlenia, ručné trhové ceny, X2 /VN/, prekrytie nad skutočnou dobou platnosti s nástupníctvom, lokálne overenie importu na vzorových exportoch; plán migrácie `0023` (časť 18);
+- v0.12 = odpovede 23–25 v `0026`, API importu a obrazovky 25–27 lokálne overené (časť 25.8);
+- v0.11 = `0026_zmluvy_import` napísaná a overená nanečisto vrátane vzorových exportov, odpovede 20–22 a doplnky a–c (časť 25.7);
+- v0.10 = plán `0026_zmluvy_import` (časť 25);
 - v0.9 = migrácia `0025` overená nanečisto, úpravy pri implementácii (časť 24);
 - v0.8 = odpovede kola 3 (otázky 3b, 4, 8, 10–14, 19), VBattery AKU 1,00 € od 1. 1. 2026 v skripte, plán `0025_zmluvy_jadro` (časť 23);
 - v0.7 = skript `db/seed/podnikatelia-2026.sh` (časť 22);
@@ -1371,3 +1374,225 @@ Upravené aj staršie testovacie dáta (`seed.sql`, `checks.sql`, `checks_zakazn
 **Kód v tom istom nasadení:**
 - API: `queries/contracts.ts`, `queries/customers.ts` (aktívne zmluvy podľa stavu, zoznam), `queries/oom.ts` (ceny zo zmlúv);
 - web: karta zmluvy, karta OOM, karta zákazníka a osoby (stav zmluvy, zložka ceny namiesto smeru, bez „potvrdená“).
+
+---
+
+## 25. Plán migrácie `0026_zmluvy_import` a kódu F2 (časť 2) – schválený (Peter, 14. 10. 2026)
+
+Cieľ: zmluvy sa dostanú do CRM importom exportu Office portálu (s cenami) a OOM importom exportu XM Trade, s náhľadom ako pri OOM (obrazovka 27). Pravidlá polí sú v častiach 8 a 9; tu poradie, objekty, výpočet cien a overenie.
+
+### 25.1 Postup jedného importu (oba súbory naraz alebo každý zvlášť)
+
+1. **API prečíta súbory** (SheetJS, ako import OOM):
+   - rozpozná zostavu podľa hlavičiek: Office portal „HEO - Web Zmluvy - prehlad EE“, XM Trade „Prehľad“;
+   - **zahodí dátum narodenia a rodné číslo** (rozhodnutie 9) – do databázy nejdú ani v náhľade;
+   - znormalizuje bunky: 1900-01-01 = prázdne, `-` = prázdne, kWh → MWh podľa `MJ`, `DD.MM.RRRR` → dátum, IČO bez medzier;
+   - pošle do databázy JSON.
+2. **Databáza** – jedna funkcia `contract_import_run(org, xm_rows, op_rows, uložiť, odtlačok, očakávané počty)`, náhľad iba číta, uloženie v jednej transakcii. Pri uložení:
+   - **XM Trade najprv:** OOM sa založia alebo aktualizujú (rovnaké pravidlá ako import OOM `0018`: nové OOM Pripravované, stav a zákazníka existujúceho OOM nemení). Nové OOM domácnosti dostane zákazníka cez zmluvu z Office portálu v tom istom behu (číslo zmluvy → `Osoba_ID`).
+   - **Office portal potom:** zmluvy, OOM v zmluve, ceny.
+   - Prepočet stavu dotknutých zákazníkov raz na konci (ako `0018`).
+3. **Náhľad po zmluvách:** Nová, Zmena (s popisom, napr. „Fáza Čaká na podpis → Finálne podpísaná“), Bez zmeny (`Greatest_updated_at`), Upozornenie, Chyba, Preskočené (test). Chyba v zmluve = celá zmluva sa neuloží, ostatné áno. Neznámy názov (fáza, produkt, sadzba, obchodník) = chyba s „Pridať preklad“ (rozhodnutie 5).
+4. **Súbor sa neukladá** – uloží sa záznam `contract_import` (kto, kedy, názov a odtlačok súboru, počty) a `contract_import_change` na kartu zmluvy.
+
+### 25.2 Objekty (`-- migrate:up`)
+
+| # | Objekt | Podrobnosti |
+| --- | --- | --- |
+| 1 | `contract_import`, `contract_import_change` | časť 8.1; čítajú tímy s právom „import zmlúv“ a admin |
+| 2 | `company.op_person_id`, `contact.op_person_id`, `created_by_import` | časť 8.2; jedinečné v spoločnosti; príznak „založený importom“ zruší prvá ručná úprava alebo „Skontrolované“ |
+| 3 | `oom.tdo_class` | trieda TDO z XM Trade (otázka 14), text; export a import OOM |
+| 4 | `oom_import_run` (úprava `0018`) | zmena cenovej regulácie existujúceho OOM sa zapíše ako zmena s „platí od“ dnes (otázka 19); nové pole `tdo_class` |
+| 5 | `contract_import_run(...)` | celý import (časť 25.1), `SECURITY DEFINER`, iba s právom „import zmlúv“; nástupníctvo a prekrytie rieši spúšťač z `0025` |
+| 6 | pomocné funkcie | `contract_import_price_rows(...)` – výpočet cien zmluvy (časť 25.3); `contract_import_customer(...)` – nájdi alebo založ zákazníka |
+| 7 | `import_alias` | druh `obchodnik` už je; systémové preklady sa nepridávajú (mená obchodníkov pridá admin pri prvom importe) |
+| 8 | práva | `crm_app`: SELECT nových tabuliek, EXECUTE importu; zápis iba cez funkciu |
+
+### 25.3 Ceny pri importe
+
+| Zmluva | Riadky ceny (`contract_price`) |
+| --- | --- |
+| Firma, individuálna cena (`GREEN_*_INDIVIDUAL`, `ISOTSK_PLUS`) | **komodita** podľa modelu z prekladu, obdobie z `ZZC` orezané na účinnosť, pri 1T + 2T cena podľa typu tarifu produktu OOM (rozhodnutie 2); **poplatok za OM** – položka cenníka „Poplatky B2B“ platná v danom období |
+| Firma, cenníková cena (malý podnik, DMPx) | **komodita** = položka platnej verzie cenníka „Malé podniky“ pre produkt OOM, po verziách (každá verzia = vlastné obdobie) |
+| Domácnosť (cenníková cena) | **komodita** = položka cenníka Domácnosti ANO alebo NIE podľa regulácie OOM, produkt DDx z prekladu (`target_extra.ano`), po verziách; **ZEM** pri každom OOM spotreby (zadanie modulu 3: „platia iba domácnosti, za každé OOM spotreby“); **VBattery** program z prekladu a cenníka VBattery / VBattery V / VBattery AKU |
+| Výkup | komodita (výkup FIX / SPOT − € / SPOT − %) z prekladu, cena na rok; pri dobe neurčitej posledné obdobie bez konca (zadanie časť 5) |
+| VIWA | **mesačná platba za účet** a **€/kW** z položky cenníka Green VIWA podľa balíka – otázka 20 |
+
+- **Chýba cena** (príznak): obdobie účinnosti bez komodity, položka cenníka chýba, cenníková cena pri produkte, ktorý nie je v platnej verzii.
+- **Na kontrolu** (príznak): produkt Dobieha alebo Ukončený pri novej zmluve, `_PC_M09`, nesúlad regulácie VBattery (XM vs. produkt), nesúlad výkonu zdroja (OP vs. OOM), možná duplicita osoby, zmluva na neurčito ukončená nástupcom.
+- Pridaná hodnota, marža firmy, snímka ceny pre obchodníka, príznak „Pod hranicou“ a párovanie výnimiek prídu v `0027` (bilancia).
+
+### 25.4 Kód F2
+
+- **API:** `routes/contract-import.ts` (náhľad, uloženie, chybné riadky .xlsx), `routes/contracts.ts` (zoznam s filtrami, karta, úprava údajov CRM, export), preklady importu z náhľadu.
+- **Web:** obrazovky 25 (zoznam zmlúv), 26 (karta zmluvy), 27 (import: dva súbory, náhľad po zmluvách, „Pridať preklad“, uloženie); položka menu Zmluvy; Zákazníci → filter „založený importom“.
+
+### 25.5 Overenie
+
+- **Databáza nanečisto:** dočasný Postgres, testy `checks_zmluvy_import.sql` s vymyslenými riadkami. Pokrytie:
+  - nová, zmena, bez zmeny, test riadok;
+  - 1T + 2T, kWh;
+  - domácnosť s účinnosťou z XM, nový zákazník;
+  - VBattery, ZEM, výkup na neurčito, nástupníctvo z importu;
+  - chyby: neznámy preklad, prekrytie, chýbajúce OOM, dva cenové riadky.
+- **Vzorové exporty (doplnok b):**
+  - celý import oboch vzorových súborov na dočasnej lokálnej databáze s vymyslenými zákazníkmi a cenníkmi, **na `dev` nič**;
+  - Peter dostane počty nová / zmena / bez zmeny / upozornenie / chyba / preskočené a príklady chýb **bez osobných údajov**;
+  - dočasná databáza sa zmaže.
+- **API a obrazovky:** lokálne proti dočasnej databáze; na Teste Peter s vlastným exportom (osobitný súhlas – na `dev` by išli skutočné osobné údaje; rozhodnutie 2026-10-12 hovorí o vymyslených dátach na Teste).
+
+### 25.6 Otázky
+
+- **20. VIWA bez balíka:** kým Office portal nedoplní stĺpec balíka (O5), import VIWA nevie, ktorá položka cenníka platí. **Odporúčam:** zmluvu VIWA založiť bez cien s príznakom „Chýba cena“; balík doplní Servis v CRM (nový údaj CRM na zmluve, kým ho neprinesie import).
+- **21. Skutočné exporty na Teste:** Test (`dev`) má dnes iba vymyslené dáta. Import skutočného exportu by tam priniesol osobné údaje zákazníkov. **Odporúčam:**
+  - na Teste skúšať iba vymyslený export (pripravím ho z vzorovej štruktúry s vymyslenými menami a EIC);
+  - skutočné exporty až na Ostrom.
+- **22. Obchodník podľa mena:** v exporte je meno („Uzatvoril“), nie e-mail. **Odporúčam:**
+  - preklad meno → používateľ CRM (druh `obchodnik`), ktorý admin pridá pri prvom importe z náhľadu;
+  - prázdne meno = zmluva bez obchodníka (vo vzorke 46 z 179 riadkov) a upozornenie.
+
+### 25.7 Odpovede, implementácia a overenie nanečisto (14. 10. 2026)
+
+**Peter:** plán schválený.
+- **20:** VIWA bez balíka sa uloží bez cien s príznakom „Chýba cena“, balík doplní Servis.
+- **21:** na Teste iba vymyslený export; prvý skutočný import až na Ostrom, najprv iba náhľad, ktorý prejdeme spolu.
+- **22:** obchodník cez „Pridať preklad“. Prázdny obchodník sa nenahrádza tvorcom zmluvy – zmluva sa uloží bez obchodníka s upozornením, tvorca je iba informácia.
+- **Doplnky:** a) prázdna bunka v exporte nikdy neprepíše hodnotu v CRM; b) zákazník založený importom má vlastníka = obchodník zo zmluvy, bez obchodníka ostane bez vlastníka s upozornením; c) opakovaný import toho istého súboru = všetko „bez zmeny“. Ku každému test.
+
+**„Uzatvoril“ (overenie k otázke 22):**
+- 5 vzorových zmlúv v PDF má pole „Uzatvoril“ v tvare „meno / spoločnosť“. Žiadna z nich nie je vo vzorovom exporte, priamo porovnať sa nedajú.
+- V exporte je `ObchodnikNazov` = `VytvorilNazov` v 104 zo 105 zmlúv, kde sú vyplnené obe. 9 mien je iba vo `VytvorilNazov` (tvorcovia, nie obchodníci). 2 mená z PDF sú medzi menami exportu (v oboch stĺpcoch).
+- Import berie `ObchodnikNazov`. Overí sa na prvom skutočnom exporte (náhľad na Ostrom).
+
+**Úpravy oproti plánu pri implementácii:**
+- `contract_import`: počty v jednom stĺpci `counts`, názov a odtlačok súboru Office portálu aj XM Trade. Zmeny z importu majú v audite odkaz `audit_log.contract_import_id` (import OOM zo šablóny ostáva v `import_id`). Zmluva má `last_import_id`.
+- **Osoba založená importom môže byť bez e-mailu a telefónu** (Office portal ich neposiela). Príznak „založený importom“ drží, kým sa kontakt nedoplní; potom ho zruší prvá ručná úprava alebo „Skontrolované“.
+- `contract_oom.program_id`: program VBattery popri produkte DD (DD z XM Trade, program z Office portálu).
+- **Balík VIWA zadá Servis v CRM** (aplikácia mení iba tento stĺpec; balík iba pri zmluve VIWA – obmedzenie). Spúšťač doplní ceny Green VIWA (platba za účet, €/kW pri OOM) a uzavrie „Chýba cena“. Obchodníka zmluvy zmení v CRM iba vedenie alebo admin, rovnako ako vlastníka zákazníka.
+- **Oprava `0025`:** nástupníctvo sa spustí aj vtedy, keď OOM v zmluve dostane účinnosť dodatočne (domácnosť: začiatok dodávky z neskoršieho importu XM Trade). Predtým by prolongácia staršej zmluvy nebola skrátená a import by skončil chybou prekrytia.
+- Ceny:
+  - z cenníkov počíta `contract_price_list_sync`: komodita pri cenníkovej cene (DD, DMP), ZEM, program, mesačná platba za OM firmy, VIWA;
+  - individuálne ceny z Office portálu počíta `contract_import_op_prices`;
+  - zapisujú sa iba pri zmene, takže opakovaný import nič nezapíše.
+- **„Chýba cena“ sa kontroluje od 1. 1. bežného roka** (staršie roky CRM v cenníkoch nemá); pri dobe neurčitej do konca bežného roka. Otázka 25.
+- **Prázdna bunka (doplnok a)** neprepíše ani údaje z Office portálu, ktoré už v CRM sú (účinnosť do, podpis, tvorca, obchodník, balík VIWA, dôvod uzatvorenia).
+- Zmluva so starším alebo rovnakým `Greatest_updated_at` sa nespracúva; doplnia sa iba údaje z XM Trade (účinnosť domácnosti, produkt DD pri VBattery).
+- **Import OOM zo šablóny (`0018`):**
+  - trieda TDO;
+  - zmena cenovej regulácie existujúceho OOM sa zapíše do histórie s „platí od“ dnes (otázka 19);
+  - prázdna regulácia v súbore reguláciu nezruší.
+- **Čítanie exportov:** `api/src/contract-import-parse.ts` (použije ho aj API):
+  - rozpozná zostavu podľa hlavičiek, aj s hranatými zátvorkami Office portálu;
+  - prevedie kWh na MWh a dátumy (1900 = prázdne);
+  - dátum narodenia a rodné číslo nečíta vôbec.
+
+**Overenie (dočasný Postgres, `0001`–`0026` + skripty cenníkov 2026, nie Neon):**
+
+| Krok | Výsledok |
+| --- | --- |
+| `0026` hore | OK |
+| Testy | **150 kontrol OK** (140 + Z2-1 až Z2-10, `db/test/checks_zmluvy_import.sql`) |
+| `0026` dole | schéma = `0025` (0 riadkov rozdielu) |
+| `0026` znova hore | rovnaká schéma ako prvé `up` |
+| Vzorka Office portálu – prevod | 179 riadkov, 150 zmlúv, bez chýb čítania; kWh → MWh; bez dátumu narodenia |
+| OOM pre vzorku | 151 vymyslených riadkov XM Trade (EIC, číslo zmluvy, PDS podľa predpony EIC, NN/VN); vzorky XM a OP sa neprekrývajú |
+| Náhľad bez prekladov obchodníkov | 40 nových, 109 chýb „Neznámy obchodník“ (13 mien) s ponukou prekladu |
+| Náhľad po doplnení 13 prekladov | **149 nových, 0 chýb, 1 preskočená (test)**, 94 s upozornením; OOM 151 nových; 0,6 s |
+| Uloženie, potom ten istý import znova | **149 zmlúv a 151 OOM „bez zmeny“** (0,16 s) |
+| Skutočný XM Trade (5 riadkov) | bez zmlúv v CRM 5 chýb „zákazníka nejde určiť“; s vymyslenými zmluvami 5 nových OOM, všetky stĺpce preložené (PDS, sadzba D3, D4, X2, typ merania, fakturačné obdobie, zálohy, trieda TDO, plán v MWh), virtuálne OOM = sharing |
+| Dočasná databáza | zmazaná |
+
+Upozornenia vo vzorke (zmluvy):
+- 64 nesúlad súčtu množstva zmluvy a OOM (rozhodnutie 1);
+- 40 bez obchodníka (tvorca ako informácia);
+- 37 nový zákazník bez vlastníka;
+- **17 „Chýba cena“**: 14 firiem s cenou iba za starší rok (otázka 23), 2 VIWA bez balíka, 1 domácnosť bez produktu pri OOM;
+- 2 EIC neobvyklého tvaru;
+- 1 mesačná cena výkupu `_PC_M09` na kontrolu;
+- 1 cena mimo účinnosti (vynechaná).
+
+XM Trade: 4 nesúlady regulácie (produkt „ANO Energopomoc“, stĺpec „Neregulované“ – platí produkt), 2 „Dodávka (+)“ (otázka 24).
+
+**Otázky:**
+- **23. Cena iba za starší rok:** 14 firemných zmlúv vo vzorke je účinných aj v roku 2026 (niektoré na neurčito), ale export má cenu iba za rok 2023, 2024 alebo 2025. Najčastejšie ide o SPOT + aditív (`GREEN_ISOTSK_PLUS_RRRR_R`), niekde o FIX. Import pre rok 2026 hlási „Chýba cena“. Platí aditív (alebo FIX) posledného roka aj pre ďalšie roky účinnosti? **Odporúčam:** pri SPOT + aditív áno (posledné obdobie bez konca, ako pri výkupe), pri FIX nie (Chýba cena, rieši Servis alebo prolongácia).
+- **24. „Dodávka (+)“ v XM Trade** (VBattery domácnosti): nové OOM sa zakladá ako spotreba s upozornením. **Odporúčam** ponechať (typ OOM sa dá na karte zmeniť).
+- **25. Obdobie kontroly „Chýba cena“:** od 1. 1. bežného roka (pri dobe neurčitej do konca bežného roka). **Odporúčam** ponechať; staršie roky dopĺňa iba presun z HubSpotu.
+
+**Odpovede 23–25 (Peter, 14. 10. 2026) – zapracované do `0026`:**
+- **23:** SPOT + aditív: aditív posledného roka platí ďalej (do konca OOM v zmluve, pri dobe neurčitej bez konca), rovnako ako výkup. FIX: ak má zmluva automatickú prolongáciu, od konca posledného roka s cenou platí cenník „Podnikatelia nad 30 MWh“ (produkt podľa typu tarifu OOM, pri verejnom osvetlení Green 1T VO). Mesačná platba za OM z Poplatkov B2B sa v tom období nepridáva, lebo je v položke cenníka. Bez prolongácie „Chýba cena“.
+- **24:** „Dodávka (+)“ v XM Trade = OOM typu výroba, „Odber (−)“ = spotreba, bez upozornenia. Nepreložiteľná hodnota = spotreba s upozornením. Existujúcemu OOM sa typ nemení; pri nesúlade upozornenie. **Dôsledok:** VBattery sa viaže na výrobné OOM, takže v zmluve o dodávke má výrobné OOM iba program VBattery. Komodita, ZEM a „Chýba cena“ sa počítajú iba pri OOM spotreby; produkt DD z XM Trade sa ukladá iba pri OOM spotreby.
+- **25:** kontrola „Chýba cena“ od 1. 1. bežného roka – áno.
+
+Testy po úprave: **152 kontrol** (+ Z2-11 cena po poslednom roku, Z2-12 typ OOM z XM Trade). Vzorka: 149 nových zmlúv, 0 chýb; „Chýba cena“ 11 namiesto 17:
+- 8 firiem s FIX – bez prolongácie, alebo s prolongáciou, ale cenník nad 30 MWh platí až od 1. 10. 2026 (január – september 2026 bez ceny);
+- 2 VIWA bez balíka;
+- 1 domácnosť bez produktu.
+
+### 25.8 API importu a obrazovky 25–27 – lokálne overené (14. 10. 2026)
+
+**API:**
+- `routes/contract-import.ts`:
+  - `POST /api/contract-import/preview` – jeden alebo dva súbory, zostava sa rozpozná sama;
+  - `POST /api/contract-import/save` – iba rovnaké odtlačky súborov a počty ako v náhľade, inak 409;
+  - `POST /api/contract-import/errors` – .xlsx s chybami: riadok, číslo zmluvy alebo EIC, text chyby, bez údajov osôb;
+  - `GET /api/contract-import/history`;
+  - právo „importovať“ v module Zmluvy (pri XM Trade aj v module OOM – stráži databáza).
+- `routes/contracts.ts`:
+  - `GET /api/contracts` – stav, príznak, typ, obchodník (aj „bez obchodníka“), hľadanie podľa čísla, zákazníka a EIC; počty v tlačidlách;
+  - `GET /api/contract-filters`, `GET /api/contracts/:id` (karta);
+  - `PATCH /api/contracts/:id` – poznámka, dôvod uzatvorenia, predošlá a súvisiaca zmluva (zadávajú sa číslom), balík VIWA, obchodník (iba vedenie a admin);
+  - `POST /api/contract-flags/:id/resolve`.
+- Preklady importov: nový druh **fáza** (API aj stránka Nastavení).
+
+**Web:**
+- **25 Zoznam zmlúv:** tlačidlá stavov a príznakov, filtre, menu Zmluvy zapnuté. Bez stĺpcov bilancie – prídu v F3 (`0027`).
+- **26 Karta zmluvy:**
+  - zahŕňa príznaky s tlačidlom „Vyriešené“ (okrem „Chýba cena“, ktorá zmizne sama), ceny po zložkách a obdobiach, OOM v zmluve (nástupca), údaje zmluvy, históriu importov a panel „Upraviť údaje CRM“;
+  - bilancia príde v F3.
+- **27 Import:**
+  - nahratie jedného alebo dvoch súborov, náhľad po zmluvách (filtre) a OOM z XM Trade;
+  - chýbajúce preklady s tlačidlom „Pridať preklad“ (admin) a prepočtom náhľadu;
+  - „Čo sa stane“, stiahnutie chýb, uloženie, história importov.
+- **Export zoznamu zmlúv** (tlačidlo na obrazovke 25) zatiaľ nie je – príde s bilanciou v F3.
+
+**Overenie (lokálny Worker ako Peter proti dočasnej databáze; vzorové exporty; OOM pre vzorku vymyslené jednej testovacej firme):**
+
+| Krok | Výsledok |
+| --- | --- |
+| Náhľad Office portal + XM Trade | 149 nových zmlúv, 0 chýb, 1 testovacia preskočená; 5 OOM z XM Trade s chybou (ich zmluvy v CRM nie sú); 0,3 s |
+| Uloženie s iným odtlačkom | 409 |
+| Uloženie, potom ten istý náhľad | 149 „bez zmeny“ |
+| Zoznam, filtre, hľadanie podľa EIC, karta | OK |
+| Balík VIWA v CRM | ceny Green VIWA (účet, €/kW), „Chýba cena“ uzavretá |
+| Balík pri zmluve o dodávke, súvisiaca zmluva iného zákazníka | odmietnuté so slovenskou hláškou |
+| Uzavretie príznaku „Na kontrolu“ | OK |
+| Testy databázy | 152 OK; `0026` dole = schéma `0025`, znova hore rovnaká |
+
+Typy (`tsc`) a zostavenie webu prešli. Obrazovky som v prehliadači neprezeral (iba API a zostavenie).
+
+### 25.9 Pred nasadením na Test (14. 10. 2026)
+
+- **VBattery** (Peter potvrdil): pravidlo z časti 25.7 platí, test Z2-12.
+- **Cenník nad 30 MWh od 1. 1. 2026:** skript `db/seed/podnikatelia-2026` pridá verziu „2026 (1.–9.)“ od 1. 1. 2026 s rovnakými cenami; schválenie ju ukončí 30. 9. 2026. Opakovateľné.
+- **`0026` doplnená:**
+  - chyba nového OOM z XM Trade (napr. neznáma sadzba) sa ukáže pri zmluve aj s ponukou prekladu (test v Z2-4);
+  - návrat (`down`) neskončí chybou, ak na Teste ostanú osoby založené importom bez kontaktu – kontrola dosiahnuteľnosti ostane `NOT VALID`; bez nich je schéma presne `0025`.
+- **Snímky obrazoviek 25–27** (headless Chrome, vymyslený export) porovnané s dizajnom. Opravené:
+  - pád zoznamu (príznaky z databázy ako text → `to_jsonb`);
+  - karta: drobčeková navigácia, veľké číslo, ceny zlúčené naprieč OOM („všetky (n)“), stav ceny pri období, rozloženie ako návrh (údaje zmluvy a časová os vedľa seba);
+  - import: dva stĺpce, karty Office portal / XM Trade, „Čo sa stane“ vpravo, „História importov“ v hlavičke, správne tvary čísloviek, späť na Zmluvy;
+  - zoznam: zákazník ako odkaz.
+- Vedome chýba (príde v F3 `0027`): stĺpce a karta bilancie, filter „Rok bilancie“, export zoznamu, „Otvoriť v Office portáli“, záložky Kontaktné osoby a Dokumenty.
+- **Vymyslené exporty** na skúšku: `exports/importy-test/` (README so scenárom, generátor `vytvor.cjs`).
+- Testy 152 OK; `0026` hore / dole / hore bez rozdielu.
+
+### 25.10 Skúška na Teste a uzavretie F2 (14. 10. 2026)
+
+- `0026`, `app-role.sql`, skript `podnikatelia-2026` a nasadenie na Test spustil Peter.
+- Oprava po nasadení: zoznam Zákazníci a Leady čítal zrušený `contract.status` (z `0025`).
+- Skúška: import 3 zmlúv a 4 OOM prešiel; produkty a služby priradené správne.
+- **Úpravy obrazovky importu:**
+  - samostatné políčka pre Office portal a XM Trade; prvý import potrebuje oba súbory naraz;
+  - import OOM (19) rozpozná exporty z XM Trade a Office portálu a pošle ich na import zmlúv.
+- **Rozhodnutie (Peter):** veľkoobchod a GreenSolar sa nerobia ako zmluvy v CRM. Veľkoobchod ide iba do Cockpitu, GreenSolar cez deal do Cockpitu. Ručné zmluvy nie sú. Nové služby sa doriešia neskôr.
+

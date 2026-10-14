@@ -72,8 +72,8 @@ export async function listCustomers(sql: Sql, f: CustomerFilter, pageSize = PAGE
              ${CUSTOM(sql)} AS custom,
              (SELECT coalesce(p4.mobile, p4.phone) FROM contact p4 WHERE p4.id = cu.person_id) AS phone,
              (SELECT min(k.valid_from) FROM contract k
-               WHERE (k.company_id = cu.id OR k.person_id = cu.id) AND k.valid_from > current_date
-                 AND k.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')) AS future_from,
+               WHERE (k.company_id = cu.id OR k.person_id = cu.id) AND k.valid_from > crm_today()
+                 AND k.phase = 'podpisana') AS future_from,
              count(*) OVER ()::int AS total
         FROM customer_v cu
         LEFT JOIN app_user u ON u.id = cu.owner_id

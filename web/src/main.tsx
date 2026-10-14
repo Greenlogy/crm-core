@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ContactsPage } from './pages/ContactsPage';
+import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
+import { ContractsPage } from './pages/ContractsPage';
 import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { OomImportPage } from './pages/OomImportPage';
@@ -49,6 +51,8 @@ const router = createBrowserRouter([
       { path: 'oom', element: <OomListPage /> },
       { path: 'oom/import', element: <OomImportPage /> },
       { path: 'oom/:id', element: <OomPage /> },
+      { path: 'zmluvy', element: <ContractsPage /> },
+      { path: 'zmluvy/import', element: <ContractImportPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
       // Cenníky: pevné adresy pred /cenniky/:id (stránka detailu prijme iba platné ID)
       { path: 'cenniky', element: <PriceListsPage /> },

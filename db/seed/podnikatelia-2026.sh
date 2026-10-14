@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Naplnenie modulu 4, F1 na Teste (Neon dev): produkty Green 1T / 2T / 2T Vykurovanie / 1T VO a VBattery V,
-# Dodávka B2B → Dobieha, cenník „Podnikatelia nad 30 MWh“ od 1. 10. 2026, cenník „VBattery V (sharing)“ od 1. 1. 2026
+# Dodávka B2B → Dobieha, cenník „Podnikatelia nad 30 MWh“ od 1. 1. 2026 (verzie 1.–9. a od 1. 10. s rovnakými cenami), cenník „VBattery V (sharing)“ od 1. 1. 2026
 # (bezplatne), cenník „VBattery AKU (dobieha)“ od 1. 1. 2026 (1,00 €) a preklady produktov pri OOM
 # (db/seed/podnikatelia-2026.sql). Predpoklad: migrácie 0023, 0024 a db/seed/cenniky-2026.sh. Beží ako vlastník databázy
 # v jednej transakcii; ceny s DPH sa na konci porovnajú s PDF.

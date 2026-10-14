@@ -7,6 +7,8 @@ import { Hono } from 'hono';
 import { accessEmail } from './auth';
 import { asUser, connect, type Env } from './db';
 import { dbErrorResponse } from './errors';
+import { contractImport } from './routes/contract-import';
+import { contracts } from './routes/contracts';
 import { customersWrite } from './routes/customers-write';
 import { exportRoutes } from './routes/export';
 import { oomImport } from './routes/oom-import';
@@ -19,7 +21,6 @@ import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTER } from './queries/contacts';
-import { contractCard } from './queries/contracts';
 import {
   customerCard,
   listCustomers,
@@ -118,6 +119,8 @@ app.get('/me', async (c) => {
 });
 
 // Zákazníci – zakladanie, úpravy, duplicity (pred kartami: /companies/search nie je id)
+app.route('/', contractImport);
+app.route('/', contracts);
 app.route('/', customersWrite);
 app.route('/', exportRoutes);
 app.route('/', oomImport);
@@ -188,13 +191,6 @@ app.get('/oom/:id', async (c) => {
   const id = c.req.param('id');
   if (!UUID.test(id)) return badId(c);
   const result = await oomCard(c.var.sql, id);
-  return result ? c.json(result) : notFound(c);
-});
-
-app.get('/contracts/:id', async (c) => {
-  const id = c.req.param('id');
-  if (!UUID.test(id)) return badId(c);
-  const result = await contractCard(c.var.sql, id);
   return result ? c.json(result) : notFound(c);
 });
 

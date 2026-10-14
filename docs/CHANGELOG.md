@@ -2,6 +2,23 @@
 
 ## 2026-10-14
 
+- Modul 4, F2 – import po skúške na Teste:
+  - Obrazovka 27 má dve políčka (Office portal, XM Trade) a tlačidlo „Skontrolovať“, s návodom, že prvý import potrebuje oba súbory naraz. V náhľade je „Zmeniť súbory“ a rada pri OOM, ktoré nie sú v CRM.
+  - Import OOM (obrazovka 19) rozpozná export z XM Trade alebo Office portálu a pošle na import zmlúv.
+  - Peter na Teste: 3 zmluvy a 4 OOM prešli správne (produkty aj služby).
+- Oprava (Test): zoznam Zákazníci a Leady padal („Chyba servera“). Stĺpec „budúci začiatok“ čítal `contract.status`, ktorý zrušila `0025`; teraz `contract.phase = 'podpisana'` a `crm_today()` (`api/src/queries/customers.ts`). Lokálne overené všetky hlavné cesty API (zoznamy, karty, cenníky, zmluvy).
+- Modul 4, F2 pred nasadením:
+  - Skript `podnikatelia-2026`: verzia cenníka nad 30 MWh od 1. 1. 2026 (rovnaké ceny).
+  - `0026`: chyba nového OOM z XM Trade pri zmluve s prekladom; návrat odolný voči osobám bez kontaktu.
+  - Obrazovky 25–27 upravené podľa snímok a dizajnu.
+  - Vymyslené exporty `exports/importy-test/`.
+  - Návrh DB časť 25.9.
+- Modul 4, F2 časť 3 (lokálne overené, nenasadené):
+  - `0026` doplnená o odpovede 23–25: SPOT + aditív platí ďalej; FIX s prolongáciou → cenník nad 30 MWh; „Dodávka (+)“ = OOM výroba; testy Z2-11, Z2-12, spolu 152.
+  - API `routes/contract-import.ts` (náhľad, uloženie, chyby .xlsx, história) a `routes/contracts.ts` (zoznam, filtre, karta, údaje CRM, uzavretie príznaku); preklad fázy v Prekladoch importov; hlášky obmedzení zmluvy.
+  - Web: Zoznam zmlúv (25), Karta zmluvy (26), Import zmlúv (27) s „Pridať preklad“; menu Zmluvy.
+  - Návrh DB v0.12 (časť 25.8).
+- Modul 4, F2 časť 2: migrácia `0026_zmluvy_import` (napísaná, overená nanečisto: hore, testy 150, dole = schéma 0025, hore = rovnaká; na `dev` nespustená): `contract_import` a história importov na zmluve, `contract_import_run` (náhľad a uloženie; XM Trade → OOM, Office portal → zákazník, zmluva, OOM v zmluve, ceny), zákazník s `op_person_id` a príznakom „založený importom“ (osoba bez kontaktu povolená, kým ju niekto neskontroluje), `oom.tdo_class`, import OOM so zmenou regulácie cez históriu, `contract_oom.program_id`, ceny z cenníkov (`contract_price_list_sync`) a príznak „Chýba cena“, balík VIWA a obchodník zmluvy meniteľné v CRM, oprava nástupníctva pri dodatočnej účinnosti (0025). Testy `db/test/checks_zmluvy_import.sql` (Z2-1 až Z2-10: doplnky a–c, RLS iba svoje, chyby, VBattery, VIWA, výkup). Čítanie exportov `api/src/contract-import-parse.ts`. `api/db/app-role.sql`: import iba funkciou, UPDATE balíka VIWA a obchodníka. Vzorové exporty lokálne: 149 nových zmlúv, 0 chýb, opakovanie bez zmeny. Návrh DB v0.11 (časť 25.7, otázky 23–25)
 - Modul 4, F2 časť 1: migrácia `0025_zmluvy_jadro` (napísaná, overená nanečisto na dočasnom Postgrese: hore, testy 140, dole = schéma 0024 okrem poradia 3 stĺpcov zmluvy, hore = rovnaká schéma; na `dev` nespustená): zmluva s fázou z Office portálu a vypočítaným stavom (`contract_state`, `contract_effective_to`, `contract_v`), `contract_oom` s nástupníctvom a obmedzením prekrytia, prerobené `contract_price`, `contract_flag`, `price_exception` (+ `price_exception_v`), ochrana stĺpcov z Office portálu, RLS (zákazník aj uzatvoril, „schvaľuje ceny“ vidí všetky), stav zákazníka z fázy, preklady fáz. Testy `db/test/checks_zmluvy.sql` (Z1-1 až Z1-5), testovacie dáta a staršie kontroly na novú štruktúru. `api/db/app-role.sql`: práva na zmluvy a **oprava 0024 – aplikácia nemá UPDATE na trhové ceny**. API a web kariet zmluvy, zákazníka a OOM na novú štruktúru. Čítanie na `dev` pred migráciou (`db/test-data/0025-pred-migraciou.sql`). Návrh DB v0.9 (časť 24)
 ## 2026-10-13
 

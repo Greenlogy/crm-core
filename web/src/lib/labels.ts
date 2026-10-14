@@ -29,6 +29,46 @@ export const CONTRACT_STATUS: Record<string, { label: string; tone: Tone; live?:
   neuspesna: { label: 'Neúspešná', tone: 'negative' },
 };
 
+/** Typ zmluvy (0025). */
+export const CONTRACT_TYPE: Record<string, string> = {
+  dodavka_domacnost: 'Dodávka – domácnosť',
+  dodavka_firma_nn: 'Dodávka – firma NN',
+  dodavka_firma_vn: 'Dodávka – firma VN',
+  vykup: 'Výkup',
+  viwa: 'VIWA',
+};
+
+/** Fáza v Office portáli (0025). */
+export const CONTRACT_PHASE: Record<string, string> = {
+  rozpracovana: 'Rozpracovaná',
+  caka_na_podpis: 'Čaká na podpis',
+  fyzicke_podpisovanie: 'Fyzické podpisovanie',
+  elektronicke_podpisovanie: 'Elektronické podpisovanie',
+  podpisana: 'Finálne podpísaná',
+  odmietnuta: 'Odmietnutá',
+  ukoncena: 'Ukončená',
+  neuspesna: 'Neúspešná',
+};
+
+/** Príznaky zmluvy na kontrolu (0025, 0026). */
+export const CONTRACT_FLAG: Record<string, { label: string; tone: Tone }> = {
+  chyba_cena: { label: 'Chýba cena', tone: 'negative' },
+  kontrola_importu: { label: 'Na kontrolu', tone: 'warning' },
+  sprolongovane_bez_ceny: { label: 'Sprolongované bez novej ceny', tone: 'warning' },
+  konci_do_4_mesiacov: { label: 'Končí do 4 mesiacov', tone: 'info' },
+  pod_hranicou_bez_vynimky: { label: 'Pod hranicou bez výnimky', tone: 'negative' },
+};
+
+export const CLOSE_REASON: Record<string, string> = {
+  akvizicia: 'Akvizícia',
+  retencia: 'Retencia',
+  autoprolong: 'Autoprolong',
+  prepis: 'Prepis',
+  nove_oom: 'Nové OOM',
+};
+
+export const VIWA_PACKAGE: Record<string, string> = { basic: 'Basic', plus: 'Plus', pro: 'Pro' };
+
 /** Zložka ceny zmluvy (0025). */
 export const PRICE_SLOT: Record<string, string> = {
   komodita: 'Komodita',

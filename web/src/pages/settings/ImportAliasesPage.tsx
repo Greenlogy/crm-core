@@ -10,7 +10,7 @@ import { send, useApi } from '../../lib/api';
 import { EMPTY } from '../../lib/format';
 import { SettingsHead } from './SettingsLayout';
 
-type Kind = 'produkt_op' | 'produkt_oom' | 'sadzba' | 'pds' | 'obchodnik' | 'typ_merania' | 'fakturacne_obdobie' | 'sposob_zaloh' | 'iny';
+type Kind = 'faza' | 'produkt_op' | 'produkt_oom' | 'sadzba' | 'pds' | 'obchodnik' | 'typ_merania' | 'fakturacne_obdobie' | 'sposob_zaloh' | 'iny';
 type Source = 'office_portal' | 'xm_trade' | 'vsetky';
 type Option = { value: string; label: string };
 type Alias = {
@@ -27,6 +27,7 @@ type Alias = {
 type Data = { items: Alias[]; targets: Record<Kind, Option[]> };
 
 const KINDS: { value: Kind; label: string }[] = [
+  { value: 'faza', label: 'Fáza zmluvy (Office portal)' },
   { value: 'produkt_op', label: 'Cenový produkt (Office portal)' },
   { value: 'produkt_oom', label: 'Produkt pri OOM' },
   { value: 'sadzba', label: 'Sadzba distribúcie' },

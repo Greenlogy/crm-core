@@ -3,7 +3,7 @@
 -- Zdroj: zadanie 04-zmluvy.md v0.3 časť 5 a 14, návrh DB 04-zmluvy-navrh-db.md časť 11.3, Petrove odpovede 2 a 4
 -- (13. 10. 2026) a PDF exports/cenniky-2026/GLG_Cennik_podnikatelia_nad_30MWh_od_1_10_2026.pdf.
 --
--- Obsah:
+-- Obsah (doplnené 14. 10. 2026: verzia „2026 (1.–9.)“ cenníka nad 30 MWh od 1. 1. do 30. 9. 2026, rovnaké ceny):
 --   - produkty Green 1T Jednotarif, Green 2T Dvojtarif, Green 2T Vykurovanie, Green 1T VO (dodávka firmy; modely cenník,
 --     FIX, SPOT + aditív €; typ a variant tarifu) a VBattery V (sharing, bez poplatku);
 --   - Dodávka B2B → Dobieha (nahrádza ju sada Green, odpoveď 2; nemaže sa);
@@ -71,6 +71,25 @@ BEGIN
   END IF;
   INSERT INTO price_list_version (price_list_id, name, valid_from, note)
   VALUES (v_list, '2026', '2026-10-01', 'cenník z PDF platný od 1. 10. 2026 (db/seed/podnikatelia-2026.sql)')
+  RETURNING id INTO v_id;
+  INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, price_nt_eur_mwh, fee_oom_eur_month, sort_order)
+  SELECT v_id, p.id, s.vt, s.nt, s.oom, s.sort FROM s_item s JOIN product p ON p.code = s.product;
+  PERFORM price_list_version_approve(v_id);
+END;
+$$;
+
+-- Verzia „2026 (1.–9.)“ od 1. 1. 2026 s rovnakými cenami (Peter, 14. 10. 2026: ceny platia bez zmeny od 1. 1. 2026).
+-- Schválenie ju ukončí 30. 9. 2026 (deň pred verziou 2026). Iba ak ju cenník ešte nemá.
+DO $$
+DECLARE
+  v_list uuid := (SELECT id FROM price_list WHERE code = 'podnikatelia_nad_30mwh');
+  v_id   uuid;
+BEGIN
+  IF EXISTS (SELECT 1 FROM price_list_version WHERE price_list_id = v_list AND valid_from = '2026-01-01' AND status = 'schvalena') THEN
+    RETURN;
+  END IF;
+  INSERT INTO price_list_version (price_list_id, name, valid_from, note)
+  VALUES (v_list, '2026 (1.–9.)', '2026-01-01', 'rovnaké ceny ako od 1. 10. 2026 – platia od 1. 1. 2026 (Peter, 14. 10. 2026; db/seed/podnikatelia-2026.sql)')
   RETURNING id INTO v_id;
   INSERT INTO price_list_item (version_id, product_id, price_vt_eur_mwh, price_nt_eur_mwh, fee_oom_eur_month, sort_order)
   SELECT v_id, p.id, s.vt, s.nt, s.oom, s.sort FROM s_item s JOIN product p ON p.code = s.product;
@@ -175,6 +194,11 @@ BEGIN
   ASSERT (SELECT count(*) FROM price_list_version v JOIN price_list l ON l.id = v.price_list_id
            WHERE l.code = 'podnikatelia_nad_30mwh' AND v.name = '2026' AND v.status = 'schvalena'
              AND v.valid_from = '2026-10-01') = 1, 'schválená verzia 2026 od 1. 10. 2026';
+  ASSERT (SELECT count(*) FROM price_list_version v JOIN price_list l ON l.id = v.price_list_id
+           WHERE l.code = 'podnikatelia_nad_30mwh' AND v.status = 'schvalena'
+             AND v.valid_from = '2026-01-01' AND v.valid_to = '2026-09-30'
+             AND (SELECT count(*) FROM price_list_item i WHERE i.version_id = v.id) = 4) = 1,
+         'verzia 2026 (1.–9.) od 1. 1. do 30. 9. 2026 so 4 položkami';
 
   SELECT string_agg(s.product, ', ') INTO bad
     FROM s_item s
@@ -202,7 +226,7 @@ BEGIN
   n := (SELECT count(*) FROM import_alias a JOIN s_alias s
           ON a.source = s.source AND a.kind = 'produkt_oom' AND a.name_norm = import_name_norm(s.name) AND a.target = s.target);
   ASSERT n = 32, format('prekladov produktov %s, čakám 32', n);
-  RAISE NOTICE 'OK: 5 produktov, Dodávka B2B dobieha, cenník Podnikatelia nad 30 MWh od 1. 10. 2026 (4 položky, ceny s DPH = PDF), VBattery V bezplatne a VBattery AKU 1,00 € od 1. 1. 2026, 32 prekladov';
+  RAISE NOTICE 'OK: 5 produktov, Dodávka B2B dobieha, cenník Podnikatelia nad 30 MWh od 1. 1. 2026 (verzie 1.–9. a od 1. 10., 4 položky, ceny s DPH = PDF), VBattery V bezplatne a VBattery AKU 1,00 € od 1. 1. 2026, 32 prekladov';
 END;
 $$;
 

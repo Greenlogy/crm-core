@@ -1707,3 +1707,8 @@ a.tab {
 .tbl td.strong { font-weight: 600; }
 .tbl tr.sub-row td { background: var(--surface-muted); }
 .tbl td.actions { white-space: nowrap; text-align: right; }
+
+/* Zmluvy – import (obrazovka 27): text chyby v náhľade */
+.text-negative {
+  color: var(--negative);
+}

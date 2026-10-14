@@ -94,7 +94,10 @@ export function Layout() {
           Odberné miesta
         </NavLink>
         {disabled('Dealy', ICONS.deals)}
-        {disabled('Zmluvy', ICONS.contracts)}
+        <NavLink to="/zmluvy" end={false} className={navClass}>
+          <Icon d={ICONS.contracts} />
+          Zmluvy
+        </NavLink>
         <NavLink to="/cenniky" end={false} className={navClass}>
           <Icon d={ICONS.pricelist} />
           Cenníky

@@ -10,8 +10,16 @@ export const importAliases = new Hono<AppEnv>();
 
 export const ALIAS_SOURCES = ['office_portal', 'xm_trade', 'vsetky'] as const;
 export const ALIAS_KINDS = [
-  'produkt_op', 'produkt_oom', 'sadzba', 'pds', 'obchodnik', 'typ_merania', 'fakturacne_obdobie', 'sposob_zaloh', 'iny',
+  'faza', 'produkt_op', 'produkt_oom', 'sadzba', 'pds', 'obchodnik', 'typ_merania', 'fakturacne_obdobie', 'sposob_zaloh', 'iny',
 ] as const;
+
+// Fázy zmluvy v CRM (0025) – cieľ prekladu fázy z Office portálu
+const PHASES = [
+  { value: 'rozpracovana', label: 'Rozpracovaná' }, { value: 'caka_na_podpis', label: 'Čaká na podpis' },
+  { value: 'fyzicke_podpisovanie', label: 'Fyzické podpisovanie' }, { value: 'elektronicke_podpisovanie', label: 'Elektronické podpisovanie' },
+  { value: 'podpisana', label: 'Podpísaná' }, { value: 'odmietnuta', label: 'Odmietnutá' },
+  { value: 'ukoncena', label: 'Ukončená' }, { value: 'neuspesna', label: 'Neúspešná' },
+];
 
 const PRICE_MODELS = [
   { value: 'fix', label: 'FIX' },
@@ -50,6 +58,7 @@ importAliases.get('/import-aliases', async (c) => {
   return c.json({
     items,
     targets: {
+      faza: PHASES,
       produkt_op: PRICE_MODELS,
       produkt_oom: products,
       sadzba: tariffs,
