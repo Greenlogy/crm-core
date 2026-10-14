@@ -8,15 +8,26 @@ import type { Sql } from '../db';
 export const CONTRACT_PAGE_SIZE = 50;
 export const CONTRACT_STATES = ['v_priprave', 'podpisana', 'ucinna', 'skoncena', 'odmietnuta', 'neuspesna'] as const;
 export const CONTRACT_TYPES = ['dodavka_domacnost', 'dodavka_firma_nn', 'dodavka_firma_vn', 'vykup', 'viwa'] as const;
-export const CONTRACT_FLAGS = ['chyba_cena', 'kontrola_importu', 'sprolongovane_bez_ceny', 'konci_do_4_mesiacov', 'pod_hranicou_bez_vynimky'] as const;
+export const CONTRACT_FLAGS = ['chyba_cena', 'kontrola_importu', 'sprolongovane_bez_ceny', 'konci_do_4_mesiacov', 'pod_hranicou_bez_vynimky', 'nad_30_mwh', 'objem_xm'] as const;
 /** Tlačidlá zoznamu: stavy a príznaky. */
 export const CONTRACT_CHIPS = new Set<string>(['', ...CONTRACT_STATES, ...CONTRACT_FLAGS]);
 
 export type ContractFilter = { q: string; chip: string; type: string; owner: string; org: string; page: number; year: number };
 
-// Končí do 4 mesiacov: podpísaná zmluva o dodávke firmy, skutočný koniec od dnes do 4 mesiacov (upozornenie pošle F4)
-const ENDING = `(k.state IN ('podpisana', 'ucinna') AND k.type::text LIKE 'dodavka_firma%'
+// Končí do 4 mesiacov: podpísaná zmluva o dodávke firmy alebo výkup (odpoveď 34), skutočný koniec od dnes do 4 mesiacov
+// (upozornenie posiela nočný beh, 0028)
+const ENDING = `(k.state IN ('podpisana', 'ucinna') AND (k.type::text LIKE 'dodavka_firma%' OR k.type = 'vykup')
                  AND k.effective_to BETWEEN crm_today() AND (crm_today() + interval '4 months')::date)`;
+
+// Nad 30 MWh v regulácii (0029): zmluvy regulovaného malého podniku, ktorého ročný objem je dnes nad 30 MWh
+// alebo sa objem zo zmlúv a z XM Trade líši okolo hranice (iba upozornenie)
+const OVER_30 = `(k.company_id IN (SELECT s.company_id FROM small_business_volume(crm_today()) s
+                                    WHERE s.state IN ('vyradit', 'nesulad')))`;
+// Objem ≠ XM Trade (0030): zmluvné množstvo sa dnes líši od plánovanej spotreby OOM z XM Trade o viac ako 5 %
+const VOLUME_XM = `(k.id IN (SELECT d.contract_id FROM contract_volume_diff(crm_today()) d WHERE d.over))`;
+/** Podmienka tlačidla príznaku: uložené príznaky z contract_flag; „Končí do 4 mesiacov“, „Nad 30 MWh“ a „Objem ≠ XM Trade“ sa počítajú. */
+const COMPUTED: Record<string, string> = { konci_do_4_mesiacov: ENDING, nad_30_mwh: OVER_30, objem_xm: VOLUME_XM };
+const flagCond = (f: string) => COMPUTED[f] ?? `('${f}' = ANY (k.flags))`;
 
 export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONTRACT_PAGE_SIZE) {
   const like = `%${f.q}%`;
@@ -26,8 +37,8 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
       ? sql`TRUE`
       : (CONTRACT_STATES as readonly string[]).includes(f.chip)
         ? sql`k.state = ${f.chip}`
-        : f.chip === 'konci_do_4_mesiacov'
-          ? sql.unsafe(ENDING)
+        : f.chip in COMPUTED
+          ? sql.unsafe(flagCond(f.chip))
           : sql`${f.chip} = ANY (k.flags)`;
   // Hľadanie a filtre platia aj pre počty v tlačidlách; tlačidlo iba pre riadky.
   const base = sql`
@@ -53,7 +64,7 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
     sql`
       SELECT count(*)::int AS all,
              ${sql.unsafe(CONTRACT_STATES.map((s) => `count(*) FILTER (WHERE k.state = '${s}')::int AS ${s}`).join(', '))},
-             ${sql.unsafe(CONTRACT_FLAGS.map((s) => `count(*) FILTER (WHERE ${s === 'konci_do_4_mesiacov' ? ENDING : `'${s}' = ANY (k.flags)`})::int AS ${s}`).join(', '))}
+             ${sql.unsafe(CONTRACT_FLAGS.map((s) => `count(*) FILTER (WHERE ${flagCond(s)})::int AS ${s}`).join(', '))}
         FROM contract_v k
        WHERE ${base}`,
   ]);
@@ -110,7 +121,11 @@ export async function contractCard(sql: Sql, id: string) {
            crm_contract_editable(k.company_id, k.person_id, k.owner_id) AS can_edit,
            crm_can_change_owner() AS can_change_owner,
            (crm_is_admin() OR EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id
-                                       WHERE u.id = crm_active_user_id() AND t.code = 'nakup')) AS can_edit_vykup
+                                       WHERE u.id = crm_active_user_id() AND t.code = 'nakup')) AS can_edit_vykup,
+           crm_approves_prices() AS can_resolve_threshold,
+           (SELECT to_jsonb(s) FROM small_business_volume(greatest(crm_today(), coalesce(k.valid_from, crm_today())), k.company_id) s
+             WHERE k.company_id IS NOT NULL) AS regulation_check,
+           (SELECT to_jsonb(d) FROM contract_volume_diff(greatest(crm_today(), coalesce(k.valid_from, crm_today())), k.id) d) AS volume_check
       FROM contract_v k
       LEFT JOIN contract pk ON pk.id = k.previous_contract_id
       LEFT JOIN contract rk ON rk.id = k.related_contract_id
@@ -129,7 +144,9 @@ export async function contractCard(sql: Sql, id: string) {
              o.voltage_level, o.breaker_a, o.public_lighting, o.price_regulation,
              (SELECT label FROM lookup_value WHERE list_code = 'sadzba_distribucie' AND code = o.pds_tariff LIMIT 1) AS tariff_label,
              p.name AS product_name, pg.name AS program_name,
-             co.qty_vt_mwh, co.qty_nt_mwh, co.source_power_kw, co.valid_from, co.valid_to, co.op_valid_to, co.is_binding,
+             co.qty_vt_mwh, co.qty_nt_mwh, co.source_power_kw,
+             CASE WHEN o.planned_consumption_vt_mwh IS NOT NULL OR o.planned_consumption_nt_mwh IS NOT NULL
+                  THEN coalesce(o.planned_consumption_vt_mwh, 0) + coalesce(o.planned_consumption_nt_mwh, 0) END AS xm_mwh, co.valid_from, co.valid_to, co.op_valid_to, co.is_binding,
              sk.id AS successor_id, sk.number AS successor_number
         FROM contract_oom co
         JOIN oom o ON o.id = co.oom_id
@@ -154,7 +171,7 @@ export async function contractCard(sql: Sql, id: string) {
        WHERE cp.contract_id = ${id}
        ORDER BY cp.valid_from, cp.slot, o.eic NULLS FIRST`,
     sql`
-      SELECT f.id, f.code, f.year, f.detail, f.raised_at, f.resolved_at, u.name AS resolved_by_name
+      SELECT f.id, f.code, f.year, f.detail, f.raised_at, f.resolved_at, f.resolved_note, u.name AS resolved_by_name
         FROM contract_flag f
         LEFT JOIN app_user u ON u.id = f.resolved_by
        WHERE f.contract_id = ${id}

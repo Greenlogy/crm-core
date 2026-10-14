@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CONTRACT_CHIPS, CONTRACT_TYPES, contractCard, contractFilters, exportContracts, listContracts, type ContractFilter } from '../queries/contracts';
 import { type AppEnv, UUID } from '../types';
-import { BadRequest, Forbidden, readBody } from '../validate';
+import { BadRequest, Forbidden, readBody, str } from '../validate';
 import { type Cell, xlsx } from '../xlsx';
 
 export const contracts = new Hono<AppEnv>();
@@ -148,11 +148,14 @@ contracts.patch('/contracts/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Uzavretie príznaku (Na kontrolu, Sprolongované bez novej ceny…) – kto smie zmluvu upraviť (RLS)
+// Uzavretie príznaku (Na kontrolu, Sprolongované bez novej ceny – Servis potvrdí navrhnutý produkt…) s voliteľnou
+// poznámkou – kto smie zmluvu upraviť (RLS)
 contracts.post('/contract-flags/:id/resolve', async (c) => {
   const fid = id(c.req.param('id'));
+  const body = await readBody(c.req);
+  const note = str(body, 'note', 'Poznámka', { max: 500, optional: true }) || null;
   const rows = await c.var.sql`
-    UPDATE contract_flag SET resolved_at = now(), resolved_by = crm_active_user_id()
+    UPDATE contract_flag SET resolved_at = now(), resolved_by = crm_active_user_id(), resolved_note = ${note}
      WHERE id = ${fid} AND resolved_at IS NULL
     RETURNING id`;
   if (rows.length === 0) return c.json({ error: 'Príznak nemôžete uzavrieť alebo už je uzavretý.' }, 403);

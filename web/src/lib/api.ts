@@ -1,6 +1,7 @@
 // Volania API jadra (čítanie aj zápis) a typy odpovedí. Číselné hodnoty z databázy prichádzajú ako text.
 
 import { useCallback, useEffect, useState } from 'react';
+import type { RegulationCheck } from '../components/regulation';
 
 export type Num = string | number | null;
 
@@ -183,6 +184,8 @@ type CardBase = {
 };
 
 export type CompanyCard = CardBase & {
+  /** malý podnik a hranica 30 MWh k dnešku (0029) */
+  regulation_check: RegulationCheck | null;
   country: 'SK' | 'CZ' | 'HR';
   legal_form: string | null;
   kind: 'company';
@@ -516,6 +519,12 @@ export type ContractCard = ContractListItem & {
   can_edit: boolean;
   can_change_owner: boolean;
   can_edit_vykup: boolean;
+  /** „Pod hranicou bez výnimky“ uzatvára iba „schvaľuje ceny“ (0029) */
+  can_resolve_threshold: boolean;
+  /** malý podnik a hranica 30 MWh (0029); null = zákazník nie je regulovaný malý podnik */
+  regulation_check: RegulationCheck | null;
+  /** objem zmluvy vs. XM Trade (0030); null = nehodnotí sa (výkup, VIWA, skončená, bez OOM spotreby) */
+  volume_check: VolumeCheck | null;
   vykup_min_additive: Num;
   balance: ContractYear[];
   exceptions: { id: string; years: number[]; price_model: string; requested_value: Num; threshold_value: Num; state: string;
@@ -539,6 +548,8 @@ export type ContractCard = ContractListItem & {
     qty_vt_mwh: Num;
     qty_nt_mwh: Num;
     source_power_kw: Num;
+    /** plánovaná spotreba VT + NT z XM Trade (0030) */
+    xm_mwh: Num;
     valid_from: string | null;
     valid_to: string | null;
     op_valid_to: string | null;
@@ -574,7 +585,58 @@ export type ContractYear = {
   portfolio_stale: boolean | null;
   missing: string | null;
 };
-export type ContractFlagRow = { id: string; code: string; year: number | null; detail: string | null; raised_at: string; resolved_at: string | null; resolved_by_name: string | null };
+export type ContractFlagRow = {
+  id: string;
+  code: string;
+  year: number | null;
+  detail: string | null;
+  raised_at: string;
+  resolved_at: string | null;
+  resolved_note: string | null;
+  resolved_by_name: string | null;
+};
+
+// Objem zmluvy vs. plánovaná spotreba z XM Trade (0030)
+export type VolumeCheck = {
+  contract_mwh: string;
+  xm_mwh: string | null;
+  diff_pct: string | null;
+  months: number;
+  oom_over: number;
+  xm_missing: number;
+  over: boolean;
+  message: string;
+};
+
+// Upozornenia (zvonček, 0028) a denník nočných behov (admin, Nákup)
+export type NotificationRow = {
+  id: string;
+  kind: string;
+  detail: string | null;
+  created_at: string;
+  read_at: string | null;
+  ref_date: string | null;
+  contract_id: string | null;
+  contract_number: string | null;
+  price_exception_id: string | null;
+  job_run_id: string | null;
+};
+export type JobRunError = { zmluva: string | null; cislo: string | null; krok: string; kod: string; text: string };
+export type JobRun = {
+  id: string;
+  job: string;
+  run_date: string;
+  test_date: boolean;
+  started_at: string;
+  finished_at: string | null;
+  result: Record<string, unknown> & {
+    cennik_spatne?: { pocet: number; zmluvy: string[] };
+    maly_podnik?: { pocet: number; zmluvy: string[] };
+    objem_xm?: { pocet: number; zmluvy: string[] };
+    chyby?: number;
+  };
+  errors: JobRunError[];
+};
 
 export class ApiError extends Error {
   status: number;
@@ -655,6 +717,8 @@ export type Me = {
   /** „schvaľuje ceny“ – cenové parametre, výnimky; vidí všetky zmluvy a maržu firmy */
   approves_prices: boolean;
   can_see_margin: boolean;
+  /** denník nočných behov (admin, Nákup – 0028) */
+  can_see_job_runs: boolean;
   environment: string;
   orgs: OrgRef[];
   permissions: Partial<Record<ModuleCode, Permission>>;

@@ -2,10 +2,13 @@
 // Údaje z Office portálu sú iba na čítanie (opravujú sa v Office portáli a ďalším importom). V CRM sa mení poznámka,
 // dôvod uzatvorenia, predošlá a súvisiaca zmluva, balík VIWA (Servis) a obchodník (vedenie, admin).
 // Ročná bilancia (0027): pridaná hodnota obchodníka (iba komodita) a marža firmy (iba s právom) po rokoch.
+// Prolongácia (0028): pri príznaku „Sprolongované bez novej ceny“ navrhnutý produkt (cenník nad 30 MWh) a potvrdenie
+// s poznámkou (odpoveď 36) – kto smie zmluvu upraviť (Servis všetky, obchodník svoje).
 
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
+import { RegulationNotice } from '../components/regulation';
 import { Card, Empty, ErrorState, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { send, useApi, type ContractCard, type ContractYear } from '../lib/api';
 import { useMe } from '../lib/me';
@@ -23,7 +26,6 @@ import {
   PRICE_SLOT,
   VIWA_PACKAGE,
 } from '../lib/labels';
-import { contractPeriod } from './ContractsPage';
 
 const yes = (v: boolean) => (v ? 'áno' : 'nie');
 
@@ -46,6 +48,8 @@ export function ContractPage() {
   const { data: k, error, reload } = useApi<ContractCard>(`/api/contracts/${id}`);
   const [editing, setEditing] = useState(false);
   const [pickYear, setPickYear] = useState<number | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);
   const save = useSave();
   const me = useMe();
 
@@ -61,11 +65,20 @@ export function ContractPage() {
   const thisYear = new Date().getFullYear();
   const bal: ContractYear | undefined =
     k.balance.find((b) => b.year === pickYear) ?? k.balance.find((b) => b.year === thisYear) ?? k.balance.find((b) => b.year > thisYear) ?? k.balance.at(-1);
-  const resolve = (flagId: string) =>
+  const resolve = (flagId: string, note?: string) =>
     save.run(async () => {
-      await send('POST', `/api/contract-flags/${flagId}/resolve`);
+      await send('POST', `/api/contract-flags/${flagId}/resolve`, { note: note ?? '' });
+      setConfirming(null);
       reload();
     });
+  // Navrhnutý produkt prolongácie: cenníkové ceny komodity po konci účinnosti z Office portálu
+  const prolongProducts = [
+    ...new Set(
+      k.prices
+        .filter((p) => p.slot === 'komodita' && p.price_model === 'cennik' && !!k.valid_to && !!p.valid_from && p.valid_from > k.valid_to)
+        .map((p) => p.product_name ?? p.product ?? '–'),
+    ),
+  ];
 
   return (
     <>
@@ -102,6 +115,22 @@ export function ContractPage() {
         </div>
       </header>
       {save.error && <Notice tone="error">{save.error}</Notice>}
+      {closing && (
+        <CloseThresholdPanel
+          busy={save.busy}
+          error={save.error}
+          onClose={() => setClosing(null)}
+          onConfirm={(note) => resolve(closing, note).then(() => setClosing(null))}
+        />
+      )}
+      {confirming && (
+        <ConfirmProlongPanel
+          products={prolongProducts}
+          busy={save.busy}
+          onClose={() => setConfirming(null)}
+          onConfirm={(note) => resolve(confirming, note)}
+        />
+      )}
       {editing && (
         <EditPanel
           k={k}
@@ -113,8 +142,25 @@ export function ContractPage() {
         />
       )}
 
+      <RegulationNotice check={k.regulation_check} />
+      {k.volume_check?.over && (
+        <div className="reg-notice warn" role="alert">
+          <Pill tone="warning">Objem ≠ XM Trade</Pill>
+          <span>{k.volume_check.message}</span>
+        </div>
+      )}
       <section className="kpis" aria-label="Ukazovatele">
-        <Kpi label="Účinnosť" value={contractPeriod(k)} sub={k.auto_prolong ? 'automatická prolongácia o 12 mesiacov' : 'bez automatickej prolongácie'} />
+        <Kpi
+          label="Účinnosť"
+          value={period(k.valid_from, k.effective_to)}
+          sub={
+            k.crm_valid_to && k.valid_to && k.crm_valid_to > k.valid_to
+              ? `sprolongovaná · pôvodne do ${date(k.valid_to)}`
+              : k.auto_prolong
+                ? 'automatická prolongácia o 12 mesiacov'
+                : 'bez automatickej prolongácie'
+          }
+        />
         <Kpi label="Zmluvné množstvo" value={`${mwh(vt + nt)} / rok`} sub={`${num(k.ooms.length, 0)} OOM · VT ${num(vt, 3)} · NT ${num(nt, 3)}`} />
         <Kpi
           label={`Pridaná hodnota ${bal?.year ?? ''}`}
@@ -140,7 +186,19 @@ export function ContractPage() {
               title={<Pill tone={CONTRACT_FLAG[f.code]?.tone ?? 'neutral'}>{CONTRACT_FLAG[f.code]?.label ?? f.code}</Pill>}
               meta={`${f.detail ?? ''} · od ${date(f.raised_at)}`}
               side={
-                k.can_edit && f.code !== 'chyba_cena' ? (
+                f.code === 'pod_hranicou_bez_vynimky' ? (
+                  k.can_resolve_threshold ? (
+                    <button type="button" className="btn" disabled={save.busy} onClick={() => setClosing(f.id)}>
+                      Uzavrieť s poznámkou
+                    </button>
+                  ) : (
+                    <span className="caption">uzatvára schvaľovateľ cien</span>
+                  )
+                ) : k.can_edit && f.code === 'sprolongovane_bez_ceny' ? (
+                  <button type="button" className="btn" disabled={save.busy} onClick={() => setConfirming(f.id)}>
+                    Potvrdiť produkt
+                  </button>
+                ) : k.can_edit && f.code !== 'chyba_cena' ? (
                   <button type="button" className="btn" disabled={save.busy} onClick={() => resolve(f.id)}>
                     Vyriešené
                   </button>
@@ -148,7 +206,10 @@ export function ContractPage() {
               }
             />
           ))}
-          <div className="caption">„Chýba cena“ zmizne sama, keď cena pribudne (import, balík VIWA, cenník).</div>
+          <div className="caption">
+            „Chýba cena“ zmizne sama, keď cena pribudne (import, balík VIWA, cenník). „Pod hranicou bez výnimky“ uzatvára iba
+            schvaľovateľ cien s poznámkou, alebo sa uzavrie sama schválenou výnimkou.
+          </div>
         </Card>
       )}
 
@@ -216,6 +277,9 @@ export function ContractPage() {
                 <th>Produkt</th>
                 <th className="num">VT [MWh]</th>
                 <th className="num">NT</th>
+                <th className="num" title="Plánovaná spotreba VT + NT z XM Trade; pri zmluve kratšej ako rok za obdobie zmluvy">
+                  XM Trade
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -246,6 +310,9 @@ export function ContractPage() {
                   </td>
                   <td className="num">{num(o.qty_vt_mwh, 3)}</td>
                   <td className="num">{num(o.qty_nt_mwh, 3)}</td>
+                  <td className="num">
+                    <XmCell o={o} months={k.volume_check?.months ?? 12} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -456,3 +523,81 @@ function BalanceCard(props: { k: ContractCard; bal: ContractYear | undefined; on
   );
 }
 
+/** Servis potvrdí navrhnutý produkt prolongácie (odpoveď 36): iný produkt = nová zmluva v Office portáli. */
+function ConfirmProlongPanel(props: { products: string[]; busy: boolean; onClose: () => void; onConfirm: (note: string) => void }) {
+  const [note, setNote] = useState('');
+  return (
+    <SidePanel
+      title="Potvrdiť produkt prolongácie"
+      onClose={props.onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={props.onClose}>
+            Zrušiť
+          </button>
+          <button type="button" className="btn primary" disabled={props.busy} onClick={() => props.onConfirm(note)}>
+            Potvrdiť
+          </button>
+        </>
+      }
+    >
+      <Rows
+        rows={[
+          [
+            'Navrhnutý produkt',
+            props.products.length > 0 ? props.products.join(', ') : 'bez cenníka – pokračuje posledná cena alebo aditív zo zmluvy',
+          ],
+        ]}
+      />
+      <Field label="Poznámka" hint="Nepovinné. Iný produkt sa nemení tu – dojedná sa nová zmluva v Office portáli.">
+        <TextInput value={note} onChange={setNote} maxLength={500} />
+      </Field>
+    </SidePanel>
+  );
+}
+
+/** „Pod hranicou bez výnimky“ uzatvára iba schvaľovateľ cien s povinnou poznámkou (zadanie časť 7, 0029). */
+function CloseThresholdPanel(props: { busy: boolean; error: string | null; onClose: () => void; onConfirm: (note: string) => void }) {
+  const [note, setNote] = useState('');
+  return (
+    <SidePanel
+      title="Uzavrieť „Pod hranicou bez výnimky“"
+      onClose={props.onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={props.onClose}>
+            Zrušiť
+          </button>
+          <button type="button" className="btn primary" disabled={props.busy || note.trim() === ''} onClick={() => props.onConfirm(note.trim())}>
+            Uzavrieť
+          </button>
+        </>
+      }
+    >
+      {props.error && <Notice tone="error">{props.error}</Notice>}
+      <Field label="Poznámka" hint="Povinná – prečo cena pod hranicou ostáva bez výnimky.">
+        <TextInput value={note} onChange={setNote} maxLength={500} autoFocus />
+      </Field>
+    </SidePanel>
+  );
+}
+
+/** Plánovaná spotreba z XM Trade pri OOM a rozdiel oproti zmluvnému množstvu (0030); nad 5 % zvýraznené. */
+function XmCell(props: { o: ContractCard['ooms'][number]; months: number }) {
+  const { o } = props;
+  if (o.type !== 'spotreba') return <>–</>;
+  if (o.xm_mwh === null || Number(o.xm_mwh) <= 0) return <span className="caption">chýba</span>;
+  const xm = (Number(o.xm_mwh) * props.months) / 12;
+  const qty = Number(o.qty_vt_mwh ?? 0) + Number(o.qty_nt_mwh ?? 0);
+  const pctDiff = ((qty - xm) / xm) * 100;
+  const over = Math.abs(qty - xm) > 0.05 * xm;
+  return (
+    <>
+      {num(xm, 3)}
+      <div className={`sub${over ? ' text-negative' : ''}`}>
+        {pctDiff >= 0 ? '+' : '−'}
+        {num(Math.abs(pctDiff), 1)} %
+      </div>
+    </>
+  );
+}

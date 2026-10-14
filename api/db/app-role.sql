@@ -70,6 +70,10 @@ GRANT UPDATE (viwa_package, owner_id) ON contract TO crm_app;
 -- (bilanciu vracia contract_year_calc, marža iba s právom).
 GRANT UPDATE (vykup_min_additive) ON contract TO crm_app;
 REVOKE ALL ON contract_year_basis FROM crm_app;
+-- 0028: upozornenia zakladá iba databáza (nočný beh, spúšťače); aplikácia číta vlastné a označí ich ako prečítané (RLS).
+-- Záznam nočných behov iba číta admin (RLS).
+REVOKE INSERT, UPDATE ON notification, job_run FROM crm_app;
+GRANT UPDATE (read_at) ON notification TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

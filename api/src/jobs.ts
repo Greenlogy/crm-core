@@ -24,3 +24,61 @@ export async function dailyOomActivation(env: Env): Promise<void> {
     await sql.end();
   }
 }
+
+type ContractRun = {
+  bezi?: boolean;
+  regulacia?: number;
+  cennik?: number;
+  cennik_spatne?: { pocet: number };
+  prolongovane?: number;
+  ukoncene?: number;
+  konci_4_mesiace?: number;
+  zakaznici?: number;
+  chyby?: number;
+};
+
+// Nočný beh zmlúv (contract_daily_run, 0028): regulácia, cenník, prolongácia, príznaky, upozornenia, stav zákazníka.
+// Chyby jednotlivých zmlúv zapíše databáza do denníka (job_run) a upozorní admina; beh pokračuje.
+// Iba tento beh dostane dlhší časový limit (rola crm_app má 30 s pre bežné API) – SET LOCAL platí iba v jeho transakcii.
+export async function dailyContractRun(env: Env): Promise<void> {
+  const sql = connect(env);
+  try {
+    const r = await sql.begin(async (tx) => {
+      await tx`SET LOCAL statement_timeout = '600s'`;
+      const [row] = await tx<{ r: ContractRun }[]>`SELECT contract_daily_run() AS r`;
+      return row?.r;
+    });
+    if (r?.bezi) {
+      console.log('Nočný beh zmlúv: už beží iný beh, preskočené');
+      return;
+    }
+    console.log(
+      `Nočný beh zmlúv: regulácia ${r?.regulacia ?? 0}, cenník ${r?.cennik ?? 0} (spätne ${r?.cennik_spatne?.pocet ?? 0}), ` +
+        `prolongované ${r?.prolongovane ?? 0}, ukončené ${r?.ukoncene ?? 0}, upozornenia 4 mesiace ${r?.konci_4_mesiace ?? 0}, ` +
+        `zákazníci ${r?.zakaznici ?? 0}, chyby ${r?.chyby ?? 0}`,
+    );
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? 'unknown';
+    console.error(`Nočný beh zmlúv zlyhal: ${(err as Error).name} ${code}`);
+    throw err;
+  } finally {
+    await sql.end();
+  }
+}
+
+// Celý nočný beh: najprv OOM (plány, regulácia na OOM, aktivácia), potom zmluvy. Zlyhanie OOM nezastaví zmluvy;
+// ak niektorá časť zlyhá celá, handler skončí chybou (viditeľné vo Workers Observability).
+export async function nightlyRun(env: Env): Promise<void> {
+  let failed = false;
+  try {
+    await dailyOomActivation(env);
+  } catch {
+    failed = true;
+  }
+  try {
+    await dailyContractRun(env);
+  } catch {
+    failed = true;
+  }
+  if (failed) throw new Error('Nočný beh skončil s chybou (podrobnosti v logu vyššie).');
+}

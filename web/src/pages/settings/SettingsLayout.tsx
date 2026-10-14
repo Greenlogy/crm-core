@@ -1,5 +1,5 @@
 // Nastavenia: vnútorné menu (dizajn 11–16, 24, 29) a obsah sekcie. Admin všetko; „schvaľuje ceny“ (obchodný riaditeľ)
-// iba Cenové parametre (modul 4, rozhodnutie 7).
+// iba Cenové parametre (modul 4, rozhodnutie 7); Nákup iba Nočný beh (denník, 0028).
 
 import type { ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -16,20 +16,23 @@ export const SETTINGS_SECTIONS = [
   { path: 'vlastne-polia', label: 'Vlastné polia' },
   { path: 'pipelines', label: 'Pipelines a stage' },
   { path: 'audit', label: 'Audit' },
+  { path: 'nocny-beh', label: 'Nočný beh', jobs: true },
 ] as const;
 
 export function SettingsLayout() {
   const me = useMe();
   const location = useLocation();
   const section = location.pathname.split('/')[2] ?? '';
-  if (!me.is_admin && !me.approves_prices) {
+  if (!me.is_admin && !me.approves_prices && !me.can_see_job_runs) {
     return <div className="error-box" role="alert">Nastavenia môže otvoriť iba admin.</div>;
   }
-  // Obchodný riaditeľ bez admina: iba Cenové parametre
-  if (!me.is_admin && section !== 'cenove-parametre') {
-    return <Navigate to="/nastavenia/cenove-parametre" replace />;
+  // Bez admina iba povolené sekcie: Cenové parametre („schvaľuje ceny“), Nočný beh (Nákup)
+  const allowed = (s: (typeof SETTINGS_SECTIONS)[number]) =>
+    me.is_admin || ('approver' in s && s.approver && me.approves_prices) || ('jobs' in s && s.jobs && me.can_see_job_runs);
+  const sections = SETTINGS_SECTIONS.filter(allowed);
+  if (!me.is_admin && !sections.some((s) => s.path === section)) {
+    return <Navigate to={`/nastavenia/${sections[0].path}`} replace />;
   }
-  const sections = SETTINGS_SECTIONS.filter((s) => me.is_admin || ('approver' in s && s.approver));
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Nastavenia">
@@ -42,7 +45,9 @@ export function SettingsLayout() {
         <div className="caption settings-nav-note">
           {section === 'cenove-parametre'
             ? 'Mení admin a obchodný riaditeľ. Každá zmena ide do auditu.'
-            : 'Mení iba admin. Každá zmena ide do auditu.'}
+            : section === 'nocny-beh'
+              ? 'Iba čítanie – vidí admin a Nákup.'
+              : 'Mení iba admin. Každá zmena ide do auditu.'}
         </div>
       </nav>
       <div className="settings-body">

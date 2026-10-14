@@ -66,6 +66,33 @@ export const CONTRACT_FLAG: Record<string, { label: string; tone: Tone }> = {
   sprolongovane_bez_ceny: { label: 'Sprolongované bez novej ceny', tone: 'warning' },
   konci_do_4_mesiacov: { label: 'Končí do 4 mesiacov', tone: 'info' },
   pod_hranicou_bez_vynimky: { label: 'Pod hranicou bez výnimky', tone: 'negative' },
+  nad_30_mwh: { label: 'Nad 30 MWh v regulácii', tone: 'warning' },
+  objem_xm: { label: 'Objem ≠ XM Trade', tone: 'warning' },
+};
+
+// Upozornenia (zvonček, 0028)
+export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = {
+  konci_4_mesiace: { label: 'Končí do 4 mesiacov', tone: 'info' },
+  sprolongovana: { label: 'Sprolongovaná', tone: 'warning' },
+  neprolongovana: { label: 'Bez prolongácie', tone: 'warning' },
+  pod_hranicou: { label: 'Pod hranicou', tone: 'negative' },
+  vynimka_nova: { label: 'Žiadosť o výnimku', tone: 'info' },
+  vynimka_rozhodnutie: { label: 'Rozhodnutie o výnimke', tone: 'info' },
+  nocny_beh_chyba: { label: 'Chyba nočného behu', tone: 'negative' },
+  maly_podnik: { label: 'Malý podnik – 30 MWh', tone: 'warning' },
+  objem_xm: { label: 'Objem ≠ XM Trade', tone: 'warning' },
+};
+
+// Kroky nočného behu zmlúv (denník, 0028)
+export const JOB_STEP: Record<string, string> = {
+  regulacia: 'Regulácia',
+  cennik: 'Cenník',
+  prolongacia: 'Prolongácia',
+  priznaky: 'Príznaky',
+  upozornenia: 'Upozornenia',
+  zakaznik: 'Stav zákazníka',
+  maly_podnik: 'Malý podnik – 30 MWh',
+  objem_xm: 'Objem ≠ XM Trade',
 };
 
 export const CLOSE_REASON: Record<string, string> = {

@@ -2,6 +2,26 @@
 
 ## 2026-10-14
 
+- Modul 4, F4 uzavretá: `0028`–`0030` na `dev` (`db/schema.sql` z `dev`), kód nasadený na Test, Peter otestoval.
+- Modul 4, `0030_objem_xm` (overená nanečisto, 167 kontrol; nenasadené): upozornenie, ak sa objem zmluvy (Office portal) líši od plánovanej spotreby z XM Trade o viac ako 5 % – nočný beh (denník, upozornenie obchodníkovi a schvaľovateľom cien, znova iba po zmene objemu), import, karta zmluvy (stĺpec XM Trade s rozdielom), filter „Objem ≠ XM Trade“. Bilancia a provízia ostávajú na zmluvnom množstve. Testy `checks_objem_xm.sql` (Z6); skript `zmluvy-test.sh` s TEST-NB-11. Cockpit → `0031`.
+- Modul 4, `0029_male_podniky` (overená nanečisto, 165 kontrol; nenasadené):
+  - malý podnik: ročný objem zo zmlúv aj z XM Trade, hranica 30,000 MWh vrátane; hláška na karte zmluvy a firmy, filter „Nad 30 MWh v regulácii“, upozornenie v importe, denník a upozornenie z nočného behu;
+  - vyradenie malého podniku nad 30 MWh = „Chýba cena“ s textom, nie chyba behu;
+  - „Pod hranicou bez výnimky“ uzatvára iba schvaľovateľ cien s povinnou poznámkou; „Chýba cena“ iba databáza; príznak sa dá iba uzavrieť.
+  - Testy `checks_male_podniky.sql` (Z5); skript `zmluvy-test.sh` s TEST-NB-09 a 10. Cockpit → `0030`.
+- Modul 4, F4 časť 2 (lokálne overené, nenasadené):
+  - `0028` podľa Petrových úprav: prolongácia iba Aktívnych/Pripravovaných OOM (ostatné `end_fixed`), zmluva bez nich → Ukončená s upozornením; chýbajúci pár ANO ↔ NIE = chyba v denníku, admin, znova ďalšiu noc; spätne zapísaný cenník v denníku (Nákup ho vidí); dlhší limit iba pre nočný beh. Testy 161.
+  - Worker: nočný beh zmlúv po behu OOM; API upozornení a denníka; potvrdenie prolongácie s poznámkou.
+  - Web: zvonček „Upozornenia“, Nastavenia → Nočný beh, potvrdenie produktu prolongácie na karte zmluvy.
+  - Oprava: „Vyriešené“ na karte zmluvy (POST bez JSON → 415).
+  - Skript `db/test-data/zmluvy-test.sh dev vytvor|zmaz|beh|nanecisto`.
+- Modul 4, F4 časť 1: migrácia `0028_zmluvy_nocny_beh` (overená nanečisto: hore, testy 161, dole = schéma 0027, hore = rovnaká; na `dev` nespustená):
+  - nočný beh zmlúv `contract_daily_run` (regulácia, cenník, prolongácia, príznaky, upozornenia, stav zákazníka), každá zmluva samostatne, záznam `job_run`;
+  - upozornenia `notification` (4 mesiace pred koncom, prolongácia, Pod hranicou, výnimky, chyby behu);
+  - časový rez cien pri zmene regulácie, rozdielový zápis cien (audit iba zmien);
+  - testovací dátum pre ručný beh (iba vlastník databázy).
+  - Testy `checks_zmluvy_nocny_beh.sql` (Z4), `api/db/app-role.sql` (upozornenia, `job_run`).
+  - Návrh DB v0.16 (plán F4, časť 27), v0.17 (časť 27.12). F5 (Cockpit) odložená na prechod z HubSpotu.
 - Modul 4, F3 uzavretá: `0027` na `dev` (`db/schema.sql` z `dev`), nasadené na Test, Peter otestoval.
 - Modul 4, F3 časť 2 – API a obrazovky:
   - zoznam zmlúv (25): rok bilancie, Pridaná hodnota a Marža firmy, export .xlsx, čip „Končí do 4 mesiacov“;

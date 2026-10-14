@@ -7,6 +7,7 @@ import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
 import { ContractsPage } from './pages/ContractsPage';
 import { ExceptionsPage } from './pages/ExceptionsPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { OomImportPage } from './pages/OomImportPage';
@@ -23,6 +24,7 @@ import { AuditPage } from './pages/settings/AuditPage';
 import { CompanyPage } from './pages/settings/CompanyPage';
 import { CustomFieldsPage } from './pages/settings/CustomFieldsPage';
 import { ImportAliasesPage } from './pages/settings/ImportAliasesPage';
+import { JobRunsPage } from './pages/settings/JobRunsPage';
 import { LookupsPage } from './pages/settings/LookupsPage';
 import { PipelinesPage } from './pages/settings/PipelinesPage';
 import { PricingPage } from './pages/settings/PricingPage';
@@ -56,6 +58,7 @@ const router = createBrowserRouter([
       { path: 'zmluvy/import', element: <ContractImportPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
       { path: 'vynimky', element: <ExceptionsPage /> },
+      { path: 'upozornenia', element: <NotificationsPage /> },
       // Cenníky: pevné adresy pred /cenniky/:id (stránka detailu prijme iba platné ID)
       { path: 'cenniky', element: <PriceListsPage /> },
       { path: 'cenniky/produkty', element: <ProductsPage /> },
@@ -76,6 +79,7 @@ const router = createBrowserRouter([
           { path: 'vlastne-polia', element: <CustomFieldsPage /> },
           { path: 'pipelines', element: <PipelinesPage /> },
           { path: 'audit', element: <AuditPage /> },
+          { path: 'nocny-beh', element: <JobRunsPage /> },
         ],
       },
       { path: '*', element: <Navigate to="/zakaznici" replace /> },

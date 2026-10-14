@@ -584,6 +584,21 @@ a:hover {
   height: 14px;
   margin: 10px 0;
 }
+.reg-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--info);
+  background: var(--info-tint);
+}
+.reg-notice.warn {
+  border-color: var(--warning);
+  background: var(--warning-tint);
+}
 .error-box {
   border: 1px solid var(--negative);
   background: var(--negative-tint);
@@ -619,6 +634,23 @@ a:hover {
   font-size: 12px;
   color: var(--ink-subtle);
   font-variant-numeric: tabular-nums;
+}
+/* zvonček: neprečítané upozornenia (0028) */
+.nav-count-alert {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--negative-tint);
+  color: var(--negative);
+  font-weight: 600;
+  text-align: center;
+}
+.notif-unread .item-title {
+  font-weight: 600;
+}
+.notif-unread {
+  border-left: 3px solid var(--info, currentColor);
+  padding-left: 8px;
 }
 .avatar.neutral {
   background: var(--surface-muted);

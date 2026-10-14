@@ -32,7 +32,9 @@ import {
   type CustomerKind,
 } from './queries/customers';
 import { listOom, OOM_CHIPS, OOM_TYPES, oomCard, oomFilters } from './queries/oom';
-import { dailyOomActivation } from './jobs';
+import { nightlyRun } from './jobs';
+import { jobRuns } from './routes/job-runs';
+import { notifications } from './routes/notifications';
 
 const app = new Hono<AppEnv>().basePath('/api');
 
@@ -103,6 +105,7 @@ app.get('/me', async (c) => {
     SELECT u.id, u.name, u.email, u.is_admin, t.code AS team_code, t.name AS team_name,
            t.can_change_owner OR u.is_admin AS can_change_owner,
            u.seller_type, u.approves_prices, crm_can_see_margin() AS can_see_margin,
+           crm_can_see_job_runs() AS can_see_job_runs,
            ${c.env.ENVIRONMENT ?? 'test'}::text AS environment,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
                                                        'currency', o.currency, 'status', o.status, 'default', o.is_default)
@@ -131,6 +134,8 @@ app.route('/', priceListsWrite);
 app.route('/', productsWrite);
 app.route('/', pricing);
 app.route('/', priceExceptions);
+app.route('/', notifications);
+app.route('/', jobRuns);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
@@ -220,6 +225,6 @@ app.onError((err, c) => {
 export default {
   fetch: app.fetch,
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(dailyOomActivation(env));
+    ctx.waitUntil(nightlyRun(env));
   },
 } satisfies ExportedHandler<Env>;

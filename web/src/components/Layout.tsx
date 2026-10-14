@@ -1,7 +1,7 @@
 // Ľavé menu (logo, skupiny; dole Nastavenia pre admina, prostredie, používateľ, tmavý režim) a obsah stránky.
 
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApi, type MenuCounts } from '../lib/api';
 import { num } from '../lib/format';
 import { ENVIRONMENT_LABEL, useMe } from '../lib/me';
@@ -33,6 +33,7 @@ const ICONS = {
   contracts: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8',
   moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   pricelist: 'M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82M7 7h.01',
   sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
 };
@@ -42,6 +43,21 @@ export function Layout() {
   const defaultOrg = me.orgs.find((o) => o.default) ?? me.orgs[0];
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const { data: counts } = useApi<MenuCounts>('/api/counts');
+  // Zvonček: počet neprečítaných upozornení – obnoví sa pri zmene stránky a každých 5 minút
+  const location = useLocation();
+  const { data: bell, reload: reloadBell } = useApi<{ unread: number }>('/api/notifications/count');
+  useEffect(() => {
+    reloadBell();
+  }, [location.pathname, reloadBell]);
+  useEffect(() => {
+    const t = window.setInterval(reloadBell, 5 * 60_000);
+    return () => window.clearInterval(t);
+  }, [reloadBell]);
+  const settingsPath = me.is_admin
+    ? '/nastavenia'
+    : me.approves_prices
+      ? '/nastavenia/cenove-parametre'
+      : '/nastavenia/nocny-beh';
   const navClass = ({ isActive }: { isActive: boolean }) => `nav${isActive ? ' active' : ''}`;
 
   useEffect(() => {
@@ -108,8 +124,17 @@ export function Layout() {
         </NavLink>
 
         <div className="sidebar-foot">
-          {(me.is_admin || me.approves_prices) && (
-            <NavLink to={me.is_admin ? '/nastavenia' : '/nastavenia/cenove-parametre'} className={navClass}>
+          <NavLink to="/upozornenia" className={navClass}>
+            <Icon d={ICONS.bell} />
+            Upozornenia
+            {bell && bell.unread > 0 && (
+              <span className="nav-count nav-count-alert" aria-label={`${bell.unread} neprečítaných`}>
+                {num(bell.unread, 0)}
+              </span>
+            )}
+          </NavLink>
+          {(me.is_admin || me.approves_prices || me.can_see_job_runs) && (
+            <NavLink to={settingsPath} className={navClass}>
               <Icon d={ICONS.settings} />
               Nastavenia
             </NavLink>

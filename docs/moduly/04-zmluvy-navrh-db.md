@@ -1,8 +1,13 @@
 # Modul 4 – Zmluvy a ceny: návrh databázy
 
-Verzia 0.15 · 14. 10. 2026 · `0027_zmluvy_bilancia` na `dev`, F3 na Teste otestovaná (časti 26.6, 26.7) · **`0023`–`0025` na `dev` (podľa `db/schema.sql`, commit `b301345`); `0026_zmluvy_import` overená nanečisto (časť 25.7), na `dev` nespustená**.
+Verzia 0.20 · 14. 10. 2026 · **`0023`–`0030` na `dev`, F1–F4 na Teste otestované** (podľa `db/schema.sql` a STAV.md) · F5 (Cockpit, `0031`) odložená na prechod z HubSpotu.
 - v0.1 = návrh;
 - v0.2 = Petrove odpovede 1–6 k časti 16 a doplnky a, b: pomerné množstvo v neúplnom roku, produkty Green namiesto Dodávka B2B, zákazník založený importom a `Osoba_ID`, príznak verejného osvetlenia, ručné trhové ceny, X2 /VN/, prekrytie nad skutočnou dobou platnosti s nástupníctvom, lokálne overenie importu na vzorových exportoch; plán migrácie `0023` (časť 18);
+- v0.20 = `0030_objem_xm`: upozornenie pri rozdiele objemu zmluvy a XM Trade nad 5 % (časť 29), Cockpit → `0031`;
+- v0.19 = `0029_male_podniky`: hranica 30 MWh (zmluvy aj XM Trade), práva uzatvárania príznakov, Cockpit → `0030` (časť 28);
+- v0.18 = Petrove úpravy k `0028` (prolongácia iba odoberajúcich OOM, Ukončená, chýbajúci pár = chyba, spätný cenník v denníku, limit iba pre beh), skript `zmluvy-test.sh`, kód F4 (časť 27.13);
+- v0.17 = odpovede 34–36, `0028` napísaná a overená nanečisto (časť 27.12);
+- v0.16 = plán F4 (časť 27); F5 odložená na prechod z HubSpotu spolu s prenosom dát a históriou BL/PL; opravený úvodný riadok (stav `0026`, `0027`);
 - v0.14 = odpovede 26–32, `0027` napísaná a overená nanečisto (časť 26.6);
 - v0.13 = plán F3 `0027_zmluvy_bilancia` (časť 26);
 - v0.12 = odpovede 23–25 v `0026`, API importu a obrazovky 25–27 lokálne overené (časť 25.8);
@@ -62,7 +67,9 @@ Nič sa nespúšťa, databáza sa nemení.
 | `0026_zmluvy_import` | `contract_import`, `Osoba_ID` a príznak „založený importom“ pri zákazníkovi, funkcie náhľadu a uloženia importu Office portálu, import OOM priamo z XM Trade | 8 | F2 |
 | `0027_zmluvy_bilancia` | cena pre obchodníka, ročná bilancia (pridaná hodnota, marža firmy), príznaky Pod hranicou / Chýba cena | 4, 6, 7 | F3 |
 | `0028_zmluvy_nocny_beh` | upozornenia, automatická prolongácia, prechod na novú verziu cenníka, časový rez pri zmene regulácie | 7 | F4 |
-| `0029_zmluvy_cockpit` | rola `crm_cockpit`, pohľady pre Cockpit (zrkadlo dealov a OOM, ročné riadky, súhrny) | 10 | F5 |
+| `0029_male_podniky` | malý podnik a hranica 30 MWh, kto uzatvára príznaky – časť 28 | 28 | F4 |
+| `0030_objem_xm` | objem zmluvy vs. XM Trade nad 5 % – časť 29 | 29 | F4 |
+| `0031_zmluvy_cockpit` | rola `crm_cockpit`, pohľady pre Cockpit (zrkadlo dealov a OOM, ročné riadky, súhrny) – **odložené na prechod z HubSpotu** (Peter, 14. 10.) | 10 | F5 |
 
 ---
 
@@ -921,7 +928,7 @@ Ku každej fáze testovací scenár pre Petra a kontroly v `db/test/checks_zmluv
 | **F2** Zmluvy a import | zmluva, OOM v zmluve, ceny; import Office portálu a XM Trade s náhľadom; zoznam a karta zmluvy bez bilancie; RLS | `0025`, `0026` | 25, 26, 27 |
 | **F3** Bilancia a výnimky | snímka nákladu, ročná bilancia (pridaná hodnota, marža firmy), výnimky a schvaľovanie, príznaky Pod hranicou a Chýba cena, sekcia Zmluvy na karte zákazníka | `0027` | 25, 26 (bilancia), 28, karta zákazníka |
 | **F4** Nočný beh | upozornenia (`notification`), prolongácia, prechod cenníka, časový rez regulácie; zapnutie `customer_status_auto` | `0028` | zvonček, prehľady príznakov |
-| **F5** Cockpit | rola `crm_cockpit`, pohľady a endpointy, service token; porovnanie v Cockpite (mimo repozitára) | `0029` | – |
+| **F5** Cockpit | rola `crm_cockpit`, pohľady a endpointy, service token; porovnanie v Cockpite (mimo repozitára) – **odložené na prechod z HubSpotu** spolu s prenosom dát a históriou BL/PL | `0031` | – |
 
 ---
 
@@ -1761,3 +1768,239 @@ Upravené staršie testy:
 - 26: chýba „Otvoriť v Office portáli“ a záložky Kontaktné osoby a Dokumenty (zatiaľ bez zdroja údajov).
 - 29: aditívy VIWA nie sú zoskupené do jedného riadku a energopomoc nie je po rokoch (stav z F1).
 
+
+---
+
+## 27. Plán F4 – migrácia `0028_zmluvy_nocny_beh` a kód – na schválenie
+
+Cieľ: nočný beh zmlúv (časť 7.2) – časový rez pri zmene regulácie, prechod na novú verziu cenníka, automatická prolongácia, príznaky a upozornenia (zvonček), prepočet stavu zákazníka.
+
+### 27.1 Časovač – v Cloudflare sa nič nemení
+
+- **Overené:** nočná úloha z modulu 2 existuje. `wrangler.toml` má `crons = ["5 22 * * *", "5 23 * * *"]`, handler `scheduled` v `api/src/index.ts` volá `dailyOomActivation` (`api/src/jobs.ts`) → `oom_daily_run()` (plány OOM, regulácia na OOM, aktivácia).
+- F4 pridá do toho istého handlera druhé volanie `contract_daily_run()`. **Nový časovač netreba.** V `wrangler.toml` sa zmení iba komentár; nasadenie Workera ako doteraz.
+- Dva časy pokryjú zimný aj letný čas. Spustenie, ktoré padne ešte na predošlý deň v Bratislave (v zime 22:05 UTC = 23:05), nič nové nenájde. Beh je idempotentný, druhé spustenie nič nezmení.
+- Súbežnosť: beh si vezme zámok (`pg_try_advisory_xact_lock`); keď už beží (napr. ručný beh), druhý skončí s „beží“.
+
+### 27.2 Poradie krokov
+
+| # | Krok | Prečo v tomto poradí |
+| --- | --- | --- |
+| 0 | **OOM** (existujúci `oom_daily_run`, samostatné volanie): plány, regulácia na OOM, aktivácia | OOM a ich regulácia musia byť aktuálne pred cenami zmlúv |
+| 1 | **Regulácia – časový rez** cien zmlúv na OOM, ktorých zmena regulácie nastala (`valid_from ≤ dnes`) a zmluvy ju ešte nemajú | ceny pred prolongáciou |
+| 2 | **Cenník – prechod na novú verziu** pri zmluvách s cenníkovými cenami | ceny pred prolongáciou |
+| 3 | **Prolongácia** zmlúv, ktorých OOM skončili (`valid_to < dnes`) bez nástupcu | nové obdobie dostane ceny z aktuálnych verzií |
+| 4 | **Príznaky:** „Chýba cena“ (nový rok, nové obdobia), „Končí do 4 mesiacov“, uzavretie neplatných | z výsledku krokov 1–3 |
+| 5 | **Upozornenia** (časové): 4 mesiace pred koncom, vykonaná prolongácia, chyby behu pre admina | z výsledku krokov 3–4 |
+| 6 | **Stav zákazníka** pre dotknutých zákazníkov (začiatok alebo koniec účinnosti, prolongácia), ak je zapnutý `customer_status_auto` | posledný, nad hotovými zmluvami |
+
+Upozornenia na udalosti (Pod hranicou bez výnimky, nová žiadosť o výnimku, rozhodnutie o výnimke) nečakajú na noc – vzniknú hneď spúšťačom.
+
+### 27.3 Ceny: jeden výpočet pre import aj nočný beh
+
+- Cenníkové ceny dnes počíta `contract_price_list_rows` z obdobia OOM v zmluve × schválené verzie cenníkov (`0026`) a zapisuje `contract_price_list_sync`.
+  - **Nová verzia cenníka:** tá istá funkcia vráti obdobia rozdelené podľa novej verzie → krok 2 je `sync` zmlúv s cenníkovou cenou.
+  - **Prolongácia:** dlhšie obdobie OOM → `sync` doplní cenník nad 30 MWh (FIX, otázka 23); SPOT a výkup pokračujú posledným aditívom (otázka 23).
+- **Regulácia (nové v `0028`):** výpočet doplní históriu `oom_price_regulation_change`.
+  - Pri produkte s variantom ANO/NIE (DDx, DMPx) sa obdobie OOM rozdelí podľa dátumov zmien a každá časť dostane variant podľa regulácie.
+  - Pár ANO ↔ NIE: nový stĺpec `product.regulation_pair_id`, migrácia ho naplní zo systémových aliasov (`import_alias.target` / `target_extra.ano`).
+  - Pár chýba (vyradenie malého podniku bez známej ceny) → od dátumu zmeny cena nie je → „Chýba cena“ (zadanie časť 5).
+  - Výhoda: ďalší import rez nezruší, lebo import aj beh počítajú rovnako.
+  - Značka spracovania: nový stĺpec `oom_price_regulation_change.contract_applied_at` (existujúci `applied_at` patrí behu OOM).
+- **`contract_price_set` rozdielovo:** dnes pri zmene zmaže a znova vloží všetky cenníkové riadky zmluvy. Po úprave zmení iba riadky, ktoré sa líšia → audit ukáže iba skutočnú zmenu (napr. „do 31. 12. 2026“ + nový riadok od 1. 1. 2027), so zdrojom `system`.
+
+### 27.4 Prolongácia (krok 3)
+
+- Kandidát: podpísaná zmluva s `auto_prolong`, OOM v zmluve s koncom `valid_to < dnes`, bez nástupcu, zmluva nie je ukončená v OP.
+- `valid_to` += 12 mesiacov (31. 12. 2026 → 31. 12. 2027), najviac do dňa pred začiatkom ďalšej podpísanej zmluvy toho istého druhu na OOM (tá sa stane nástupcom).
+- Potom `contract_crm_end_refresh`, `contract_price_list_sync`, `contract_price_missing_refresh`, `contract_basis_refresh` (bilancia nového roka) a príznak „Sprolongované bez novej ceny“ (návrh produktu podľa O11, časť 11.3).
+- Podmienka „`< dnes`“ (nie „= včera“) znamená, že vynechaná noc alebo zlyhaná zmluva sa dobehne nasledujúcu noc. Po roku sa zmluva sprolonguje znova.
+- Ktoré typy zmlúv – otázka 34.
+
+### 27.5 Upozornenia (`notification`) a zvonček
+
+- Tabuľka `notification`: `user_id`, `kind`, `contract_id` alebo `price_exception_id`, `detail` (bez osobných údajov), `created_at`, `read_at`. RLS: iba vlastné. Bez auditu (časť 12). Neodstraňuje sa automaticky (neskôr údržba).
+- Druhy a príjemcovia:
+
+| Druh | Kedy | Komu |
+| --- | --- | --- |
+| `konci_4_mesiace` | nočný beh, raz na koniec zmluvy (po prolongácii znova) | obchodník zmluvy (`owner_id`); bez neho otázka 35 |
+| `sprolongovana` | nočný beh po prolongácii | obchodník zmluvy |
+| `pod_hranicou` | hneď pri vzniku príznaku | všetci so „schvaľuje ceny“ + tím CEO |
+| `vynimka_nova` | hneď pri žiadosti | všetci so „schvaľuje ceny“ |
+| `vynimka_rozhodnutie` | hneď pri schválení alebo zamietnutí | autor žiadosti |
+| `nocny_beh_chyba` | nočný beh s aspoň jednou chybou | admini |
+
+- „Raz“ stráži príznak `konci_do_4_mesiacov` uložený s dátumom konca (`detail`), ako predpokladá časť 7.1.
+- E-mail neskôr (otázka 8).
+
+### 27.6 Čo sa stane pri chybe
+
+- **Jedna zmluva v jednom kroku:** každá zmluva sa spracuje v samostatnej podtransakcii (`BEGIN … EXCEPTION`). Chyba vráti späť iba zmenu tejto zmluvy v tomto kroku, ostatné zmluvy a kroky pokračujú. Kroky sú dobiehajúce (`≤ dnes` a „ešte nevykonané“), takže zmluva sa skúsi znova ďalšiu noc.
+- **Celý krok** (chyba mimo jednej zmluvy): zapíše sa a beh pokračuje ďalším krokom. Kroky na sebe nezávisia natvrdo – prolongácia si ceny dopočíta sama.
+- **Záznam behu:** nová tabuľka `job_run` (úloha, dátum behu, začiatok, koniec, počty po krokoch, chyby: zmluva, krok, kód SQLSTATE a text **bez osobných údajov**). Číta iba admin (Nastavenia → Nočný beh, iba čítanie, posledných 30 behov). Pri chybe dostane admin upozornenie v zvončeku.
+- **Worker:** OOM a zmluvy v samostatných `try/catch` – zlyhanie OOM nezastaví zmluvy. Do logu iba počty. Ak niektorá časť zlyhá celá, handler skončí chybou, aby to bolo vidno vo Workers Observability.
+
+### 27.7 Ručný beh na Teste s iným „dnešným“ dátumom
+
+- Rovnaký vzor ako OOM: `contract_daily_run_at(p_today)` (iba vlastník databázy, `REVOKE … FROM PUBLIC`) a `contract_daily_run()` = `contract_daily_run_at(crm_today())` pre Cron.
+- Aby celý beh videl ten istý dátum (aj vnútorné funkcie, ktoré volajú `crm_today()`, napr. „Chýba cena“, stav zákazníka), `crm_today()` vráti testovací dátum z nastavenia transakcie `crm.today`, **iba v spojení vlastníka databázy** (`crm_owner_session()`). Spojenie aplikácie (`crm_app`) ho ignoruje – aplikácia dátum podstrčiť nevie. Nastavenie platí iba v transakcii behu.
+- Skript `db/test-data/zmluvy-test.sh` (iba `dev`, pripojenie z `.dev.vars`, ako `oom-test.sh`):
+  - `vytvor` / `zmaz` – vymyslené zmluvy na scenáre (koniec 31. 12. 2026 s prolongáciou, retencia, čiastočný nástupca, regulácia, nová verzia cenníka);
+  - `beh RRRR-MM-DD` – celý nočný beh (OOM aj zmluvy) k dátumu, uloží sa;
+  - `nanecisto RRRR-MM-DD` – to isté v transakcii, ktorá sa na konci vráti: vypíše počty a zmeny, **na Teste sa nič nezmení**.
+- Príklad: `cd ~/projects/greenlogy/crm-core && ./db/test-data/zmluvy-test.sh dev nanecisto 2027-01-01`
+- Upozornenie: `beh` k budúcemu dátumu zmení dáta na Teste natrvalo (zmluva ostane sprolongovaná aj po návrate k dnešku). Preto na skúšky vymyslené zmluvy a potom `zmaz`.
+- Lokálne sa dá vyskúšať aj samotný handler Workera: `wrangler dev --test-scheduled` a `curl "http://localhost:8787/__scheduled?cron=5+23+*+*+*"` (s dnešným dátumom).
+
+### 27.8 Objekty `0028_zmluvy_nocny_beh` (`-- migrate:up`)
+
+| # | Objekt | Podrobnosti |
+| --- | --- | --- |
+| 1 | `crm_today()` | testovací dátum `crm.today` iba v spojení vlastníka (27.7) |
+| 2 | `notification` | tabuľka, RLS, `notification_mark_read(id)`, `notification_mark_all_read()`; spúšťače na `contract_flag` (pod hranicou) a `price_exception` (nová, rozhodnutie) |
+| 3 | `job_run` | záznam behov a chýb, čítanie iba admin |
+| 4 | `product.regulation_pair_id` | pár ANO ↔ NIE, naplnenie z aliasov; kontrola, že pár je obojstranný |
+| 5 | `oom_price_regulation_change.contract_applied_at` | značka kroku 1 |
+| 6 | `contract_price_list_rows` (úprava) | rozdelenie obdobia podľa regulácie |
+| 7 | `contract_price_set` (úprava) | rozdielový zápis |
+| 8 | `contract_prolong(contract_id, p_today)` | krok 3 |
+| 9 | `contract_daily_run_at(date)`, `contract_daily_run()` | kroky 1–6, podtransakcie, zámok, zápis do `job_run` |
+| 10 | `contract_flag_resolve_prolong(contract_id, note)` | Servis potvrdí navrhnutý produkt, príznak sa uzavrie (otázka 36) |
+| 11 | práva | `api/db/app-role.sql`: `notification` SELECT a UPDATE `read_at` vlastných; `job_run` SELECT cez funkciu pre admina |
+
+`-- migrate:down` vráti `crm_today()`, `contract_price_list_rows` a `contract_price_set` do stavu `0027` a zmaže nové objekty. Test: hore → testy → dole = schéma `0027` → hore = rovnaká.
+
+### 27.9 Kód
+
+- **Worker:** `api/src/jobs.ts` – `dailyContractRun(env)`; `index.ts` – `scheduled` volá OOM, potom zmluvy, každé v `try/catch`.
+- **API:** `routes/notifications.ts` (zoznam s počtom neprečítaných, prečítať jedno, prečítať všetko); `GET /api/settings/job-runs` (admin); potvrdenie prolongácie na karte zmluvy (Servis).
+- **Web:**
+  - zvonček v hlavičke: počet neprečítaných, rozbaľovací zoznam s odkazom na zmluvu alebo výnimku, „Označiť všetko ako prečítané“; obnoví sa pri zmene stránky;
+  - zoznam 25: filtre príznakov už sú (F3); doplní sa iba „Sprolongované bez novej ceny“ s navrhnutým produktom;
+  - karta 26: pri príznaku „Sprolongované bez novej ceny“ navrhnutý produkt a tlačidlo „Potvrdiť“ (Servis);
+  - Nastavenia → Nočný beh (admin, iba čítanie).
+- **Skript** `db/test-data/zmluvy-test.sh` + `zmluvy-test.sql`, `zmluvy-test-delete.sql`.
+
+### 27.10 Overenie
+
+- Testy `db/test/checks_zmluvy_nocny_beh.sql` (Z4), dočasný Postgres ako pri `0027`:
+  - prolongácia bez nástupcu (cenník nad 30 MWh podľa typu tarifu, VO), s čiastočným nástupcom, s nástupcom v medzere, retencia (prolongácia nenastane), prepis počas prolongácie (časť 14);
+  - prechod na novú verziu cenníka (rez v deň účinnosti, audit iba zmenených riadkov);
+  - regulácia ANO → NIE v strede roka (rez), vyradenie malého podniku bez páru → „Chýba cena“; ďalší import rez nezruší;
+  - upozornenie 4 mesiace pred koncom práve raz, po prolongácii znova;
+  - druhé spustenie v ten istý deň nič nezmení; vynechaná noc sa dobehne;
+  - chyba jednej zmluvy nezastaví ostatné a zapíše sa do `job_run`;
+  - testovací dátum z aplikácie (`crm_app`) nefunguje;
+  - upozornenia: príjemcovia, iba vlastné (RLS).
+- Lokálne: zvonček, karta 26 s potvrdením, Nastavenia → Nočný beh (snímky, porovnanie s dizajnom).
+
+### 27.11 Otázky
+
+- **34. Ktoré zmluvy sa prolongujú?** Zadanie (časť 5) opisuje firmy. **Odporúčam:** každá podpísaná zmluva s `auto_prolong` a pevným koncom (aj výkup a cenníkové zmluvy malých podnikov); ceny podľa otázky 23 (FIX firma → nad 30 MWh, SPOT a výkup → posledný aditív alebo cena, cenník → cenník ďalej); príznak „Sprolongované bez novej ceny“ pri každej. Upozornenie 4 mesiace pred koncom pri firmách a výkupe, nie pri domácnostiach a VIWA.
+- **35. Komu ide upozornenie 4 mesiace pred koncom, keď zmluva nemá obchodníka** (46 vo vzorke)? **Odporúčam:** vlastníkovi zákazníka; ak ani ten nie je, všetkým so „schvaľuje ceny“.
+- **36. Potvrdenie produktu prolongácie Servisom:** iba potvrdiť (uzavrie príznak), alebo aj zmeniť produkt v CRM? **Odporúčam:** iba potvrdiť s poznámkou; iný produkt = nová zmluva v Office portáli.
+
+**Odpovede 34–36 (Peter, 14. 10. 2026):** súhlas so všetkými tromi odporúčaniami; plán časti 27 schválený.
+
+### 27.12 Migrácia `0028_zmluvy_nocny_beh` – overená nanečisto (14. 10. 2026)
+
+**Úpravy oproti plánu pri implementácii:**
+- **Pár ANO ↔ NIE sa neukladá do stĺpca.** `product.price_regulation` už existuje z `0019` (true = ANO a malé podniky, false = NIE). Pár odvodzuje funkcia `product_regulation_pair()` za behu zo systémových prekladov, lebo produkty zakladá skript cenníkov až po migrácii (na Ostrom by stĺpec ostal prázdny).
+- **Hodnota pred zmenou:** `oom_price_regulation_change.prev_value` (zapíše `oom_price_regulation_set`). Rez berie do úvahy iba zmeny s dátumom ≤ dnes; pred prvou zmenou platí `prev_value`, inak produkt zo zmluvy. Zmeny, ktoré platili pred `0028`, sa nespracúvajú znova.
+- **„Raz“ pri upozornení 4 mesiace pred koncom stráži `notification.ref_date`** (koniec zmluvy), nie príznak. Filter „Končí do 4 mesiacov“ v zozname sa počíta ako doteraz.
+- **Cenník:** krok 2 prepočíta zmluvu hneď prvú noc po schválení novej verzie (nie až v deň účinnosti). Výsledok je rovnaký – riadky sa delia k dátumu účinnosti verzie.
+- **Prolongácia na úrovni zmluvy:** koniec zmluvy sa cez existujúci spúšťač `contract_sync` prenesie na všetky jej OOM bez nástupcu. OOM, na ktorom nadväzuje iná podpísaná zmluva, dostane nástupcu (aj pri retencii bez medzery) a predĺži sa najviac do dňa pred ňou. Zmluva sa predlžuje, iba ak má aspoň jedno OOM Aktívne alebo Pripravované; OOM, ktoré medzitým odišlo, sa v predĺženej zmluve predĺži tiež (rovnako ako dnes pri zmene konca z Office portálu).
+- **Stav zákazníka** počíta `customer_refresh` k `crm_today()` (doteraz k `now()`), aby ručný beh k dátumu dal stav k tomu istému dňu.
+- `contract_flag.resolved_note` – poznámka pri potvrdení produktu prolongácie (odpoveď 36). Uzavrieť príznak smie, kto smie zmluvu upravovať (RLS, ako doteraz – Servis všetky, obchodník svoje).
+- Admin číta `job_run` priamo (RLS), samostatná funkcia netreba.
+- **Pozor pre Worker:** rola `crm_app` má `statement_timeout = 30s` (`api/db/app-role.sql`). Prvý beh v roku prepočíta „Chýba cena“ všetkých živých zmlúv, preto Worker pred volaním `contract_daily_run()` nastaví v transakcii `SET LOCAL statement_timeout = '600s'` (kód v ďalšom kroku).
+- `api/db/app-role.sql`: aplikácia upozornenia iba číta a mení `read_at`; `job_run` iba číta (RLS: admin).
+
+**Overenie (dočasný Postgres, `0001`–`0028` + cenníky 2026 + `podnikatelia-2026`, nie Neon):**
+
+| Krok | Výsledok |
+| --- | --- |
+| `0028` hore | OK |
+| Testy | **161 kontrol OK** (155 + Z4-1 až Z4-6 v `db/test/checks_zmluvy_nocny_beh.sql`) |
+| `0028` dole | schéma = `0027` (0 riadkov rozdielu) |
+| `0028` znova hore | rovnaká schéma, testy znova 161 OK |
+
+**Testy Z4:**
+- Z4-1 upozornenie 4 mesiace pred koncom: 29. 12. nie, 30. 12. áno, raz; obchodník, bez neho vlastník zákazníka; nie pri nadväzujúcej zmluve ani pri domácnosti.
+- Z4-2 prolongácia: v posledný deň nie, deň po konci o 12 mesiacov; ceny z cenníka nad 30 MWh (1T 164, 2T 173, VO 162), rok 2026 bez zmeny; príznak a upozornenie; retencia bez prolongácie; čiastočný nástupca (druhé OOM do 31. 3. 2027); bez prolongácie; výkup skončený 2025 dobehnutý; druhé spustenie nič nezmení; nová zmluva počas prolongácie ju skráti a uzavrie príznak.
+- Z4-3 regulácia: domácnosť DD2 ANO → NIE od 1. 3. 2027 (pred dátumom bez zmeny, v deň zmeny rez, ZEM z cenníka NIE, pôvodný riadok iba skrátený s auditom „Systém“, ďalší import rez nezruší); malý podnik vyradený od 1. 2. 2027 → bez ceny a „Chýba cena“; nová verzia cenníka Domácnosti NIE od 1. 6. 2027 → stará cena do 31. 5., nová od 1. 6.
+- Z4-4 chyba jednej zmluvy: ostatné pokračujú, záznam v `job_run` s krokom a kódom a EIC skráteným na „24Z…“, beh označený ako testovací, upozornenie admina, ďalšiu noc sa zmluva dobehne.
+- Z4-5 stav zákazníka: Čakajúci pred začiatkom účinnosti, po behu v deň začiatku prepočítaný.
+- Z4-6 aplikácia: testovací dátum nepodstrčí, beh k dátumu nespustí, vidí iba vlastné upozornenia a označí ich ako prečítané, obchodník nevidí nočné behy; upozornenia pri novej žiadosti o výnimku, rozhodnutí a „Pod hranicou“; práva `crm_app`.
+
+### 27.13 Petrove úpravy k `0028` (14. 10. 2026) a kód F4 – lokálne overené
+
+**Úpravy `0028` (body 1–4):**
+1. **Prolongácia iba OOM, ktoré k dátumu konca odoberajú:** predĺži sa iba OOM v stave Aktívne alebo Pripravované, ktorého dodávka (`oom.supply_to`) neskončila pred koncom zmluvy. Ostatné (Odídené, Zrušené, Prepísané, koniec dodávky skôr) si ponechajú obdobie – nový stĺpec `contract_oom.end_fixed`; spúšťač `contract_sync` ich už koncom zmluvy nepredlžuje (ani pri neskoršej zmene konca z Office portálu). **Zmluva bez takého OOM sa nepredĺži, prejde do fázy Ukončená** a obchodník dostane upozornenie `neprolongovana`. Import fázu prepíše iba pri zmene zmluvy v Office portáli; ak ju vráti na Podpísaná, zmluva sa už nepredlžuje (OOM majú pevný koniec).
+2. **Chýbajúci pár ANO ↔ NIE nesmie prejsť potichu:** `contract_sync_checked` po prepočte cien skontroluje `contract_regulation_pair_missing()`. Chyba vráti zmluvu do pôvodného stavu, zapíše sa do denníka (krok, kód, EIC skrátené na „24Z…“), admin dostane upozornenie a zmena regulácie ostane nespracovaná – ďalšiu noc sa skúsi znova. Týka sa aj malých podnikov (DMP nemá pár NIE): vyradenie malého podniku je teraz chyba v denníku, nie tichý príznak „Chýba cena“. Import naďalej zapíše ceny bez kontroly (aby nezablokoval ostatné údaje zmluvy); nočný beh chybu ohlási.
+3. **Nový cenník:** uplatní sa prvú noc po schválení; ak dátum platnosti verzie už je v minulosti, cena sa zapíše od dátumu platnosti a denník behu má `cennik_spatne` = počet a čísla zmlúv. Denník číta admin a **Nákup** (`crm_can_see_job_runs()`). Pozn.: schválená verzia cenníka sa dá skrátiť najskôr ku včerajšku, takže spätná platnosť vznikne pri verzii od dneška (alebo skriptom vlastníka) a behu neskôr.
+4. **Dlhší časový limit iba pre nočný beh:** Worker nastaví `SET LOCAL statement_timeout = '600s'` v transakcii behu zmlúv; bežné API ostáva na 30 s (`api/db/app-role.sql`).
+- Navyše: upozornenie 4 mesiace pred koncom iba pri zmluve, ktorá má ešte Aktívne alebo Pripravované OOM bez nadväzujúcej zmluvy.
+
+**Overenie `0028` (dočasný Postgres z nuly, `0001`–`0028` + cenníky 2026):** 161 kontrol OK (Z4 rozšírené o body 1–3 a prístup Nákupu); `down` = schéma `0027` (0 riadkov rozdielu), `up` znova = rovnaká schéma.
+
+**Bod 5 – skript `db/test-data/zmluvy-test.sh`** (iba `dev`; pri inom argumente alebo ak `DATABASE_URL_DEV` ukazuje na tú istú databázu ako `DATABASE_URL_MAIN`, skončí chybou):
+- `vytvor` – zákazníci, OOM a zmluvy `TEST-NB-01`…`08` (id `7e570000-0000-4000-9000-…`, iba vymyslené údaje), dátumy od dneška: prolongácia (01), odídené OOM pred koncom (02), bez aktívneho OOM → Ukončená (03), 4 mesiace pred koncom (04), nástupca (05/06), zmena regulácie od 1. dňa budúceho mesiaca (07), nový cenník (08). Na konci vypíše, ku ktorým dátumom spustiť beh.
+- `beh RRRR-MM-DD` – nočný beh OOM aj zmlúv k dátumu ako vlastník databázy, uloží sa; `nanecisto RRRR-MM-DD` – to isté s ROLLBACK. Oba vypíšu výsledok, zmluvy so zmenou konca alebo fázy, zmeny cien po zmluvách, nové upozornenia a chyby (bez osobných údajov).
+- `zmaz` – zmaže iba zmluvy, OOM a zákazníkov s id `7e570000-0000-4000-9000-…`. Cenník a produkt „TEST – nočný beh“ ostávajú (schválenú verziu cenníka nemaže nikto); ďalšie `vytvor` ich použije a pridá novú verziu.
+- Beh k dátumu mení všetky zmluvy na Teste, nielen testovacie – preto najprv `nanecisto`.
+
+**Kód:**
+- Worker: `api/src/jobs.ts` – `nightlyRun` (OOM, potom zmluvy; každé v `try/catch`), `dailyContractRun` s dlhším limitom; Cron sa nemení.
+- API: `routes/notifications.ts` (`GET /api/notifications`, `/count`, `POST /:id/read`, `/read-all`), `routes/job-runs.ts` (`GET /api/job-runs`, admin a Nákup), `POST /api/contract-flags/:id/resolve` s poznámkou (`resolved_note`), `/api/me` s `can_see_job_runs`.
+- **Oprava:** tlačidlo „Vyriešené“ na karte zmluvy posielalo POST bez JSON a API ho odmietalo (415); teraz posiela `{ note }`.
+- Web: zvonček „Upozornenia“ v ľavom menu s počtom neprečítaných (obnoví sa pri zmene stránky a každých 5 min) a stránka `/upozornenia`; karta zmluvy – pri „Sprolongované bez novej ceny“ navrhnutý produkt a „Potvrdiť produkt“ s poznámkou, KPI Účinnosť pri prolongácii „pôvodne do …“; Nastavenia → Nočný beh (admin, Nákup; Nákup vidí v Nastaveniach iba túto sekciu). Dizajn zvonček nemá – je ako položka menu nad Nastaveniami.
+
+**Lokálne overenie (Worker proti dočasnej databáze s rolou `crm_app`, nie Neon):** skript `vytvor` → `nanecisto` → `beh` → `zmaz` → `vytvor` znova; API upozornení (zoznam, prečítané, všetko), potvrdenie prolongácie s poznámkou, denník (admin 200, Nákup 200, obchodník 403, Nákup do ostatných Nastavení 403); Cron handler (`--test-scheduled`) ako `crm_app`: beh OOM aj zmlúv, záznam v denníku; snímky obrazoviek Upozornenia, Nočný beh, karta zmluvy. Dočasná databáza zmazaná.
+
+---
+
+## 28. Migrácia `0029_male_podniky` – malý podnik 30 MWh a práva príznakov (Peter, 14. 10. 2026) – overená nanečisto
+
+**Zadanie (Peter):** malý podnik je regulovaný (ANO), ak ročný objem na všetkých OOM a súbežne účinných zmluvách je najviac 30,000 MWh; 30,001 MWh už je nad limit. CRM má aspoň zobraziť hlášku (ostáva / treba vyradiť / nemá nárok na regulovaný cenník). „Pod hranicou bez výnimky“ uzatvára iba schvaľovateľ cien.
+
+**Objem – dva zdroje (otázka 1):** CRM má objem na dvoch miestach a **jeden neprepisuje druhý**:
+- XM Trade → plánovaná spotreba OOM (`oom.planned_consumption_vt/nt_mwh`, karta OOM a zákazníka);
+- Office portal → zmluvné množstvo OOM v zmluve (`contract_oom.qty_vt/nt_mwh`, karta zmluvy, bilancia).
+Keďže obchodníci objem v zmluve niekedy nadhodnotia a backoffice zapíše do XM Trade iný (historickú spotrebu), hranica sa porovnáva s oboma: oba do 30 → ostáva, oba nad 30 → vyradiť, rozdiel okolo hranice → „overte“. Bilancia a pridaná hodnota (základ provízie) dnes počítajú so zmluvným množstvom – pozri STAV, Otvorené.
+
+**Objekty:**
+- `small_business_volume(deň, firma)` – firemní zákazníci so zmluvou „malý podnik“, regulovaným produktom (DMP) alebo OOM s reguláciou ANO: Σ zmluvného množstva OOM spotreby v podpísaných zmluvách o dodávke firmy účinných k dňu, Σ plánovanej spotreby tých istých OOM, stav `ostava` / `vyradit` / `nesulad` a text hlášky (iba agregáty, bez osobných údajov). Domácnosti sa nehodnotia.
+- Karta zmluvy (k dnešku, pri budúcej zmluve k jej začiatku) a karta firmy (k dnešku): hláška; zoznam zmlúv: filter „Nad 30 MWh v regulácii“ (`vyradit` + `nesulad`).
+- Import zmlúv: upozornenie riadku pri zmluve nad 30 MWh / v nesúlade – v náhľade aj pri uložení (`contract_import_small_business`, náhľad beží v podtransakcii, kde sú zmluvy uložené).
+- Nočný beh, krok 5b: zoznam zmlúv v denníku (`maly_podnik`), upozornenie obchodníkovi raz za rok (`notification.kind = 'maly_podnik'`).
+- **Bod 3:** vyradenie malého podniku z regulácie (chýba pár NIE) je chyba nočného behu iba pri stave `ostava`; pri `vyradit` / `nesulad` je to „Chýba cena“ s textom „vyradený z cenovej regulácie od … – treba novú cenu (cenník nad 30 MWh alebo individuálnu)“.
+- **A – príznaky:** spúšťač `contract_flag_resolve_guard`: používateľ smie príznak iba uzavrieť (kto, kedy, poznámka – nič iné nezmení); „Chýba cena“ nie (zmizne sama); „Pod hranicou bez výnimky“ iba „schvaľuje ceny“ s povinnou poznámkou – a to aj pri zmluve, ktorú inak upravovať nesmie (politika RLS). Databáza (import, nočný beh, párovanie výnimky) smie všetko. Dovtedy ho mohol uzavrieť aj obchodník pri svojej zmluve.
+- Cockpit (pôvodne `0029`) sa posúva na `0030`.
+
+**Overenie (dočasný Postgres, `0001`–`0029` + cenníky 2026):** 165 kontrol OK (+ Z5-1 až Z5-4 v `db/test/checks_male_podniky.sql`: 30 ostáva, 30,001 vyradiť, súbežné zmluvy 15 + 16, skončená sa nepočíta, nesúlad, XM chýba, neregulovaný bez stavu, import, nočný beh, bod 3, práva príznakov); `down` = schéma `0028`, `up` znova = rovnaká. Test Z4-3 (malý podnik do 30 MWh → chyba behu) dostal vlastnú firmu.
+
+**Kód (lokálne overený proti dočasnej databáze):** karta zmluvy (hláška, „Uzavrieť s poznámkou“ iba pre schvaľovateľa, inak „uzatvára schvaľovateľ cien“), karta firmy (hláška), filter v zozname, denník (malé podniky), upozornenie „Malý podnik – 30 MWh“. API: obchodník → 403 „uzatvára iba schvaľovateľ cien“, schvaľovateľ bez poznámky → chyba, s poznámkou OK. Skript `zmluvy-test.sh vytvor` má navyše TEST-NB-09 (malý podnik 33 MWh) a TEST-NB-10 (20 MWh).
+
+---
+
+## 29. Migrácia `0030_objem_xm` – objem zmluvy vs. XM Trade (Peter, 14. 10. 2026) – overená nanečisto
+
+**Rozhodnutie (Peter):** bilancia a pridaná hodnota (základ provízie) ostávajú na zmluvnom množstve z Office portálu. Ak sa objem zmluvy líši od plánovanej spotreby OOM z XM Trade o viac ako 5 %, CRM upozorní obchodníka a schvaľovateľov cien (obchodný riaditeľ, CEO) – variant b.
+
+**Pravidlo (`contract_volume_diff(deň, zmluva)`):**
+- podpísané zmluvy o dodávke (firmy aj domácnosti), ktoré k dňu neskončili; výkup a VIWA nie (objem berú z plánu výkupu OOM);
+- po zmluve: Σ zmluvného množstva VT + NT OOM spotreby vs. Σ plánovanej spotreby VT + NT tých istých OOM; pri zmluve kratšej ako 12 mesiacov XM Trade × mesiace / 12;
+- rozdiel = |zmluva − XM| / XM; **nad 5 %** upozornenie, presne 5 % nie;
+- ak pri niektorom OOM plánovaná spotreba chýba (alebo je 0), zmluva sa neporovnáva;
+- text: „Objem podľa zmluvy 12 MWh, podľa XM Trade 10 MWh (+20,0 %) – rozdiel nad 5 %, overte zmluvné množstvo (ovplyvňuje pridanú hodnotu a províziu)“, pri viacerých OOM „rozdiel pri X z Y OOM“ (bez EIC).
+
+**Kde:**
+- nočný beh, krok 5c: zmluvy do denníka (`objem_xm`), upozornenie `objem_xm` obchodníkovi a schvaľovateľom cien raz – znova iba pri zmene niektorého objemu (iný text);
+- import zmlúv: upozornenie riadku v náhľade aj po uložení;
+- karta zmluvy: hláška nad ukazovateľmi, v tabuľke OOM stĺpec „XM Trade“ s rozdielom v % (nad 5 % červený);
+- zoznam zmlúv: filter „Objem ≠ XM Trade“.
+- Cockpit sa posúva na `0031`.
+
+**Overenie (dočasný Postgres, `0001`–`0030` + cenníky 2026):** 167 kontrol OK (+ Z6-1, Z6-2 v `db/test/checks_objem_xm.sql`: 5 % nie, ±6 % áno, súčet OOM, XM chýba, krátka zmluva, domácnosť, výkup a skončená nie, import, nočný beh – príjemcovia, raz, znova po zmene); `down` = schéma `0029`, `up` znova = rovnaká. Lokálne: karta TEST-NB-11, filter, denník. Skript `zmluvy-test.sh vytvor` má navyše TEST-NB-11 (12 MWh vs. XM Trade 10 MWh).

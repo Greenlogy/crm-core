@@ -166,7 +166,8 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
                  company_is_archived(c) AS archived, ${sql.unsafe(CITY('c.address'))} AS city,
                  c.hubspot_id, c.created_at, c.updated_at, u.name AS owner_name, t.name AS owner_team,
                  c.owner_id, c.org_id, o.legal_name AS org_name, c.country, c.custom,
-                 crm_company_access(c.id, 'edit') AS can_edit
+                 crm_company_access(c.id, 'edit') AS can_edit,
+                 (SELECT to_jsonb(s) FROM small_business_volume(crm_today(), c.id) s) AS regulation_check
             FROM company c
             JOIN org o ON o.id = c.org_id
             LEFT JOIN app_user u ON u.id = c.owner_id

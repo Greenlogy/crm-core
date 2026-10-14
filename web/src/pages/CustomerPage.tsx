@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CompanyContactsCard, TimelineCard } from '../components/customer-f2';
+import { RegulationNotice } from '../components/regulation';
 import { CompanyFormPanel } from '../components/customer-forms';
 import { CustomFieldsCard } from '../components/custom-fields';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
@@ -76,6 +77,7 @@ export function CustomerPage() {
       </header>
       {editing && <CompanyFormPanel company={c} onClose={() => setEditing(false)} onSaved={reload} />}
 
+      <RegulationNotice check={c.regulation_check} />
       <section className="kpis" aria-label="Ukazovatele">
         <Kpi label="Odberné miesta" value={num(k.oom_count, 0)} sub={`aktívne ${num(k.oom_active, 0)}`} />
         <Kpi label="Aktívne zmluvy" value={num(k.active_contracts, 0)} sub={`zmlúv spolu ${num(c.contracts.length, 0)}`} />
