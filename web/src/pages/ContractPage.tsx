@@ -1,14 +1,15 @@
 // Karta zmluvy podľa docs/dizajn/obrazovky/26-zmluva-karta.html (modul Zmluvy, F2).
 // Údaje z Office portálu sú iba na čítanie (opravujú sa v Office portáli a ďalším importom). V CRM sa mení poznámka,
 // dôvod uzatvorenia, predošlá a súvisiaca zmluva, balík VIWA (Servis) a obchodník (vedenie, admin).
-// Ročná bilancia (pridaná hodnota, marža firmy) príde v F3 (0027).
+// Ročná bilancia (0027): pridaná hodnota obchodníka (iba komodita) a marža firmy (iba s právom) po rokoch.
 
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
 import { Card, Empty, ErrorState, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
-import { send, useApi, type ContractCard } from '../lib/api';
-import { date, eurMonth, eurMwh, mwh, num, pct, period, text } from '../lib/format';
+import { send, useApi, type ContractCard, type ContractYear } from '../lib/api';
+import { useMe } from '../lib/me';
+import { date, eur, eurMonth, eurMwh, mwh, num, pct, period, text } from '../lib/format';
 import {
   CLOSE_REASON,
   CONTRACT_FLAG,
@@ -44,7 +45,9 @@ export function ContractPage() {
   const { id = '' } = useParams();
   const { data: k, error, reload } = useApi<ContractCard>(`/api/contracts/${id}`);
   const [editing, setEditing] = useState(false);
+  const [pickYear, setPickYear] = useState<number | null>(null);
   const save = useSave();
+  const me = useMe();
 
   if (error) return <ErrorState error={error} />;
   if (!k || k.id !== id) return <PageSkeleton />;
@@ -55,6 +58,9 @@ export function ContractPage() {
   const openFlags = k.flag_rows.filter((f) => !f.resolved_at);
   const models = [...new Set(k.prices.filter((p) => p.slot === 'komodita').map((p) => PRICE_MODEL[p.price_model] ?? p.price_model))];
   const groups = groupPrices(k.prices);
+  const thisYear = new Date().getFullYear();
+  const bal: ContractYear | undefined =
+    k.balance.find((b) => b.year === pickYear) ?? k.balance.find((b) => b.year === thisYear) ?? k.balance.find((b) => b.year > thisYear) ?? k.balance.at(-1);
   const resolve = (flagId: string) =>
     save.run(async () => {
       await send('POST', `/api/contract-flags/${flagId}/resolve`);
@@ -110,8 +116,20 @@ export function ContractPage() {
       <section className="kpis" aria-label="Ukazovatele">
         <Kpi label="Účinnosť" value={contractPeriod(k)} sub={k.auto_prolong ? 'automatická prolongácia o 12 mesiacov' : 'bez automatickej prolongácie'} />
         <Kpi label="Zmluvné množstvo" value={`${mwh(vt + nt)} / rok`} sub={`${num(k.ooms.length, 0)} OOM · VT ${num(vt, 3)} · NT ${num(nt, 3)}`} />
-        <Kpi label="Platnosť od (podpis)" value={date(k.signed_on)} sub={`fáza: ${CONTRACT_PHASE[k.phase] ?? k.phase}`} />
-        <Kpi label="Príznaky" value={num(openFlags.length, 0)} sub={openFlags.length ? openFlags.map((f) => CONTRACT_FLAG[f.code]?.label ?? f.code).join(', ') : 'nič na kontrolu'} />
+        <Kpi
+          label={`Pridaná hodnota ${bal?.year ?? ''}`}
+          value={bal?.added_value_eur === null || bal?.added_value_eur === undefined ? '–' : `${eur(bal.added_value_eur)} €`}
+          sub={bal ? addedValueNote(bal) : 'zmluva nemá obdobie'}
+        />
+        {me.can_see_margin ? (
+          <Kpi
+            label={`Marža firmy ${bal?.year ?? ''}`}
+            value={bal?.margin_eur === null || bal?.margin_eur === undefined ? '–' : `${eur(bal.margin_eur)} €`}
+            sub={bal?.portfolio_on ? `odhad ${num(bal.portfolio_eur_mwh, 2)} k ${date(bal.portfolio_on)}${bal.portfolio_stale ? ' · starý odhad' : ''}` : 'komodita + poplatky'}
+          />
+        ) : (
+          <Kpi label="Platnosť od (podpis)" value={date(k.signed_on)} sub={`fáza: ${CONTRACT_PHASE[k.phase] ?? k.phase}`} />
+        )}
       </section>
 
       {openFlags.length > 0 && (
@@ -185,6 +203,8 @@ export function ContractPage() {
         )}
       </Card>
 
+      <div className="columns">
+      <div className="col-wide">
       <Card title="Odberné miesta" aside={<span className="caption">{num(k.ooms.length, 0)} OOM</span>} flush>
         <div className="table-wrap">
           <table className="tbl">
@@ -192,13 +212,10 @@ export function ContractPage() {
               <tr>
                 <th>EIC</th>
                 <th>Adresa</th>
-                <th>Typ / stav</th>
-                <th>Sadzba</th>
-                <th className="num">Istič</th>
+                <th>Sadzba / istič</th>
                 <th>Produkt</th>
                 <th className="num">VT [MWh]</th>
                 <th className="num">NT</th>
-                <th>V zmluve</th>
               </tr>
             </thead>
             <tbody>
@@ -208,35 +225,39 @@ export function ContractPage() {
                     <Link to={`/oom/${o.id}`} className="mono">
                       {o.eic}
                     </Link>
+                    <div className="sub">
+                      {label(OOM_TYPE, o.type)} · {OOM_STATUS[o.status]?.label ?? o.status}
+                      {o.successor_number && (
+                        <>
+                          {' · do '}
+                          {date(o.valid_to)} (nástupca <Link to={`/zmluvy/${o.successor_id}`}>{o.successor_number}</Link>)
+                        </>
+                      )}
+                    </div>
                   </td>
-                  <td>{text([o.address_street, o.address_number_orientacne, o.address_city].filter(Boolean).join(' ') || o.name)}</td>
+                  <td className="wrap">{text([o.address_street, o.address_number_orientacne, o.address_city].filter(Boolean).join(' ') || o.name)}</td>
                   <td>
-                    <span className="pills">
-                      {label(OOM_TYPE, o.type)} <StatusPill map={OOM_STATUS} value={o.status} />
-                    </span>
+                    {text(o.tariff_label)}
+                    {o.breaker_a !== null && <div className="sub">{num(o.breaker_a, 0)} A</div>}
                   </td>
-                  <td>{text(o.tariff_label)}</td>
-                  <td className="num">{o.breaker_a === null ? '–' : `${num(o.breaker_a, 0)} A`}</td>
-                  <td>
+                  <td className="wrap">
                     {text([o.product_name, o.program_name].filter(Boolean).join(' + '))}
                     {o.public_lighting && <div className="sub">verejné osvetlenie</div>}
                   </td>
                   <td className="num">{num(o.qty_vt_mwh, 3)}</td>
                   <td className="num">{num(o.qty_nt_mwh, 3)}</td>
-                  <td>
-                    {period(o.valid_from, o.valid_to)}
-                    {o.successor_number && (
-                      <div className="sub">
-                        nástupca <Link to={`/zmluvy/${o.successor_id}`}>{o.successor_number}</Link>
-                      </div>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+
+      </div>
+      <div className="col-right">
+        <BalanceCard k={k} bal={bal} onYear={setPickYear} margin={me.can_see_margin} />
+      </div>
+      </div>
 
       <div className="columns">
         <div className="col-mid">
@@ -250,6 +271,13 @@ export function ContractPage() {
                 ['Uzatvoril', text(k.owner_name)],
                 ['Vytvoril v Office portáli', text(k.created_by_name)],
                 ['Malý podnik / cenníková cena', `${yes(k.small_business)} / ${yes(k.list_price)}`],
+                ['Tranža pre Cockpit', text(bal?.tranche)],
+                ...(k.type === 'vykup'
+                  ? [['Minimálny aditív výkupu', k.vykup_min_additive === null ? 'podľa parametra' : `${eurMwh(k.vykup_min_additive)} (Nákup)`] as [string, string]]
+                  : []),
+                ...(k.exceptions.length
+                  ? [['Výnimka z ceny', k.exceptions.map((e) => `${e.requested_value} (${e.years.join(', ')}) – ${e.decided_by_name ?? ''}`).join('; ')] as [string, string]]
+                  : []),
                 ...(k.type === 'viwa' ? [['Balík VIWA', text(label(VIWA_PACKAGE, k.viwa_package))] as [string, string]] : []),
                 ['Predošlá zmluva', k.previous_contract_id ? <Link to={`/zmluvy/${k.previous_contract_id}`}>{k.previous_number}</Link> : text(null)],
                 [
@@ -308,6 +336,7 @@ function EditPanel(props: { k: ContractCard; onClose: () => void; onSaved: () =>
   const [rel, setRel] = useState(k.related_number ?? '');
   const [pkg, setPkg] = useState(k.viwa_package ?? '');
   const [owner, setOwner] = useState(k.owner_id ?? '');
+  const [vykup, setVykup] = useState(k.vykup_min_additive === null ? '' : String(k.vykup_min_additive));
   const save = useSave();
   const ownerOptions = (filters?.users ?? []).map((u) => ({ value: u.id, label: u.name }));
 
@@ -320,6 +349,9 @@ function EditPanel(props: { k: ContractCard; onClose: () => void; onSaved: () =>
       if (rel !== (k.related_number ?? '')) body.related_number = rel;
       if (k.type === 'viwa' && pkg !== (k.viwa_package ?? '')) body.viwa_package = pkg || null;
       if (k.can_change_owner && owner !== (k.owner_id ?? '')) body.owner_id = owner || null;
+      if (k.type === 'vykup' && k.can_edit_vykup && vykup !== (k.vykup_min_additive === null ? '' : String(k.vykup_min_additive))) {
+        body.vykup_min_additive = vykup.trim() === '' ? null : vykup;
+      }
       await send('PATCH', `/api/contracts/${k.id}`, body);
       props.onSaved();
     });
@@ -345,6 +377,11 @@ function EditPanel(props: { k: ContractCard; onClose: () => void; onSaved: () =>
           <Select value={pkg} onChange={setPkg} options={[{ value: '', label: '– bez balíka –' }, ...Object.entries(VIWA_PACKAGE).map(([value, l]) => ({ value, label: l }))]} />
         </Field>
       )}
+      {k.type === 'vykup' && k.can_edit_vykup && (
+        <Field label="Minimálny aditív výkupu [€/MWh]" hint="Prepis parametra pre túto zmluvu (Nákup). Prázdne = podľa Cenových parametrov.">
+          <TextInput value={vykup} onChange={setVykup} maxLength={12} />
+        </Field>
+      )}
       <Field label="Dôvod uzatvorenia">
         <Select value={reason} onChange={setReason} options={[{ value: '', label: '–' }, ...Object.entries(CLOSE_REASON).map(([value, l]) => ({ value, label: l }))]} />
       </Field>
@@ -365,3 +402,57 @@ function EditPanel(props: { k: ContractCard; onClose: () => void; onSaved: () =>
     </SidePanel>
   );
 }
+
+function addedValueNote(b: ContractYear): string {
+  if (b.missing && (b.added_value_eur === null || b.added_value_eur === undefined)) return `chýba ${b.missing}`;
+  if (b.exception_value !== null && b.exception_value !== undefined) return `hranica z výnimky ${eurMwh(b.exception_value)} · iba komodita`;
+  if (b.trader_price !== null && b.trader_price !== undefined && b.model?.includes('fix')) {
+    return `cena pre obchodníka ${eurMwh(b.trader_price)}${b.basis_source === 'hubspot' ? ' (HubSpot)' : ''} · iba komodita`;
+  }
+  return 'iba komodita (základ provízie)';
+}
+
+/** Ročná bilancia (návrh 26): výnos, náklad, pridaná hodnota; marža firmy iba s právom. */
+function BalanceCard(props: { k: ContractCard; bal: ContractYear | undefined; onYear: (y: number) => void; margin: boolean }) {
+  const { k, bal } = props;
+  if (!bal) {
+    return (
+      <Card title="Ročná bilancia">
+        <Empty>Zmluva nemá obdobie účinnosti – bilancia sa počíta od začiatku účinnosti.</Empty>
+      </Card>
+    );
+  }
+  const cost = bal.volume_mwh && Number(bal.volume_mwh) > 0 && bal.cost_eur !== null ? Number(bal.cost_eur) / Number(bal.volume_mwh) : null;
+  const rows: [string, React.ReactNode][] = [
+    ['Objem', `${num(bal.volume_mwh, 3)} MWh · ${bal.months} mes.`],
+    ['Výnos komodita', bal.revenue_eur === null ? '–' : `${eur(bal.revenue_eur)} €`],
+    [`Náklad pridanej hodnoty${cost !== null ? ` (${num(cost, 2)} €/MWh)` : ''}`, bal.cost_eur === null ? `– ${bal.missing ? `(chýba ${bal.missing})` : ''}` : `${eur(bal.cost_eur)} €`],
+    ['Pridaná hodnota (provízia)', <strong>{bal.added_value_eur === null ? '–' : `${eur(bal.added_value_eur)} €`}</strong>],
+  ];
+  if (props.margin) {
+    rows.push(
+      ['Mesačné platby (OM, ZEM, VBattery, VIWA)', `${eur(bal.fees_eur)} €`],
+      ['Náklad marže', bal.margin_cost_eur === null ? '–' : `${eur(bal.margin_cost_eur)} €${bal.portfolio_on ? ` (odhad k ${date(bal.portfolio_on)})` : ''}`],
+      ['Marža firmy', <strong>{bal.margin_eur === null ? '–' : `${eur(bal.margin_eur)} €`}{bal.portfolio_stale && <Pill tone="warning">starý odhad</Pill>}</strong>],
+    );
+  }
+  return (
+    <Card title={`Ročná bilancia ${bal.year}`}>
+      {k.balance.length > 1 && (
+        <div className="chips" role="group" aria-label="Rok bilancie" style={{ marginBottom: 8 }}>
+          {k.balance.map((b) => (
+            <button key={b.year} type="button" className="chip" aria-pressed={b.year === bal.year} onClick={() => props.onYear(b.year)}>
+              {b.year}
+            </button>
+          ))}
+        </div>
+      )}
+      <Rows rows={rows} />
+      <div className="caption" style={{ marginTop: 8 }}>
+        {bal.basis_stored === false ? 'Zmluva nie je podpísaná – počíta sa s hodnotami k dnešku. ' : 'Náklad pridanej hodnoty ku dňu podpisu. '}
+        {props.margin ? 'Marža firmy z dnešného odhadu portfólia.' : 'Maržu firmy vidí iba CEO, Nákup, Marketing a obchodný riaditeľ.'}
+      </div>
+    </Card>
+  );
+}
+

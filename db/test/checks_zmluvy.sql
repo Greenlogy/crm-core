@@ -268,6 +268,12 @@ END;
 $$;
 
 -- Z1-4. RLS „iba svoje“ (zákazník aj uzatvoril), „schvaľuje ceny“, ochrana stĺpcov, výnimky
+-- cena pre obchodníka 2029 dnes (hranicu výnimky dopĺňa databáza, 0027): BL 95, PL 110 → 106 pri východiskových parametroch;
+-- rok 2029 nemá žiadna testovacia zmluva, výnimka sa so zmluvou nespáruje
+INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, source)
+SELECT crm_default_org(), crm_today(), 2029, 95, 110, 'rucne'
+ WHERE NOT EXISTS (SELECT 1 FROM market_price_daily WHERE org_id = crm_default_org() AND on_date = crm_today()
+                      AND delivery_year = 2029 AND corrected_at IS NULL AND bl_eur_mwh IS NOT NULL);
 UPDATE contract SET owner_id = '00000000-0000-4000-8000-000000000011' WHERE id = pg_temp.z1_id(17);   -- Beta, uzavrel 0011
 GRANT SELECT, INSERT, UPDATE, DELETE ON contract, contract_oom, contract_price, contract_flag, price_exception TO crm_rls_test;
 GRANT SELECT ON contract_v, price_exception_v TO crm_rls_test;
@@ -314,11 +320,11 @@ BEGIN
 
   -- výnimka: obchodník pre svojho zákazníka áno, pre cudzieho nie; vlastnú neschváli
   INSERT INTO price_exception (company_id, years, price_model, requested_value, threshold_value, reason)
-  VALUES ('00000000-0000-4000-8000-000000000101', '{2027}', 'fix', 103, 106, 'konkurenčná ponuka') RETURNING id INTO v_exc;
+  VALUES ('00000000-0000-4000-8000-000000000101', '{2029}', 'fix', 103, 106, 'konkurenčná ponuka') RETURNING id INTO v_exc;
   ASSERT (SELECT requested_by FROM price_exception WHERE id = v_exc) = '00000000-0000-4000-8000-000000000011', 'autor';
   BEGIN
     INSERT INTO price_exception (company_id, years, price_model, requested_value, threshold_value, reason)
-    VALUES ('00000000-0000-4000-8000-000000005101', '{2027}', 'fix', 103, 106, 'cudzí');
+    VALUES ('00000000-0000-4000-8000-000000005101', '{2029}', 'fix', 103, 106, 'cudzí');
     RAISE EXCEPTION 'CHYBA: výnimka pre cudzieho zákazníka';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;

@@ -13,7 +13,7 @@ import { SettingsHead } from './SettingsLayout';
 
 type ParamCode =
   | 'pomer_bl_pct' | 'rizikova_prirazka' | 'nasa_marza' | 'min_aditiv_obchodnik' | 'min_aditiv_manazer'
-  | 'min_aditiv_vykup_lz' | 'nakup_energopomoc' | 'viwa_aditiv_basic' | 'viwa_aditiv_plus' | 'viwa_aditiv_pro';
+  | 'min_aditiv_vykup' | 'min_aditiv_vykup_lz' | 'nakup_energopomoc' | 'viwa_aditiv_basic' | 'viwa_aditiv_plus' | 'viwa_aditiv_pro';
 
 type ParamRow = {
   id: string;
@@ -73,6 +73,7 @@ const PARAMS: { code: ParamCode; label: string; adminOnly?: boolean; perYear?: b
   { code: 'nasa_marza', label: 'Naša marža v cene pre obchodníka' },
   { code: 'min_aditiv_obchodnik', label: 'Minimálny aditív – obchodník' },
   { code: 'min_aditiv_manazer', label: 'Minimálny aditív – manažér' },
+  { code: 'min_aditiv_vykup', label: 'Minimálny aditív – výkup', adminOnly: true },
   { code: 'min_aditiv_vykup_lz', label: 'Minimálny aditív – výkup lokálny zdroj', adminOnly: true },
   { code: 'nakup_energopomoc', label: 'Nákupná cena domácností s energopomocou', adminOnly: true, perYear: true },
   { code: 'viwa_aditiv_basic', label: 'Odhad aditívu VIWA Basic' },
@@ -209,7 +210,7 @@ export function PricingPage() {
               </table>
             </div>
             <div className="card-foot caption">
-              Mení admin a obchodný riaditeľ (minimálny aditív výkupu lokálneho zdroja a nákupnú cenu energopomoci iba admin).
+              Mení admin a obchodný riaditeľ (minimálne aditívy výkupu a nákupnú cenu energopomoci iba admin; minimálny aditív pri konkrétnej výkupnej zmluve prepíše Nákup na karte zmluvy).
               Nová hodnota platí od zvoleného dňa (dnes a neskôr), staré ostávajú v histórii a zmluvy si pamätajú hodnotu ku
               dňu podpisu. Naplánovanú zmenu môže opraviť alebo zrušiť iba jej autor.
             </div>

@@ -1,12 +1,13 @@
 // Zoznam zmlúv podľa docs/dizajn/obrazovky/25-zmluvy-zoznam.html (modul Zmluvy, F2).
 // Tlačidlá stavov (vypočítané z fázy v Office portáli a dátumov) a príznakov s počtami; filtre typ, obchodník,
-// spoločnosť; hľadanie podľa čísla zmluvy, zákazníka a EIC. Bilancia (pridaná hodnota, marža) príde v F3 (0027).
+// spoločnosť, rok bilancie (predvolene bežný); hľadanie podľa čísla zmluvy, zákazníka a EIC. Pridaná hodnota a marža firmy
+// (iba s právom) za zvolený rok (0027); export podľa filtra.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, ErrorState, Pill, Skeleton, Source, StatusPill } from '../components/ui';
 import { useApi, type ContractList, type ContractListItem } from '../lib/api';
-import { mwh, num, period, text } from '../lib/format';
+import { eur, mwh, num, period, text } from '../lib/format';
 import { permission, useMe } from '../lib/me';
 import { CONTRACT_FLAG, CONTRACT_STATUS, CONTRACT_TYPE } from '../lib/labels';
 
@@ -40,11 +41,15 @@ export function ContractsPage() {
   const owner = params.get('obchodnik') ?? '';
   const org = params.get('spolocnost') ?? '';
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
+  const thisYear = new Date().getFullYear();
+  const year = Number(params.get('rok') ?? '') || thisYear;
   const canImport = permission(me, 'zmluvy').import;
+  const canExport = permission(me, 'zmluvy').export;
+  const showMargin = me.can_see_margin;
   const [input, setInput] = useState(q);
 
   const update = (next: Record<string, string>) => {
-    const merged = { q, stav: chip, typ: type, obchodnik: owner, spolocnost: org, page: String(page), ...next };
+    const merged = { q, stav: chip, typ: type, obchodnik: owner, spolocnost: org, rok: year === thisYear ? '' : String(year), page: String(page), ...next };
     setParams(Object.fromEntries(Object.entries(merged).filter(([k, v]) => v && !(k === 'page' && v === '1'))), { replace: true });
   };
 
@@ -54,7 +59,7 @@ export function ContractsPage() {
     return () => clearTimeout(t);
   }, [input]);
 
-  const query = new URLSearchParams({ q, stav: chip, typ: type, obchodnik: owner, org, page: String(page) });
+  const query = new URLSearchParams({ q, stav: chip, typ: type, obchodnik: owner, org, rok: String(year), page: String(page) });
   const { data, error, loading } = useApi<ContractList>(`/api/contracts?${query}`);
   const { data: filters } = useApi<{ owners: { id: string; name: string }[] }>('/api/contract-filters');
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -71,6 +76,11 @@ export function ContractsPage() {
           </div>
         </div>
         <div className="head-actions">
+          {canExport && (
+            <a className="btn" href={`/api/contracts/export?${query}`} title="Stiahnuť zoznam podľa filtra s bilanciou roka (.xlsx)">
+              Export
+            </a>
+          )}
           {canImport && (
             <button type="button" className="btn primary" onClick={() => navigate('/zmluvy/import')}>
               Import z Office portálu
@@ -94,6 +104,13 @@ export function ContractsPage() {
             {Object.entries(CONTRACT_TYPE).map(([v, n]) => (
               <option key={v} value={v}>
                 {n}
+              </option>
+            ))}
+          </select>
+          <select className="input select" aria-label="Rok bilancie" value={year} onChange={(e) => update({ rok: e.target.value === String(thisYear) ? '' : e.target.value, page: '1' })}>
+            {[thisYear - 1, thisYear, thisYear + 1, thisYear + 2].map((y) => (
+              <option key={y} value={y}>
+                Rok bilancie: {y}
               </option>
             ))}
           </select>
@@ -154,15 +171,23 @@ export function ContractsPage() {
                     OOM
                   </th>
                   <th scope="col" className="num">
-                    Objem [MWh]
+                    Objem {year} [MWh]
                   </th>
+                  <th scope="col" className="num">
+                    Prid. hodnota [€]
+                  </th>
+                  {showMargin && (
+                    <th scope="col" className="num">
+                      Marža firmy [€]
+                    </th>
+                  )}
                   {multiOrg && <th scope="col">Spoločnosť</th>}
                 </tr>
               </thead>
               <tbody>
                 {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={multiOrg ? 7 : 6} className="muted">
+                    <td colSpan={7 + (multiOrg ? 1 : 0) + (showMargin ? 1 : 0)} className="muted">
                       Žiadna zmluva nezodpovedá filtru.
                     </td>
                   </tr>
@@ -198,11 +223,21 @@ export function ContractsPage() {
                             {CONTRACT_FLAG[f]?.label ?? f}
                           </Pill>
                         ))}
+                        {k.ending && <Pill tone="warning">Končí do 4 mesiacov</Pill>}
                       </span>
                     </td>
                     <td>{contractPeriod(k)}</td>
                     <td className="num">{num(k.oom_count, 0)}</td>
-                    <td className="num">{k.qty_mwh === null || Number(k.qty_mwh) === 0 ? '–' : mwh(k.qty_mwh).replace(' MWh', '')}</td>
+                    <td className="num">{!k.year_volume_mwh || Number(k.year_volume_mwh) === 0 ? '–' : mwh(k.year_volume_mwh).replace(' MWh', '')}</td>
+                    <td className={`num${k.added_value_eur !== null && Number(k.added_value_eur) < 0 ? ' text-negative' : ''}`} title={k.balance_missing ? `Chýba: ${k.balance_missing}` : undefined}>
+                      {k.added_value_eur === null || k.added_value_eur === undefined ? '–' : eur(k.added_value_eur)}
+                    </td>
+                    {showMargin && (
+                      <td className="num margin-col" title={k.portfolio_stale ? 'starý odhad portfólia (viac ako 30 dní)' : undefined}>
+                        {k.margin_eur === null || k.margin_eur === undefined ? '–' : eur(k.margin_eur)}
+                        {k.portfolio_stale && <div className="sub">starý odhad</div>}
+                      </td>
+                    )}
                     {multiOrg && <td>{k.org_name}</td>}
                   </tr>
                 ))}
@@ -217,7 +252,7 @@ export function ContractsPage() {
               {data.total === 0
                 ? '0'
                 : `${num((page - 1) * data.pageSize + 1, 0)}–${num(Math.min(page * data.pageSize, data.total), 0)} z ${num(data.total, 0)}`}
-              {' · zmluvy prichádzajú importom z Office portálu · objem = zmluvné množstvo za rok (výkup a VIWA podľa plánu OOM v F3)'}
+              {` · bilancia za rok ${year}: pridaná hodnota = iba komodita (základ provízie)${showMargin ? ', marža firmy = komodita + poplatky' : ''} · výkup a VIWA podľa plánu výkupu OOM`}
             </span>
             {pages > 1 && (
               <>

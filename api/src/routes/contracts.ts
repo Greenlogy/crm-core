@@ -4,9 +4,11 @@
 // (contract_guard, RLS, práva crm_app na stĺpce).
 
 import { Hono } from 'hono';
-import { CONTRACT_CHIPS, CONTRACT_TYPES, contractCard, contractFilters, listContracts } from '../queries/contracts';
+import type { Context } from 'hono';
+import { CONTRACT_CHIPS, CONTRACT_TYPES, contractCard, contractFilters, exportContracts, listContracts, type ContractFilter } from '../queries/contracts';
 import { type AppEnv, UUID } from '../types';
-import { BadRequest, readBody } from '../validate';
+import { BadRequest, Forbidden, readBody } from '../validate';
+import { type Cell, xlsx } from '../xlsx';
 
 export const contracts = new Hono<AppEnv>();
 
@@ -18,18 +20,65 @@ const id = (v: string) => {
   return v;
 };
 
-contracts.get('/contracts', async (c) => {
+const TYPE_LABEL: Record<string, string> = {
+  dodavka_domacnost: 'Dodávka – domácnosť', dodavka_firma_nn: 'Dodávka – firma NN', dodavka_firma_vn: 'Dodávka – firma VN',
+  vykup: 'Výkup', viwa: 'VIWA',
+};
+const STATE_LABEL: Record<string, string> = {
+  v_priprave: 'V príprave', podpisana: 'Podpísaná', ucinna: 'Účinná', skoncena: 'Skončená', odmietnuta: 'Odmietnutá', neuspesna: 'Neúspešná',
+};
+
+/** Filter zoznamu z adresy; rok bilancie predvolene bežný (otázka 31). */
+function filterOf(c: Context<AppEnv>, page: number): ContractFilter {
   const q = (c.req.query('q') ?? '').trim().slice(0, 100);
   const chip = c.req.query('stav') ?? '';
   const type = c.req.query('typ') ?? '';
   const owner = c.req.query('obchodnik') ?? '';
   const org = c.req.query('org') ?? '';
-  const page = Math.max(1, Number(c.req.query('page') ?? '1') || 1);
+  const year = Number(c.req.query('rok') ?? '') || new Date().getUTCFullYear();
   if (!CONTRACT_CHIPS.has(chip)) throw new BadRequest('Neznámy filter stavu.');
   if (type && !(CONTRACT_TYPES as readonly string[]).includes(type)) throw new BadRequest('Neznámy typ zmluvy.');
   if (owner && owner !== 'bez' && !UUID.test(owner)) throw new BadRequest('Neplatný obchodník.');
   if (org && !UUID.test(org)) throw new BadRequest('Neplatná spoločnosť.');
-  return c.json(await listContracts(c.var.sql, { q, chip, type, owner, org, page }));
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new BadRequest('Neplatný rok.');
+  return { q, chip, type, owner, org, page, year };
+}
+
+contracts.get('/contracts', async (c) => {
+  const page = Math.max(1, Number(c.req.query('page') ?? '1') || 1);
+  return c.json(await listContracts(c.var.sql, filterOf(c, page)));
+});
+
+// Export zoznamu podľa filtra (.xlsx): právo „exportovať“ v module Zmluvy, zápis do export_log; marža iba s právom
+// (contract_year_calc ju inak vráti prázdnu, stĺpec sa vynechá).
+contracts.get('/contracts/export', async (c) => {
+  const sql = c.var.sql;
+  const [perm] = await sql<{ ok: boolean; margin: boolean }[]>`
+    SELECT coalesce((SELECT p.can_export FROM app_user u JOIN team_permission p ON p.team_id = u.team_id AND p.module = 'zmluvy'
+                      WHERE u.id = crm_active_user_id()), false) AS ok,
+           crm_can_see_margin() AS margin`;
+  if (!perm?.ok) throw new Forbidden('Export zmlúv nemáte povolený (Nastavenia → Tímy a práva → Zmluvy → Exportovať).');
+  const f = filterOf(c, 1);
+  const items = await exportContracts(sql, f);
+  const header = ['Číslo zmluvy', 'Typ', 'Stav', 'Príznaky', 'Zákazník', 'Obchodník', 'Účinnosť od', 'Účinnosť do', 'OOM',
+    `Objem ${f.year} [MWh]`, `Pridaná hodnota ${f.year} [€]`, ...(perm.margin ? [`Marža firmy ${f.year} [€]`] : []), 'Spoločnosť'];
+  const num = (v: unknown): Cell => (v === null || v === undefined ? null : Number(v));
+  const rows: Cell[][] = items.map((k) => [
+    k.number as string, TYPE_LABEL[k.type as string] ?? (k.type as string), STATE_LABEL[k.state as string] ?? (k.state as string),
+    ((k.flags as string[]) ?? []).join(', '), k.customer_name as string, (k.owner_name as string) ?? '',
+    (k.valid_from as string) ?? '', (k.effective_to as string) ?? '', num(k.oom_count), num(k.year_volume_mwh), num(k.added_value_eur),
+    ...(perm.margin ? [num(k.margin_eur)] : []), k.org_name as string,
+  ]);
+  await sql`
+    INSERT INTO export_log (user_id, module, filter, row_count)
+    VALUES (${c.var.userId}, 'zmluvy', ${sql.json({ list: 'zmluvy', q: f.q, stav: f.chip, typ: f.type, obchodnik: f.owner, org: f.org, rok: f.year })}, ${rows.length})`;
+  return new Response(xlsx('Zmluvy', header, rows), {
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="zmluvy-${f.year}.xlsx"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 contracts.get('/contract-filters', async (c) => c.json(await contractFilters(c.var.sql)));
@@ -61,6 +110,13 @@ contracts.patch('/contracts/:id', async (c) => {
     const v = b.viwa_package;
     if (v !== null && v !== '' && !(VIWA_PACKAGES as readonly unknown[]).includes(v)) throw new BadRequest('Balík VIWA: neplatná hodnota.');
     sets.push(sql`viwa_package = ${(v as string) || null}`);
+  }
+  if ('vykup_min_additive' in b) {
+    // minimálny aditív výkupu pri zmluve (otázka 29) – iba výkup, mení Nákup alebo admin (databáza)
+    const v = b.vykup_min_additive;
+    const n = v === null || v === '' ? null : Number(String(v).replace(',', '.').replace(/\s/g, ''));
+    if (n !== null && (!Number.isFinite(n) || n < 0)) throw new BadRequest('Minimálny aditív výkupu: neplatné číslo.');
+    sets.push(sql`vykup_min_additive = ${n}::numeric`);
   }
   if ('owner_id' in b) {
     const v = b.owner_id;

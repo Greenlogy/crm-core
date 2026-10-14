@@ -1203,40 +1203,142 @@ $$;
 
 
 --
--- Name: contract_child_guard(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: contract_basis_refresh(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.contract_child_guard() RETURNS trigger
-    LANGUAGE plpgsql
+CREATE FUNCTION public.contract_basis_refresh(p_contract_id uuid) RETURNS text[]
+    LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
-    AS $$  -- práva volajúceho: current_user = skutočná rola (import a nočný beh = vlastník)
+    AS $$
+DECLARE
+  c      contract;
+  v_from date;
+  v_to   date;
+  y      integer;
+  v      contract_year_basis;
+  s      contract_year_basis;
+  e      price_exception;
+  r      record;
+  v_mod  text;
+  v_det  text;
+  v_warn text[] := '{}';
 BEGIN
-  IF NOT (crm_owner_session()
-          OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = TG_RELID)) THEN
-    RAISE EXCEPTION 'OOM a ceny zmluvy mení iba import z Office portálu.' USING ERRCODE = 'insufficient_privilege';
+  SELECT * INTO c FROM contract WHERE id = p_contract_id;
+  IF NOT FOUND THEN
+    RETURN v_warn;
   END IF;
-  RETURN coalesce(NEW, OLD);
+  SELECT min(valid_from), max(coalesce(valid_to, make_date(extract(year FROM crm_today())::int + 1, 12, 31)))
+    INTO v_from, v_to FROM contract_oom WHERE contract_id = c.id AND valid_from IS NOT NULL;
+  DELETE FROM contract_year_basis
+   WHERE contract_id = c.id
+     AND (c.signed_on IS NULL OR v_from IS NULL
+          OR year NOT BETWEEN extract(year FROM v_from) AND extract(year FROM v_to));
+  UPDATE contract_flag SET resolved_at = now()
+   WHERE contract_id = c.id AND code IN ('pod_hranicou_bez_vynimky', 'chyba_cena') AND year IS NOT NULL AND resolved_at IS NULL
+     AND (v_from IS NULL OR year NOT BETWEEN extract(year FROM v_from) AND extract(year FROM v_to));
+  IF v_from IS NULL THEN
+    RETURN v_warn;
+  END IF;
+
+  FOR y IN extract(year FROM v_from)::int .. extract(year FROM v_to)::int LOOP
+    IF c.signed_on IS NOT NULL THEN
+      v := contract_basis_values(c, y, c.signed_on);
+      SELECT * INTO s FROM contract_year_basis WHERE contract_id = c.id AND year = y;
+      v.exception_id := s.exception_id;
+      v.exception_value := s.exception_value;
+      IF v.exception_id IS NULL AND c.phase = 'podpisana' THEN
+        v_mod := (SELECT p.price_model::text FROM contract_price p
+                   WHERE p.contract_id = c.id AND p.slot = 'komodita' AND p.source = 'import' AND p.price_model <> 'cennik'
+                     AND p.valid_from <= make_date(y, 12, 31) AND (p.valid_to IS NULL OR p.valid_to >= make_date(y, 1, 1))
+                   ORDER BY p.valid_from DESC LIMIT 1);
+        e := NULL;
+        SELECT * INTO e FROM price_exception x
+         WHERE x.org_id = c.org_id AND x.company_id IS NOT DISTINCT FROM c.company_id
+           AND x.person_id IS NOT DISTINCT FROM c.person_id AND y = ANY (x.years) AND x.price_model::text = v_mod
+           AND ((x.status = 'schvalena' AND c.signed_on <= x.valid_until) OR (x.status = 'pouzita' AND x.contract_id = c.id))
+         ORDER BY x.decided_at DESC
+         LIMIT 1;
+        IF e.id IS NOT NULL THEN
+          v.exception_id := e.id;
+          v.exception_value := e.requested_value;
+          UPDATE price_exception SET status = 'pouzita', contract_id = c.id WHERE id = e.id AND status = 'schvalena';
+        END IF;
+      END IF;
+      INSERT INTO contract_year_basis (contract_id, year, ref_date, seller_type, trader_price, portfolio_eur_mwh, portfolio_on,
+                                       min_additive, energopomoc_price, viwa_additive, exception_id, exception_value, source)
+      VALUES (c.id, y, v.ref_date, v.seller_type, v.trader_price, v.portfolio_eur_mwh, v.portfolio_on, v.min_additive,
+              v.energopomoc_price, v.viwa_additive, v.exception_id, v.exception_value, v.source)
+      ON CONFLICT (contract_id, year) DO UPDATE
+         SET ref_date = EXCLUDED.ref_date, seller_type = EXCLUDED.seller_type, trader_price = EXCLUDED.trader_price,
+             portfolio_eur_mwh = EXCLUDED.portfolio_eur_mwh, portfolio_on = EXCLUDED.portfolio_on,
+             min_additive = EXCLUDED.min_additive, energopomoc_price = EXCLUDED.energopomoc_price,
+             viwa_additive = EXCLUDED.viwa_additive, exception_id = EXCLUDED.exception_id,
+             exception_value = EXCLUDED.exception_value, source = EXCLUDED.source, computed_at = now()
+       WHERE (contract_year_basis.ref_date, contract_year_basis.seller_type, contract_year_basis.trader_price,
+              contract_year_basis.portfolio_eur_mwh, contract_year_basis.portfolio_on, contract_year_basis.min_additive,
+              contract_year_basis.energopomoc_price, contract_year_basis.viwa_additive, contract_year_basis.exception_id,
+              contract_year_basis.exception_value, contract_year_basis.source)
+             IS DISTINCT FROM
+             (EXCLUDED.ref_date, EXCLUDED.seller_type, EXCLUDED.trader_price, EXCLUDED.portfolio_eur_mwh, EXCLUDED.portfolio_on,
+              EXCLUDED.min_additive, EXCLUDED.energopomoc_price, EXCLUDED.viwa_additive, EXCLUDED.exception_id,
+              EXCLUDED.exception_value, EXCLUDED.source);
+    END IF;
+
+    SELECT * INTO r FROM contract_year_calc(c.id, y);
+    -- Pod hranicou bez výnimky (individuálna cena)
+    IF c.phase NOT IN ('odmietnuta', 'neuspesna') AND r.model ~ '(fix|spot_plus_eur|vykup)' AND r.added_value_eur < 0
+       AND r.exception_id IS NULL THEN
+      v_det := format('Pridaná hodnota %s: %s € – cena pod hranicou bez schválenej výnimky.', y,
+                      replace(to_char(r.added_value_eur, 'FM999999990.00'), '.', ','));
+      v_warn := v_warn || format('Pod hranicou bez výnimky %s: pridaná hodnota %s €', y,
+                                 replace(to_char(r.added_value_eur, 'FM999999990.00'), '.', ','));
+      IF NOT EXISTS (SELECT 1 FROM contract_flag f WHERE f.contract_id = c.id AND f.code = 'pod_hranicou_bez_vynimky' AND f.year = y
+                        AND (f.resolved_at IS NULL OR f.resolved_by IS NOT NULL)) THEN
+        INSERT INTO contract_flag (contract_id, code, year, detail) VALUES (c.id, 'pod_hranicou_bez_vynimky', y, v_det);
+      ELSE
+        UPDATE contract_flag SET detail = v_det
+         WHERE contract_id = c.id AND code = 'pod_hranicou_bez_vynimky' AND year = y AND resolved_at IS NULL
+           AND detail IS DISTINCT FROM v_det;
+      END IF;
+    ELSE
+      UPDATE contract_flag SET resolved_at = now()
+       WHERE contract_id = c.id AND code = 'pod_hranicou_bez_vynimky' AND year = y AND resolved_at IS NULL;
+    END IF;
+    -- Chýba cena pre obchodníka (podpis od 1. 1. 2026)
+    IF c.signed_on >= '2026-01-01' AND c.phase NOT IN ('odmietnuta', 'neuspesna') AND r.missing = 'cena pre obchodníka' THEN
+      v_det := format('chýba cena pre obchodníka %s (ceny BL/PL ku dňu podpisu %s)', y, to_char(c.signed_on, 'FMDD. FMMM. YYYY'));
+      v_warn := v_warn || ('Chýba cena: ' || v_det);
+      IF NOT EXISTS (SELECT 1 FROM contract_flag WHERE contract_id = c.id AND code = 'chyba_cena' AND year = y AND resolved_at IS NULL) THEN
+        INSERT INTO contract_flag (contract_id, code, year, detail) VALUES (c.id, 'chyba_cena', y, v_det);
+      END IF;
+    ELSE
+      UPDATE contract_flag SET resolved_at = now()
+       WHERE contract_id = c.id AND code = 'chyba_cena' AND year = y AND resolved_at IS NULL;
+    END IF;
+  END LOOP;
+  RETURN v_warn;
 END;
 $$;
 
 
 --
--- Name: contract_crm_end_refresh(uuid); Type: FUNCTION; Schema: public; Owner: -
+-- Name: FUNCTION contract_basis_refresh(p_contract_id uuid); Type: COMMENT; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.contract_crm_end_refresh(p_contract_id uuid) RETURNS void
+COMMENT ON FUNCTION public.contract_basis_refresh(p_contract_id uuid) IS 'snímka ku dňu podpisu, párovanie výnimky, príznaky Pod hranicou bez výnimky a Chýba cena pre obchodníka; vráti upozornenia';
+
+
+--
+-- Name: contract_basis_refresh_trigger(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_basis_refresh_trigger() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
-DECLARE
-  v_end date;
-  v_all boolean;
 BEGIN
-  SELECT max(valid_to), bool_and(valid_to IS NOT NULL) INTO v_end, v_all FROM contract_oom WHERE contract_id = p_contract_id;
-  UPDATE contract
-     SET crm_valid_to = CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END
-   WHERE id = p_contract_id
-     AND crm_valid_to IS DISTINCT FROM (CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END);
+  PERFORM contract_basis_refresh(NEW.id);
+  RETURN NULL;
 END;
 $$;
 
@@ -1279,6 +1381,7 @@ CREATE TABLE public.contract (
     note text,
     op_updated_at timestamp with time zone,
     last_import_id uuid,
+    vykup_min_additive numeric(12,4),
     CONSTRAINT contract_crm_valid_to_check CHECK (((crm_valid_to IS NULL) OR (valid_from IS NULL) OR (crm_valid_to >= (valid_from - 1)))),
     CONSTRAINT contract_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
     CONSTRAINT contract_payment_terms_days_check CHECK ((payment_terms_days >= 0)),
@@ -1286,7 +1389,9 @@ CREATE TABLE public.contract (
     CONSTRAINT contract_related_check CHECK ((related_contract_id IS DISTINCT FROM id)),
     CONSTRAINT contract_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from))),
     CONSTRAINT contract_viwa_package_check CHECK ((viwa_package = ANY (ARRAY['basic'::text, 'plus'::text, 'pro'::text]))),
-    CONSTRAINT contract_viwa_package_type_check CHECK (((viwa_package IS NULL) OR (type = 'viwa'::public.contract_type)))
+    CONSTRAINT contract_viwa_package_type_check CHECK (((viwa_package IS NULL) OR (type = 'viwa'::public.contract_type))),
+    CONSTRAINT contract_vykup_min_additive_check CHECK ((vykup_min_additive >= (0)::numeric)),
+    CONSTRAINT contract_vykup_min_additive_type_check CHECK (((vykup_min_additive IS NULL) OR (type = 'vykup'::public.contract_type)))
 );
 
 
@@ -1389,6 +1494,139 @@ COMMENT ON COLUMN public.contract.last_import_id IS 'posledný import, ktorý zm
 
 
 --
+-- Name: COLUMN contract.vykup_min_additive; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.vykup_min_additive IS 'výkup: minimálny aditív pre túto zmluvu (prepis parametra, zadá Nákup); NULL = parameter';
+
+
+--
+-- Name: contract_year_basis; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contract_year_basis (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    contract_id uuid NOT NULL,
+    year smallint NOT NULL,
+    ref_date date NOT NULL,
+    seller_type public.seller_type NOT NULL,
+    trader_price numeric(12,4),
+    portfolio_eur_mwh numeric(12,4),
+    portfolio_on date,
+    min_additive numeric(12,4),
+    energopomoc_price numeric(12,4),
+    viwa_additive numeric(12,4),
+    exception_id uuid,
+    exception_value numeric(12,4),
+    source text DEFAULT 'vypocet'::text NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT contract_year_basis_exception_check CHECK (((exception_id IS NULL) = (exception_value IS NULL))),
+    CONSTRAINT contract_year_basis_source_check CHECK ((source = ANY (ARRAY['vypocet'::text, 'hubspot'::text]))),
+    CONSTRAINT contract_year_basis_year_check CHECK (((year >= 2000) AND (year <= 2100)))
+);
+
+
+--
+-- Name: TABLE contract_year_basis; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.contract_year_basis IS 'snímka ku dňu podpisu pre zmluvu × rok: cena pre obchodníka, odhad portfólia, minimálny aditív, energopomoc, aditív VIWA, výnimka; pridanú hodnotu po zmene parametrov nemení';
+
+
+--
+-- Name: COLUMN contract_year_basis.source; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract_year_basis.source IS 'vypocet = z cien BL/PL ku dňu podpisu; hubspot = cena pre obchodníka z nákupnej ceny pri deale (contract_purchase, zmluvy pred 2026)';
+
+
+--
+-- Name: contract_basis_values(public.contract, integer, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_basis_values(c public.contract, p_year integer, p_on date) RETURNS public.contract_year_basis
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  b contract_year_basis;
+  m record;
+BEGIN
+  b.contract_id := c.id;
+  b.year := p_year;
+  b.ref_date := p_on;
+  b.source := 'vypocet';
+  b.seller_type := coalesce((SELECT seller_type FROM app_user WHERE id = c.owner_id), 'obchodnik');
+  b.trader_price := trader_price(c.org_id, p_year::smallint, p_on);
+  IF b.trader_price IS NULL THEN
+    b.trader_price := (SELECT price_eur_mwh FROM contract_purchase
+                        WHERE contract_id = c.id AND delivery_year = p_year ORDER BY priced_on DESC LIMIT 1);
+    IF b.trader_price IS NOT NULL THEN
+      b.source := 'hubspot';
+    END IF;
+  END IF;
+  SELECT * INTO m FROM contract_market_value(c.org_id, p_year, p_on, 'portfolio');
+  b.portfolio_eur_mwh := m.value;
+  b.portfolio_on := m.on_date;
+  IF c.type = 'vykup' THEN
+    b.min_additive := coalesce(c.vykup_min_additive, contract_param(c.org_id,
+      CASE WHEN EXISTS (SELECT 1 FROM contract_oom x JOIN oom o ON o.id = x.oom_id
+                         WHERE x.contract_id = c.id AND o.source_category = 'lokalny_zdroj')
+           THEN 'min_aditiv_vykup_lz' ELSE 'min_aditiv_vykup' END, p_on));
+  ELSE
+    b.min_additive := contract_param(c.org_id,
+      CASE b.seller_type WHEN 'manazer' THEN 'min_aditiv_manazer' ELSE 'min_aditiv_obchodnik' END, p_on);
+  END IF;
+  b.energopomoc_price := contract_param(c.org_id, 'nakup_energopomoc', p_on, p_year::smallint);
+  b.viwa_additive := CASE WHEN c.viwa_package IS NOT NULL THEN contract_param(c.org_id, 'viwa_aditiv_' || c.viwa_package, p_on) END;
+  b.computed_at := now();
+  RETURN b;
+END;
+$$;
+
+
+--
+-- Name: contract_child_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_child_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$  -- práva volajúceho: current_user = skutočná rola (import a nočný beh = vlastník)
+BEGIN
+  IF NOT (crm_owner_session()
+          OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = TG_RELID)) THEN
+    RAISE EXCEPTION 'OOM a ceny zmluvy mení iba import z Office portálu.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END;
+$$;
+
+
+--
+-- Name: contract_crm_end_refresh(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_crm_end_refresh(p_contract_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_end date;
+  v_all boolean;
+BEGIN
+  SELECT max(valid_to), bool_and(valid_to IS NOT NULL) INTO v_end, v_all FROM contract_oom WHERE contract_id = p_contract_id;
+  UPDATE contract
+     SET crm_valid_to = CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END
+   WHERE id = p_contract_id
+     AND crm_valid_to IS DISTINCT FROM (CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END);
+END;
+$$;
+
+
+--
 -- Name: contract_effective_to(public.contract); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1417,7 +1655,7 @@ CREATE FUNCTION public.contract_guard() RETURNS trigger
 DECLARE
   v_system boolean := crm_owner_session()
     OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'contract'::regclass);
-  v_crm    text[] := ARRAY['previous_contract_id', 'related_contract_id', 'close_reason', 'note', 'custom', 'viwa_package',
+  v_crm    text[] := ARRAY['previous_contract_id', 'related_contract_id', 'close_reason', 'note', 'custom', 'viwa_package', 'vykup_min_additive',
                            'updated_at'];
   r contract;
 BEGIN
@@ -1435,6 +1673,13 @@ BEGIN
     IF (to_jsonb(NEW) - v_crm) <> (to_jsonb(OLD) - v_crm) THEN
       RAISE EXCEPTION 'Údaje z Office portálu sa v CRM nemenia – opravte ich v Office portáli a nahrajte export.'
         USING ERRCODE = 'check_violation';
+    END IF;
+    -- minimálny aditív výkupu pri zmluve (0027, otázka 29; iba výkup – obmedzenie tabuľky): mení Nákup alebo admin
+    IF NEW.vykup_min_additive IS DISTINCT FROM OLD.vykup_min_additive THEN
+      IF NOT (crm_is_admin() OR EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id
+                                         WHERE u.id = crm_active_user_id() AND t.code = 'nakup')) THEN
+        RAISE EXCEPTION 'Minimálny aditív výkupu pri zmluve mení iba Nákup alebo admin.' USING ERRCODE = 'insufficient_privilege';
+      END IF;
     END IF;
   END IF;
   -- súvisiaca zmluva: VIWA ↔ dodávka toho istého zákazníka
@@ -2043,6 +2288,9 @@ BEGIN
                                (SELECT coalesce(sum(qty_vt_mwh + qty_nt_mwh), 0) FROM contract_oom WHERE contract_id = v_new.id));
   END IF;
 
+  -- 12b. snímka ku dňu podpisu, výnimka, Pod hranicou bez výnimky, Chýba cena pre obchodníka (0027)
+  v_warn := v_warn || contract_basis_refresh(v_new.id);
+
   -- 13. čas zmeny v Office portáli a posledný import
   UPDATE contract
      SET op_updated_at = nullif(h ->> 'updated_at', '')::timestamptz,
@@ -2532,6 +2780,7 @@ BEGIN
   IF cardinality(v_chg) > 0 THEN
     PERFORM contract_price_list_sync(c.id);
     PERFORM contract_price_missing_refresh(c.id);
+    PERFORM contract_basis_refresh(c.id);
   END IF;
   RETURN v_chg;
 END;
@@ -2649,6 +2898,23 @@ BEGIN
             'fields', v_f, 'parse_errors', coalesce(r -> 'parse_errors', '[]')))) -> 0)
          || jsonb_build_object('warnings', v_warn, 'missing', '[]'::jsonb);
 END;
+$$;
+
+
+--
+-- Name: contract_market_value(uuid, integer, date, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_market_value(p_org uuid, p_year integer, p_on date, p_kind text) RETURNS TABLE(value numeric, on_date date)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE p_kind WHEN 'portfolio' THEN m.portfolio_eur_mwh ELSE m.spot_fve_eur_mwh END, m.on_date
+    FROM market_price_daily m
+   WHERE m.org_id = p_org AND m.delivery_year = p_year AND m.corrected_at IS NULL AND m.on_date <= p_on
+     AND (CASE p_kind WHEN 'portfolio' THEN m.portfolio_eur_mwh ELSE m.spot_fve_eur_mwh END) IS NOT NULL
+   ORDER BY m.on_date DESC
+   LIMIT 1
 $$;
 
 
@@ -2803,6 +3069,24 @@ BEGIN
     END IF;
   END LOOP;
 END;
+$$;
+
+
+--
+-- Name: contract_param(uuid, text, date, smallint); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_param(p_org uuid, p_code text, p_on date, p_year smallint DEFAULT NULL::smallint) RETURNS numeric
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce(
+    (SELECT value FROM price_parameter
+      WHERE org_id = p_org AND code = p_code AND delivery_year IS NOT DISTINCT FROM p_year AND valid_from <= p_on
+      ORDER BY valid_from DESC LIMIT 1),
+    (SELECT value FROM price_parameter
+      WHERE org_id = p_org AND code = p_code AND delivery_year IS NOT DISTINCT FROM p_year
+      ORDER BY valid_from LIMIT 1))
 $$;
 
 
@@ -3067,11 +3351,11 @@ BEGIN
   v_detail := nullif(array_to_string(v_miss, '; '), '');
   IF v_detail IS NULL THEN
     UPDATE contract_flag SET resolved_at = now()
-     WHERE contract_id = c.id AND code = 'chyba_cena' AND resolved_at IS NULL;
+     WHERE contract_id = c.id AND code = 'chyba_cena' AND year IS NULL AND resolved_at IS NULL;
   ELSE
     UPDATE contract_flag SET detail = v_detail
-     WHERE contract_id = c.id AND code = 'chyba_cena' AND resolved_at IS NULL AND detail IS DISTINCT FROM v_detail;
-    IF NOT EXISTS (SELECT 1 FROM contract_flag WHERE contract_id = c.id AND code = 'chyba_cena' AND resolved_at IS NULL) THEN
+     WHERE contract_id = c.id AND code = 'chyba_cena' AND year IS NULL AND resolved_at IS NULL AND detail IS DISTINCT FROM v_detail;
+    IF NOT EXISTS (SELECT 1 FROM contract_flag WHERE contract_id = c.id AND code = 'chyba_cena' AND year IS NULL AND resolved_at IS NULL) THEN
       INSERT INTO contract_flag (contract_id, code, detail) VALUES (c.id, 'chyba_cena', v_detail);
     END IF;
   END IF;
@@ -3185,9 +3469,165 @@ CREATE FUNCTION public.contract_viwa_package_sync() RETURNS trigger
 BEGIN
   PERFORM contract_price_list_sync(NEW.id);
   PERFORM contract_price_missing_refresh(NEW.id);
+  PERFORM contract_basis_refresh(NEW.id);
   RETURN NULL;
 END;
 $$;
+
+
+--
+-- Name: contract_year_calc(uuid, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_year_calc(p_contract_id uuid, p_year integer) RETURNS TABLE(year integer, months integer, volume_mwh numeric, revenue_eur numeric, fees_eur numeric, cost_eur numeric, added_value_eur numeric, margin_cost_eur numeric, margin_eur numeric, model text, tranche text, basis_stored boolean, basis_source text, trader_price numeric, exception_id uuid, exception_value numeric, portfolio_eur_mwh numeric, portfolio_on date, portfolio_stale boolean, missing text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+WITH k AS (
+  SELECT c AS rec, c.id, c.org_id, c.type, crm_can_see_margin() AS see_margin
+    FROM contract c
+   WHERE c.id = p_contract_id
+     AND c.org_id = ANY (crm_user_orgs()) AND crm_contract_visible(c.company_id, c.person_id, c.owner_id)
+),
+bs AS (SELECT b.*, true AS stored FROM contract_year_basis b WHERE b.contract_id = p_contract_id AND b.year = p_year),
+b AS (
+  SELECT * FROM bs
+  UNION ALL
+  SELECT (z.v).*, false FROM (SELECT contract_basis_values(k.rec, p_year, crm_today()) AS v FROM k
+                               WHERE NOT EXISTS (SELECT 1 FROM bs)) z
+),
+mk AS (
+  SELECT (SELECT value FROM contract_market_value(k.org_id, p_year, crm_today(), 'portfolio')) AS portfolio,
+         (SELECT on_date FROM contract_market_value(k.org_id, p_year, crm_today(), 'portfolio')) AS portfolio_on,
+         (SELECT value FROM contract_market_value(k.org_id, p_year, crm_today(), 'spot_fve')) AS spot_fve
+    FROM k
+),
+mo AS (
+  SELECT make_date(p_year, i, 1) AS m_start, (make_date(p_year, i, 1) + interval '1 month - 1 day')::date AS m_end
+    FROM generate_series(1, 12) i
+),
+co AS (
+  SELECT x.oom_id, x.valid_from, x.valid_to, x.qty_vt_mwh, x.qty_nt_mwh,
+         coalesce(x.source_power_kw, o.source_power_kw, 0) AS power_kw, o.planned_feed_in_mwh,
+         CASE WHEN x.valid_to IS NOT NULL
+                   AND (extract(year FROM x.valid_to) * 12 + extract(month FROM x.valid_to))
+                       - (extract(year FROM x.valid_from) * 12 + extract(month FROM x.valid_from)) + 1 < 12
+              THEN (extract(year FROM x.valid_to) * 12 + extract(month FROM x.valid_to))
+                   - (extract(year FROM x.valid_from) * 12 + extract(month FROM x.valid_from)) + 1
+              ELSE 12 END AS div
+    FROM contract_oom x JOIN oom o ON o.id = x.oom_id
+   WHERE x.contract_id = p_contract_id AND x.valid_from IS NOT NULL AND (x.valid_to IS NULL OR x.valid_to >= x.valid_from)
+),
+line AS (
+  SELECT co.oom_id, mo.m_start, k.type AS ctype, p.price_model, p.price_vt_eur_mwh AS vt, p.price_nt_eur_mwh AS nt,
+         p.additive_eur_mwh AS ad, p.additive_pct AS pct, pr.price_regulation AS reg,
+         CASE WHEN k.type IN ('vykup', 'viwa') THEN coalesce(co.planned_feed_in_mwh, 0) / 12 ELSE co.qty_vt_mwh / co.div END AS v_vt,
+         CASE WHEN k.type IN ('vykup', 'viwa') THEN 0 ELSE co.qty_nt_mwh / co.div END AS v_nt,
+         (SELECT coalesce(sum(coalesce(f.fee_eur_month, 0) + coalesce(f.fee_kw_eur_month, 0) * co.power_kw), 0)
+            FROM (SELECT DISTINCT ON (f.slot) f.* FROM contract_price f
+                   WHERE f.contract_id = p_contract_id AND f.oom_id = co.oom_id
+                     AND f.valid_from <= mo.m_end AND (f.valid_to IS NULL OR f.valid_to >= mo.m_start)
+                   ORDER BY f.slot, f.valid_from DESC) f) AS fees
+    FROM co
+    CROSS JOIN k
+    JOIN mo ON co.valid_from <= mo.m_end AND (co.valid_to IS NULL OR co.valid_to >= mo.m_start)
+    LEFT JOIN LATERAL (SELECT * FROM contract_price p
+                        WHERE p.contract_id = p_contract_id AND p.oom_id = co.oom_id AND p.slot = 'komodita'
+                          AND p.valid_from <= mo.m_end AND (p.valid_to IS NULL OR p.valid_to >= mo.m_start)
+                        ORDER BY p.valid_from DESC LIMIT 1) p ON true
+    LEFT JOIN product pr ON pr.id = p.product_id
+),
+kl AS (
+  SELECT l.*, l.v_vt + l.v_nt AS vol,
+         CASE WHEN l.ctype = 'viwa' THEN 'viwa'
+              WHEN l.ctype = 'vykup' THEN CASE WHEN l.price_model IS NOT NULL THEN 'vykup' END
+              WHEN l.price_model = 'cennik' AND l.ctype = 'dodavka_domacnost' AND l.reg THEN 'energo'
+              WHEN l.price_model IN ('fix', 'cennik', 'spot_plus_eur') THEN l.price_model::text END AS kind
+    FROM line l
+),
+calc AS (
+  SELECT kl.*,
+         CASE kl.kind
+           WHEN 'fix' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
+           WHEN 'cennik' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
+           WHEN 'energo' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
+           WHEN 'spot_plus_eur' THEN kl.ad * kl.vol
+           WHEN 'vykup' THEN CASE kl.price_model WHEN 'spot_minus_eur' THEN kl.ad * kl.vol
+                                                 WHEN 'spot_minus_pct' THEN kl.pct / 100 * (SELECT spot_fve FROM mk) * kl.vol
+                                                 -- výkup s pevnou cenou: nákup = predaj, pridaná hodnota a marža 0 (otázka 33)
+                                                 WHEN 'fix' THEN kl.vt * kl.vol END
+           WHEN 'viwa' THEN (SELECT viwa_additive FROM b) * kl.vol
+         END AS rev,
+         CASE kl.kind
+           WHEN 'fix' THEN coalesce((SELECT exception_value FROM b),
+                                    CASE WHEN (SELECT seller_type FROM b) = 'manazer' THEN (SELECT portfolio_eur_mwh FROM b)
+                                         ELSE (SELECT trader_price FROM b) END)
+           WHEN 'cennik' THEN (SELECT portfolio_eur_mwh FROM b)
+           WHEN 'energo' THEN (SELECT energopomoc_price FROM b)
+           WHEN 'spot_plus_eur' THEN coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b))
+           WHEN 'vykup' THEN CASE WHEN kl.price_model = 'fix' THEN kl.vt
+                                  ELSE coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b)) END
+           WHEN 'viwa' THEN 0
+         END AS unit_cost,
+         CASE kl.kind
+           WHEN 'fix' THEN (SELECT portfolio FROM mk)
+           WHEN 'cennik' THEN (SELECT portfolio FROM mk)
+           WHEN 'energo' THEN (SELECT energopomoc_price FROM b)
+           WHEN 'spot_plus_eur' THEN 0
+           WHEN 'vykup' THEN CASE WHEN kl.price_model = 'fix' THEN kl.vt
+                                  ELSE coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b)) END
+           WHEN 'viwa' THEN 0
+         END AS unit_mcost
+    FROM kl
+),
+vu AS (   -- VIWA: mesačná platba za účet (bez OOM)
+  SELECT coalesce(sum(f.fee_eur_month), 0) AS fee
+    FROM mo
+    JOIN LATERAL (SELECT f.fee_eur_month FROM contract_price f
+                   WHERE f.contract_id = p_contract_id AND f.slot = 'viwa_ucet'
+                     AND f.valid_from <= mo.m_end AND (f.valid_to IS NULL OR f.valid_to >= mo.m_start)
+                   ORDER BY f.valid_from DESC LIMIT 1) f ON true
+),
+agg AS (
+  SELECT count(DISTINCT m_start)::int AS months,
+         sum(vol) AS vol,
+         CASE WHEN bool_and(rev IS NOT NULL) FILTER (WHERE kind IS NOT NULL) IS NOT FALSE
+              THEN coalesce(sum(rev) FILTER (WHERE kind IS NOT NULL), 0) END AS rev,
+         coalesce(sum(fees), 0) AS fees,
+         CASE WHEN bool_and(unit_cost IS NOT NULL) FILTER (WHERE kind IS NOT NULL) IS NOT FALSE
+              THEN coalesce(sum(unit_cost * vol) FILTER (WHERE kind IS NOT NULL), 0) END AS cost,
+         CASE WHEN bool_and(unit_mcost IS NOT NULL) FILTER (WHERE kind IS NOT NULL) IS NOT FALSE
+              THEN coalesce(sum(unit_mcost * vol) FILTER (WHERE kind IS NOT NULL), 0) END AS mcost,
+         string_agg(DISTINCT kind, ',') AS model,
+         CASE WHEN bool_or(kind = 'energo') THEN 'SEAS'
+              WHEN bool_or(kind = 'vykup' AND price_model = 'fix') THEN 'FIX'
+              WHEN bool_or(kind IN ('fix', 'cennik')) THEN 'FIX'
+              WHEN bool_or(kind IN ('spot_plus_eur', 'viwa', 'vykup')) THEN 'SPOT' END AS tranche,
+         CASE WHEN bool_or(kind = 'fix' AND unit_cost IS NULL) THEN 'cena pre obchodníka'
+              WHEN bool_or(kind = 'cennik' AND unit_cost IS NULL) THEN 'odhad portfólia ku dňu podpisu'
+              WHEN bool_or(kind = 'energo' AND unit_cost IS NULL) THEN 'nákupná cena energopomoci'
+              WHEN bool_or(kind = 'viwa' AND rev IS NULL) THEN 'balík VIWA'
+              WHEN bool_or(kind = 'vykup' AND price_model = 'spot_minus_pct' AND rev IS NULL) THEN 'očakávaná cena SPOT pre FVE'
+              WHEN bool_or(kind IS NOT NULL AND unit_mcost IS NULL) THEN 'odhad portfólia (marža)' END AS missing
+    FROM calc
+)
+SELECT p_year, agg.months, round(coalesce(agg.vol, 0), 3), round(agg.rev, 2), round(agg.fees + vu.fee, 2), round(agg.cost, 2),
+       round(agg.rev - agg.cost, 2),
+       CASE WHEN k.see_margin THEN round(agg.mcost, 2) END,
+       CASE WHEN k.see_margin THEN round(agg.rev + agg.fees + vu.fee - agg.mcost, 2) END,
+       agg.model, agg.tranche, b.stored, b.source, b.trader_price, b.exception_id, b.exception_value,
+       CASE WHEN k.see_margin THEN mk.portfolio END, CASE WHEN k.see_margin THEN mk.portfolio_on END,
+       CASE WHEN k.see_margin THEN mk.portfolio_on < crm_today() - 30 END,
+       agg.missing
+  FROM k CROSS JOIN agg CROSS JOIN vu CROSS JOIN mk LEFT JOIN b ON true
+$$;
+
+
+--
+-- Name: FUNCTION contract_year_calc(p_contract_id uuid, p_year integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.contract_year_calc(p_contract_id uuid, p_year integer) IS 'ročná bilancia zmluvy: objem, výnos komodity, poplatky, pridaná hodnota, marža firmy (iba s právom), tranža; iba viditeľná zmluva';
 
 
 --
@@ -6218,6 +6658,27 @@ $$;
 
 
 --
+-- Name: price_exception_apply(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_exception_apply() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  k uuid;
+BEGIN
+  FOR k IN SELECT id FROM contract
+            WHERE org_id = NEW.org_id AND company_id IS NOT DISTINCT FROM NEW.company_id
+              AND person_id IS NOT DISTINCT FROM NEW.person_id AND signed_on IS NOT NULL LOOP
+    PERFORM contract_basis_refresh(k);
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+
+--
 -- Name: price_exception_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -6274,6 +6735,39 @@ BEGIN
   NEW.decided_by := crm_active_user_id();
   NEW.decided_at := now();
   NEW.valid_until := CASE WHEN NEW.status = 'schvalena' THEN crm_today() + 30 END;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: price_exception_threshold(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_exception_threshold() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_seller seller_type;
+  v_year   smallint := (SELECT min(x) FROM unnest(NEW.years) x);
+  v        numeric;
+BEGIN
+  IF crm_active_user_id() IS NULL THEN
+    RETURN NEW;
+  END IF;
+  v_seller := coalesce((SELECT seller_type FROM app_user WHERE id = crm_active_user_id()), 'obchodnik');
+  v := CASE NEW.price_model
+         WHEN 'fix' THEN trader_price(NEW.org_id, v_year, crm_today())
+         WHEN 'spot_plus_eur' THEN contract_param(NEW.org_id,
+                                     CASE v_seller WHEN 'manazer' THEN 'min_aditiv_manazer' ELSE 'min_aditiv_obchodnik' END, crm_today())
+         WHEN 'spot_minus_eur' THEN contract_param(NEW.org_id, 'min_aditiv_vykup', crm_today())
+       END;
+  IF v IS NULL THEN
+    RAISE EXCEPTION 'Hranica pre rok % dnes nie je známa (chýbajú ceny BL/PL alebo parameter v Cenových parametroch).', v_year
+      USING ERRCODE = 'check_violation';
+  END IF;
+  NEW.threshold_value := v;
   RETURN NEW;
 END;
 $$;
@@ -6764,9 +7258,9 @@ BEGIN
     RAISE EXCEPTION 'Platí od musí byť dnes alebo neskôr.' USING ERRCODE = 'check_violation';
   END IF;
   IF NOT (crm_is_admin() OR (crm_approves_prices()
-                             AND NEW.code NOT IN ('min_aditiv_vykup_lz', 'nakup_energopomoc'))) THEN
+                             AND NEW.code NOT IN ('min_aditiv_vykup_lz', 'min_aditiv_vykup', 'nakup_energopomoc'))) THEN
     RAISE EXCEPTION 'Tento cenový parameter smie meniť iba admin%.',
-      CASE WHEN NEW.code IN ('min_aditiv_vykup_lz', 'nakup_energopomoc') THEN '' ELSE ' alebo obchodný riaditeľ' END
+      CASE WHEN NEW.code IN ('min_aditiv_vykup_lz', 'min_aditiv_vykup', 'nakup_energopomoc') THEN '' ELSE ' alebo obchodný riaditeľ' END
       USING ERRCODE = 'insufficient_privilege';
   END IF;
   NEW.changed_by := crm_active_user_id();
@@ -9503,7 +9997,7 @@ CREATE TABLE public.price_parameter (
     changed_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT price_parameter_code_check CHECK ((code = ANY (ARRAY['pomer_bl_pct'::text, 'rizikova_prirazka'::text, 'nasa_marza'::text, 'min_aditiv_obchodnik'::text, 'min_aditiv_manazer'::text, 'min_aditiv_vykup_lz'::text, 'nakup_energopomoc'::text, 'viwa_aditiv_basic'::text, 'viwa_aditiv_plus'::text, 'viwa_aditiv_pro'::text]))),
+    CONSTRAINT price_parameter_code_check CHECK ((code = ANY (ARRAY['pomer_bl_pct'::text, 'rizikova_prirazka'::text, 'nasa_marza'::text, 'min_aditiv_obchodnik'::text, 'min_aditiv_manazer'::text, 'min_aditiv_vykup_lz'::text, 'nakup_energopomoc'::text, 'viwa_aditiv_basic'::text, 'viwa_aditiv_plus'::text, 'viwa_aditiv_pro'::text, 'min_aditiv_vykup'::text]))),
     CONSTRAINT price_parameter_delivery_year_check CHECK (((delivery_year >= 2000) AND (delivery_year <= 2100))),
     CONSTRAINT price_parameter_ratio_check CHECK (((code <> 'pomer_bl_pct'::text) OR (value <= (100)::numeric))),
     CONSTRAINT price_parameter_value_check CHECK ((value >= (0)::numeric)),
@@ -10131,6 +10625,22 @@ ALTER TABLE ONLY public.contract_price
 
 ALTER TABLE ONLY public.contract_purchase
     ADD CONSTRAINT contract_purchase_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contract_year_basis contract_year_basis_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_year_basis
+    ADD CONSTRAINT contract_year_basis_key UNIQUE (contract_id, year);
+
+
+--
+-- Name: contract_year_basis contract_year_basis_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_year_basis
+    ADD CONSTRAINT contract_year_basis_pkey PRIMARY KEY (id);
 
 
 --
@@ -11738,6 +12248,13 @@ CREATE TRIGGER trg_app_user_guard BEFORE INSERT OR DELETE OR UPDATE ON public.ap
 
 
 --
+-- Name: price_exception trg_apply; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_apply AFTER UPDATE OF status ON public.price_exception FOR EACH ROW WHEN (((new.status = 'schvalena'::public.price_exception_status) AND (old.status = 'caka'::public.price_exception_status))) EXECUTE FUNCTION public.price_exception_apply();
+
+
+--
 -- Name: activity trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -11854,6 +12371,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract_pri
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract_purchase FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: contract_year_basis trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract_year_basis FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -12162,6 +12686,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.team_permiss
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.voucher FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: contract trg_basis; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_basis AFTER UPDATE OF vykup_min_additive, owner_id ON public.contract FOR EACH ROW WHEN (((new.vykup_min_additive IS DISTINCT FROM old.vykup_min_additive) OR (new.owner_id IS DISTINCT FROM old.owner_id))) EXECUTE FUNCTION public.contract_basis_refresh_trigger();
 
 
 --
@@ -12760,6 +13291,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.contract_purchase FOR 
 
 
 --
+-- Name: contract_year_basis trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.contract_year_basis FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: conversation trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -13114,6 +13652,13 @@ CREATE TRIGGER trg_team_external_guard BEFORE INSERT OR UPDATE ON public.team_pe
 --
 
 CREATE TRIGGER trg_team_permission_init AFTER INSERT ON public.team FOR EACH ROW EXECUTE FUNCTION public.team_permission_init();
+
+
+--
+-- Name: price_exception trg_threshold; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_threshold BEFORE INSERT ON public.price_exception FOR EACH ROW EXECUTE FUNCTION public.price_exception_threshold();
 
 
 --
@@ -13545,6 +14090,22 @@ ALTER TABLE ONLY public.contract_purchase
 
 ALTER TABLE ONLY public.contract
     ADD CONSTRAINT contract_related_contract_id_fkey FOREIGN KEY (related_contract_id) REFERENCES public.contract(id);
+
+
+--
+-- Name: contract_year_basis contract_year_basis_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_year_basis
+    ADD CONSTRAINT contract_year_basis_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contract_year_basis contract_year_basis_exception_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_year_basis
+    ADD CONSTRAINT contract_year_basis_exception_id_fkey FOREIGN KEY (exception_id) REFERENCES public.price_exception(id);
 
 
 --
@@ -14396,6 +14957,12 @@ CREATE POLICY contract_select ON public.contract FOR SELECT USING (((org_id = AN
 
 CREATE POLICY contract_update ON public.contract FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_contract_editable(company_id, person_id, owner_id))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_contract_editable(company_id, person_id, owner_id)));
 
+
+--
+-- Name: contract_year_basis; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contract_year_basis ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: custom_field; Type: ROW SECURITY; Schema: public; Owner: -
@@ -15567,4 +16134,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0023'),
     ('0024'),
     ('0025'),
-    ('0026');
+    ('0026'),
+    ('0027');

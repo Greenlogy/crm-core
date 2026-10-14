@@ -6,6 +6,7 @@ import { ContactsPage } from './pages/ContactsPage';
 import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
 import { ContractsPage } from './pages/ContractsPage';
+import { ExceptionsPage } from './pages/ExceptionsPage';
 import { CustomerPage } from './pages/CustomerPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { OomImportPage } from './pages/OomImportPage';
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
       { path: 'zmluvy', element: <ContractsPage /> },
       { path: 'zmluvy/import', element: <ContractImportPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
+      { path: 'vynimky', element: <ExceptionsPage /> },
       // Cenníky: pevné adresy pred /cenniky/:id (stránka detailu prijme iba platné ID)
       { path: 'cenniky', element: <PriceListsPage /> },
       { path: 'cenniky/produkty', element: <ProductsPage /> },

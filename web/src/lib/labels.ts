@@ -29,6 +29,15 @@ export const CONTRACT_STATUS: Record<string, { label: string; tone: Tone; live?:
   neuspesna: { label: 'Neúspešná', tone: 'negative' },
 };
 
+/** Stav výnimky z ceny (0025; Expirovaná sa počíta). */
+export const EXCEPTION_STATE: Record<string, { label: string; tone: Tone }> = {
+  caka: { label: 'Čaká', tone: 'warning' },
+  schvalena: { label: 'Schválená', tone: 'positive' },
+  zamietnuta: { label: 'Zamietnutá', tone: 'negative' },
+  pouzita: { label: 'Použitá', tone: 'info' },
+  expirovana: { label: 'Expirovaná', tone: 'neutral' },
+};
+
 /** Typ zmluvy (0025). */
 export const CONTRACT_TYPE: Record<string, string> = {
   dodavka_domacnost: 'Dodávka – domácnosť',

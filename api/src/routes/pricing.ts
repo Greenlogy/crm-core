@@ -14,7 +14,7 @@ export const pricing = new Hono<AppEnv>();
 export const PARAMETER_CODES = [
   'pomer_bl_pct', 'rizikova_prirazka', 'nasa_marza',
   'min_aditiv_obchodnik', 'min_aditiv_manazer', 'min_aditiv_vykup_lz',
-  'nakup_energopomoc', 'viwa_aditiv_basic', 'viwa_aditiv_plus', 'viwa_aditiv_pro',
+  'nakup_energopomoc', 'viwa_aditiv_basic', 'viwa_aditiv_plus', 'viwa_aditiv_pro', 'min_aditiv_vykup',
 ] as const;
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

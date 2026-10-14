@@ -39,6 +39,11 @@ export const eurMonth = (v: Num | undefined) => {
   return n === null ? EMPTY : `${nf(2, 2).format(n)} €/mes.`;
 };
 export const pct = (v: Num | undefined) => num(v, 2, '%');
+/** Suma v eurách na 2 desatinné miesta (bilancia zmluvy): 1 808,10 */
+export const eur = (v: Num | undefined) => {
+  const n = toNumber(v);
+  return n === null ? EMPTY : nf(2, 2).format(n);
+};
 
 /**
  * Číslo z databázy (numeric ako text) v sk-SK bez prepočtu: medzera (U+00A0) pre tisíce, desatinná čiarka,

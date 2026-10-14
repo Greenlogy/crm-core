@@ -260,10 +260,13 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
       SELECT k.id, k.number, contract_state(k) AS status, k.type, k.valid_from, contract_effective_to(k) AS valid_to,
              d.name AS deal_name, pl.name AS pipeline,
              (SELECT count(*)::int FROM contract_oom co WHERE co.contract_id = k.id) AS oom_count,
-             (SELECT count(*)::int FROM contract_price cp WHERE cp.contract_id = k.id) AS price_count
+             (SELECT count(*)::int FROM contract_price cp WHERE cp.contract_id = k.id) AS price_count,
+             -- bilancia bežného roka (0027): pridaná hodnota; marža iba s právom (inak NULL)
+             extract(year FROM crm_today())::int AS balance_year, b.added_value_eur, b.margin_eur, b.volume_mwh AS year_volume_mwh
         FROM contract k
         LEFT JOIN deal d ON d.id = k.deal_id
         LEFT JOIN pipeline pl ON pl.id = d.pipeline_id
+        LEFT JOIN LATERAL contract_year_calc(k.id, extract(year FROM crm_today())::int) b ON true
        WHERE k.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY contract_effective_to(k) DESC NULLS FIRST, k.valid_from DESC`,
     statusHistory(sql, kind === 'company' ? 'company' : 'contact', id),

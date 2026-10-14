@@ -1,5 +1,6 @@
 // Zmluvy (modul 4): zoznam (obrazovka 25) a karta (obrazovka 26). Fáza z Office portálu a vypočítaný stav (0025),
-// OOM v zmluve, ceny po zložkách, príznaky, história importov (0026). Bilancia (pridaná hodnota, marža) príde v 0027.
+// OOM v zmluve, ceny po zložkách, príznaky, história importov (0026), ročná bilancia (0027: pridaná hodnota pre každého,
+// kto zmluvu vidí; marža firmy iba s právom – contract_year_calc vráti NULL).
 // Čo používateľ vidí, rieši RLS (zmluvy „iba svoje“ = zákazník aj uzatvoril, „schvaľuje ceny“ vidí všetky).
 
 import type { Sql } from '../db';
@@ -11,7 +12,11 @@ export const CONTRACT_FLAGS = ['chyba_cena', 'kontrola_importu', 'sprolongovane_
 /** Tlačidlá zoznamu: stavy a príznaky. */
 export const CONTRACT_CHIPS = new Set<string>(['', ...CONTRACT_STATES, ...CONTRACT_FLAGS]);
 
-export type ContractFilter = { q: string; chip: string; type: string; owner: string; org: string; page: number };
+export type ContractFilter = { q: string; chip: string; type: string; owner: string; org: string; page: number; year: number };
+
+// Končí do 4 mesiacov: podpísaná zmluva o dodávke firmy, skutočný koniec od dnes do 4 mesiacov (upozornenie pošle F4)
+const ENDING = `(k.state IN ('podpisana', 'ucinna') AND k.type::text LIKE 'dodavka_firma%'
+                 AND k.effective_to BETWEEN crm_today() AND (crm_today() + interval '4 months')::date)`;
 
 export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONTRACT_PAGE_SIZE) {
   const like = `%${f.q}%`;
@@ -21,7 +26,9 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
       ? sql`TRUE`
       : (CONTRACT_STATES as readonly string[]).includes(f.chip)
         ? sql`k.state = ${f.chip}`
-        : sql`${f.chip} = ANY (k.flags)`;
+        : f.chip === 'konci_do_4_mesiacov'
+          ? sql.unsafe(ENDING)
+          : sql`${f.chip} = ANY (k.flags)`;
   // Hľadanie a filtre platia aj pre počty v tlačidlách; tlačidlo iba pre riadky.
   const base = sql`
     (${f.q} = '' OR k.number ILIKE ${like} OR k.customer_name ILIKE ${like}
@@ -36,6 +43,7 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
       SELECT k.id, k.number, k.type, k.phase, k.state, k.valid_from, k.valid_to, k.effective_to, k.crm_valid_to,
              k.auto_prolong, k.customer_kind, k.customer_name, k.company_id, k.person_id, k.owner_id, k.owner_name,
              k.oom_count, k.qty_mwh, to_jsonb(k.flags) AS flags, k.org_id, g.legal_name AS org_name,
+             ${sql.unsafe(ENDING)} AS ending,
              count(*) OVER ()::int AS total
         FROM contract_v k
         JOIN org g ON g.id = k.org_id
@@ -45,18 +53,45 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
     sql`
       SELECT count(*)::int AS all,
              ${sql.unsafe(CONTRACT_STATES.map((s) => `count(*) FILTER (WHERE k.state = '${s}')::int AS ${s}`).join(', '))},
-             ${sql.unsafe(CONTRACT_FLAGS.map((s) => `count(*) FILTER (WHERE '${s}' = ANY (k.flags))::int AS ${s}`).join(', '))}
+             ${sql.unsafe(CONTRACT_FLAGS.map((s) => `count(*) FILTER (WHERE ${s === 'konci_do_4_mesiacov' ? ENDING : `'${s}' = ANY (k.flags)`})::int AS ${s}`).join(', '))}
         FROM contract_v k
        WHERE ${base}`,
   ]);
 
+  // ročná bilancia iba pre riadky strany (výpočet po mesiacoch na zmluvu)
+  const ids = rows.map((r) => r.id as string);
+  const balance = ids.length
+    ? await sql`
+        SELECT b.id, c.volume_mwh, c.added_value_eur, c.margin_eur, c.portfolio_stale, c.missing, c.months
+          FROM contract b, contract_year_calc(b.id, ${f.year}::int) c
+         WHERE b.id IN ${sql(ids)}`
+    : [];
+  const byId = new Map(balance.map((b) => [b.id as string, b]));
   return {
     page: f.page,
     pageSize,
+    year: f.year,
     total: rows[0]?.total ?? 0,
     counts: counts[0],
-    items: rows.map(({ total: _t, ...r }) => r),
+    items: rows.map((row) => {
+      const { total: _t, ...r } = row as Record<string, unknown>;
+      const b = byId.get(r.id as string);
+      return { ...r, year_volume_mwh: b?.volume_mwh ?? null, added_value_eur: b?.added_value_eur ?? null,
+               margin_eur: b?.margin_eur ?? null, portfolio_stale: b?.portfolio_stale ?? null, balance_missing: b?.missing ?? null,
+               year_months: b?.months ?? 0 };
+    }),
   };
+}
+
+/** Všetky riadky podľa filtra (export, najviac 5 000) s bilanciou roka. */
+export async function exportContracts(sql: Sql, f: ContractFilter) {
+  const all: Record<string, unknown>[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const r = await listContracts(sql, { ...f, page }, 50);
+    all.push(...r.items);
+    if (r.items.length < 50 || all.length >= 5000) break;
+  }
+  return all;
 }
 
 /** Možnosti filtra: obchodníci s aspoň jednou viditeľnou zmluvou; aktívni používatelia (zmena obchodníka zmluvy). */
@@ -73,14 +108,22 @@ export async function contractCard(sql: Sql, id: string) {
     SELECT k.*, to_jsonb(k.flags) AS flags,
            pk.number AS previous_number, rk.number AS related_number, rk.type AS related_type,
            crm_contract_editable(k.company_id, k.person_id, k.owner_id) AS can_edit,
-           crm_can_change_owner() AS can_change_owner
+           crm_can_change_owner() AS can_change_owner,
+           (crm_is_admin() OR EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id
+                                       WHERE u.id = crm_active_user_id() AND t.code = 'nakup')) AS can_edit_vykup
       FROM contract_v k
       LEFT JOIN contract pk ON pk.id = k.previous_contract_id
       LEFT JOIN contract rk ON rk.id = k.related_contract_id
      WHERE k.id = ${id}`;
   if (!contract) return null;
 
-  const [ooms, prices, flags, imports, successors] = await Promise.all([
+  // roky bilancie: od začiatku OOM v zmluve po koniec (pri dobe neurčitej bežný a nasledujúci rok)
+  const [span] = await sql<{ y1: number | null; y2: number | null }[]>`
+    SELECT extract(year FROM min(valid_from))::int AS y1,
+           greatest(extract(year FROM max(coalesce(valid_to, make_date(extract(year FROM crm_today())::int + 1, 12, 31))))::int,
+                    extract(year FROM min(valid_from))::int) AS y2
+      FROM contract_oom WHERE contract_id = ${id} AND valid_from IS NOT NULL`;
+  const [ooms, prices, flags, imports, successors, balance, exceptions] = await Promise.all([
     sql`
       SELECT o.id, o.eic, o.type, o.status, o.name, o.address_street, o.address_number_orientacne, o.address_city,
              o.voltage_level, o.breaker_a, o.public_lighting, o.price_regulation,
@@ -127,7 +170,14 @@ export async function contractCard(sql: Sql, id: string) {
     sql`
       SELECT DISTINCT k.id, k.number FROM contract_oom co JOIN contract k ON k.id = co.contract_id
        WHERE co.successor_id = ${id} ORDER BY k.number`,
+    span?.y1
+      ? sql`SELECT c.* FROM generate_series(${span.y1}::int, ${span.y2}::int) y, contract_year_calc(${id}::uuid, y) c ORDER BY c.year`
+      : Promise.resolve([]),
+    sql`
+      SELECT e.id, to_jsonb(e.years) AS years, e.price_model, e.requested_value, e.threshold_value, e.state, e.decided_at, e.decided_by_name,
+             e.requested_by_name, e.reason
+        FROM price_exception_v e WHERE e.contract_id = ${id}`,
   ]);
 
-  return { ...contract, ooms, prices, flag_rows: flags, imports, predecessors: successors };
+  return { ...contract, ooms, prices, flag_rows: flags, imports, predecessors: successors, balance, exceptions };
 }

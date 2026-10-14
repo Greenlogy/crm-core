@@ -2,6 +2,22 @@
 
 ## 2026-10-14
 
+- Modul 4, F3 uzavretá: `0027` na `dev` (`db/schema.sql` z `dev`), nasadené na Test, Peter otestoval.
+- Modul 4, F3 časť 2 – API a obrazovky:
+  - zoznam zmlúv (25): rok bilancie, Pridaná hodnota a Marža firmy, export .xlsx, čip „Končí do 4 mesiacov“;
+  - karta zmluvy (26): KPI za rok, karta Bilancia, výnimky, minimálny aditív výkupu (Nákup);
+  - Výnimky z ceny (28): nová stránka `/vynimky` a API `/api/price-exceptions`;
+  - karta zákazníka: súčty bilancie v sekcii Zmluvy; Cenové parametre (29): „Minimálny aditív – výkup“;
+  - otázka 33: výkup s pevnou cenou = nákup rovný predaju, pridaná hodnota aj marža 0 €.
+  - Návrh DB v0.15 (časť 26.7).
+- Modul 4, F3 časť 1: migrácia `0027_zmluvy_bilancia` (overená nanečisto: hore, testy 155 vrátane 6 príkladov zo zadania na halier, dole = schéma 0026, hore = rovnaká; na `dev` nespustená):
+  - snímka ku dňu podpisu `contract_year_basis`;
+  - ročná bilancia po mesiacoch `contract_year_calc` (pridaná hodnota, marža s právom a dátumom odhadu);
+  - párovanie výnimiek a hranica z databázy;
+  - príznaky „Pod hranicou bez výnimky“ a „Chýba cena pre obchodníka“;
+  - parameter a prepis minimálneho aditívu výkupu.
+  - Testy `checks_zmluvy_bilancia.sql` (Z3).
+  - Návrh DB v0.14 (časť 26.6, otázka 33).
 - Modul 4, F2 – import po skúške na Teste:
   - Obrazovka 27 má dve políčka (Office portal, XM Trade) a tlačidlo „Skontrolovať“, s návodom, že prvý import potrebuje oba súbory naraz. V náhľade je „Zmeniť súbory“ a rada pri OOM, ktoré nie sú v CRM.
   - Import OOM (obrazovka 19) rozpozná export z XM Trade alebo Office portálu a pošle na import zmlúv.

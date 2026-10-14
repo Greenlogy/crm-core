@@ -144,7 +144,8 @@ BEGIN
   ASSERT (SELECT count(*) FROM contract_price WHERE contract_id = k.id AND slot = 'poplatok_om' AND price_model = 'cennik'
             AND price_list_item_id = i.id AND fee_eur_month = i.fee_oom_eur_month AND valid_from = '2026-03-01') = 2,
          'mesačná platba za OM z cenníka Poplatky B2B pri každom OOM';
-  ASSERT NOT EXISTS (SELECT 1 FROM contract_flag WHERE contract_id = k.id AND resolved_at IS NULL), 'bez príznakov';
+  ASSERT NOT EXISTS (SELECT 1 FROM contract_flag WHERE contract_id = k.id AND resolved_at IS NULL AND year IS NULL),
+         'bez príznakov importu (príznaky snímky ku dňu podpisu s rokom testuje Z3)';
   ASSERT (SELECT action = 'nova' AND summary LIKE 'Nová zmluva%' FROM contract_import_change
            WHERE contract_id = k.id AND import_id = (v ->> 'import_id')::uuid), 'história importu na zmluve';
   ASSERT EXISTS (SELECT 1 FROM audit_log WHERE table_name = 'contract' AND record_id = k.id AND action = 'insert'

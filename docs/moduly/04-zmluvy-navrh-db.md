@@ -1,8 +1,10 @@
 # Modul 4 – Zmluvy a ceny: návrh databázy
 
-Verzia 0.12 · 14. 10. 2026 · **`0023`–`0025` na `dev` (podľa `db/schema.sql`, commit `b301345`); `0026_zmluvy_import` overená nanečisto (časť 25.7), na `dev` nespustená**.
+Verzia 0.15 · 14. 10. 2026 · `0027_zmluvy_bilancia` na `dev`, F3 na Teste otestovaná (časti 26.6, 26.7) · **`0023`–`0025` na `dev` (podľa `db/schema.sql`, commit `b301345`); `0026_zmluvy_import` overená nanečisto (časť 25.7), na `dev` nespustená**.
 - v0.1 = návrh;
 - v0.2 = Petrove odpovede 1–6 k časti 16 a doplnky a, b: pomerné množstvo v neúplnom roku, produkty Green namiesto Dodávka B2B, zákazník založený importom a `Osoba_ID`, príznak verejného osvetlenia, ručné trhové ceny, X2 /VN/, prekrytie nad skutočnou dobou platnosti s nástupníctvom, lokálne overenie importu na vzorových exportoch; plán migrácie `0023` (časť 18);
+- v0.14 = odpovede 26–32, `0027` napísaná a overená nanečisto (časť 26.6);
+- v0.13 = plán F3 `0027_zmluvy_bilancia` (časť 26);
 - v0.12 = odpovede 23–25 v `0026`, API importu a obrazovky 25–27 lokálne overené (časť 25.8);
 - v0.11 = `0026_zmluvy_import` napísaná a overená nanečisto vrátane vzorových exportov, odpovede 20–22 a doplnky a–c (časť 25.7);
 - v0.10 = plán `0026_zmluvy_import` (časť 25);
@@ -1595,4 +1597,167 @@ Typy (`tsc`) a zostavenie webu prešli. Obrazovky som v prehliadači neprezeral 
   - samostatné políčka pre Office portal a XM Trade; prvý import potrebuje oba súbory naraz;
   - import OOM (19) rozpozná exporty z XM Trade a Office portálu a pošle ich na import zmlúv.
 - **Rozhodnutie (Peter):** veľkoobchod a GreenSolar sa nerobia ako zmluvy v CRM. Veľkoobchod ide iba do Cockpitu, GreenSolar cez deal do Cockpitu. Ručné zmluvy nie sú. Nové služby sa doriešia neskôr.
+
+---
+
+## 26. Plán F3 – migrácia `0027_zmluvy_bilancia` a kód – na schválenie
+
+Cieľ: ročná bilancia každej zmluvy (pridaná hodnota obchodníka a marža firmy), výnimky z ceny so schvaľovaním (obrazovka 28), príznak „Pod hranicou bez výnimky“. Bilancia sa zobrazí v zozname, na karte zmluvy a na karte zákazníka; export zoznamu zmlúv. Pravidlá výpočtu sú v zadaní (časti 6–8, príklady časť 13) a v časti 6 návrhu; tu poradie, objekty a otvorené body.
+
+### 26.1 Výpočet po mesiacoch
+
+Bilancia roka sa počíta **po mesiacoch** OOM v zmluve. Pravidlá „začatý mesiac sa počíta celý“, „neúplný rok = mesiace / 12“ a „krátka zmluva sa nedelí“ (odpovede 1, 17) z toho vyplynú bez výnimiek.
+
+- **Mesiace OOM:** mesiace skutočného obdobia OOM v zmluve (`contract_oom.valid_from` – `valid_to`, s prolongáciou, skrátené nástupcom), ktoré zasahujú do roka. Pri dobe neurčitej do konca roka.
+- **Objem mesiaca:**
+  - zmluva na 12 mesiacov a viac (alebo na neurčito): ročné zmluvné množstvo / 12;
+  - kratšia: množstvo / počet mesiacov zmluvy;
+  - výkup a VIWA: plán výkupu OOM / 12 (dnešná hodnota na OOM, rozhodnutie 3).
+- **Cena mesiaca:** riadok ceny zložky, ktorý platí v mesiaci (pri zmene v strede mesiaca platí novší).
+- **Výnos komodity:** Σ mesiacov cena × objem podľa modelu:
+  - FIX a cenník: VT × objem VT + NT × objem NT;
+  - SPOT + aditív a výkup SPOT − €: aditív × objem;
+  - výkup SPOT − %: % × očakávaná cena SPOT pre FVE roka × objem;
+  - VIWA: odhad aditívu balíka × objem.
+- **Poplatky:** Σ mesiacov mesačnej platby (za OM, ZEM, VBattery, VIWA účet) a €/kW × výkon zdroja.
+- **Náklad pridanej hodnoty** (snímka ku dňu podpisu – 26.2, alebo schválená výnimka):
+
+| Model / prípad | Náklad |
+| --- | --- |
+| FIX, predajca obchodník | cena pre obchodníka roka ku dňu podpisu |
+| FIX, predajca manažér; cenník bez energopomoci | odhad portfólia roka ku dňu podpisu |
+| domácnosť s energopomocou | nákupná cena energopomoci roka |
+| SPOT + aditív | minimálny aditív (obchodník / manažér) |
+| výkup | minimálny aditív výkupu (otázka 29) |
+| VIWA | 0 |
+
+- **Náklad marže firmy:**
+  - FIX a cenník bez energopomoci: **dnešný** odhad portfólia roka;
+  - SPOT + aditív: 0 (marža = celý aditív);
+  - energopomoc, výkup a VIWA: rovnaký ako pri pridanej hodnote.
+- **Marža firmy** = výnos komodity + poplatky − náklad marže.
+- **Pridaná hodnota** = výnos komodity − náklad (bez poplatkov).
+- **Tranža pre Cockpit:** FIX (FIX, cenník bez energopomoci), SPOT (SPOT, VIWA), SEAS (energopomoc).
+- Overenie: všetkých 6 príkladov zo zadania časť 13 na halier (testy).
+
+### 26.2 Objekty (`-- migrate:up`)
+
+| # | Objekt | Podrobnosti |
+| --- | --- | --- |
+| 1 | `contract_year_basis` | snímka ku dňu podpisu pre zmluvu × rok: typ predajcu, cena pre obchodníka, odhad portfólia, minimálny aditív, cena energopomoci, odhad aditívu VIWA, spárovaná výnimka. Zapisuje import (a nové funkcie nižšie), pri zmene podpisu, obchodníka alebo cien sa prepočíta. Pri migrácii sa naplní pre zmluvy, ktoré už sú na Teste |
+| 2 | `contract_basis_refresh(contract)` | vytvorí alebo prepočíta snímku pre roky zmluvy; spáruje výnimku |
+| 3 | `contract_balance(p_year)` | ročná bilancia všetkých zmlúv, ktoré používateľ vidí (RLS): objem, výnos komodity, poplatky, pridaná hodnota, tranža; marža firmy a náklad portfólia iba pri práve „vidieť maržu“ (inak NULL) |
+| 4 | párovanie výnimiek | pri importe: zákazník, rok zmluvy ∈ roky výnimky, model, schválená, podpis ≤ platná do; najnovšia sa stane Použitou a hranicou |
+| 5 | príznak „Pod hranicou bez výnimky“ | pri importe a prepočte snímky; uzavrie ho spárovaná výnimka alebo ručné uzavretie schvaľovateľom s poznámkou |
+| 6 | „Končí do 4 mesiacov“ | počíta sa (podpísaná zmluva firmy, koniec do 4 mesiacov) – iba filter v zozname; upozornenie pošle nočný beh v F4 |
+| 7 | `price_exception_new(...)` | žiadosť: hranicu (snímku) doplní databáza – cena pre obchodníka roka dnes, alebo minimálny aditív podľa typu predajcu autora |
+| 8 | práva a audit | `contract_year_basis` iba čítanie pre aplikáciu; audit snímky |
+
+### 26.3 Kód
+
+- **API:**
+  - `GET /api/contracts?rok=` s bilanciou;
+  - `GET /api/contracts/:id` s bilanciou po rokoch;
+  - export zoznamu zmlúv (.xlsx, právo „exportovať“, `export_log`, marža iba s právom);
+  - `routes/price-exceptions.ts` – zoznam, nová žiadosť, schválenie a zamietnutie, zmazanie vlastnej čakajúcej;
+  - karta zákazníka: zmluvy a súčet pridanej hodnoty (a marže) za rok.
+- **Web:**
+  - zoznam 25: stĺpce Prid. hodnota a Marža firmy, filter „Rok bilancie“, tlačidlo Export;
+  - karta 26: KPI pridaná hodnota a marža, karta „Ročná bilancia“ s prepínaním rokov, výnimka;
+  - obrazovka 28 Výnimky: zoznam so stavmi, nová žiadosť, detail so schválením;
+  - karta zákazníka: sekcia Zmluvy so súčtom.
+- Upozornenia CEO a obchodnému riaditeľovi („Pod hranicou“) pošle až nočný beh a zvonček v F4 (`0028`). V F3 je príznak a filter.
+
+### 26.4 Overenie
+
+- Testy `checks_zmluvy_bilancia.sql` (Z3): 6 príkladov zo zadania, neúplný rok (4/12), krátka zmluva cez dva roky (5 + 5 MWh), zmena ceny v roku, výnimka (párovanie, Použitá, hranica, expirovaná sa nespáruje), „Pod hranicou“, práva (obchodník nevidí maržu, `contract_year_basis` nemení).
+- Lokálne: API a snímky obrazoviek 25, 26, 28 s vymysleným exportom (doplnený o BL/PL a parametre).
+
+### 26.5 Otázky
+
+- **26. Zmluvy podpísané pred históriou cien:** cena pre obchodníka ku dňu podpisu potrebuje BL/PL toho dňa. Kým nie je história od 1. 1. 2026 (zdroj určíš ty), a pre zmluvy podpísané skôr, chýba. **Odporúčam:** pridaná hodnota „–“ bez príznaku pri zmluvách podpísaných pred 1. 1. 2026; od 1. 1. 2026 bez ceny príznak „Chýba cena pre obchodníka“.
+- **27. FIX manažér a cenník bez energopomoci:** náklad pridanej hodnoty = odhad portfólia **ku dňu podpisu** (snímka), marža firmy = dnešný. **Odporúčam** tak.
+- **28. Zmluva bez obchodníka** (46 vo vzorke): ktorý minimálny aditív a cena? **Odporúčam:** ako obchodník (prísnejšie). Pri FIX cena pre obchodníka.
+- **29. Výkup, ktorý nie je lokálny zdroj:** náklad pridanej hodnoty = „minimálny aditív – výkup lokálny zdroj“ (0) aj pre ostatné výkupy, alebo iný parameter? **Odporúčam:** jeden parameter „minimálny aditív – výkup“ pre všetky výkupy (dnes 0).
+- **30. „Pod hranicou bez výnimky“ iba pri individuálnej cene** (FIX, SPOT + aditív, výkup). Pri cenníkových zmluvách (domácnosti, malé podniky, prolongácia nad 30 MWh) cenu nevyjednáva obchodník. **Odporúčam:** pri cenníku príznak nie.
+- **31. Rok bilancie predvolene:** bežný rok, alebo nasledujúci (v jeseni sa predáva najmä na ďalší rok; návrh obrazovky 25 ukazuje 2027)? **Odporúčam:** bežný rok, s prepínačom.
+- **32. Odhad portfólia a cena FVE pre marža:** posledná zadaná hodnota roka bez obmedzenia veku, alebo najviac 7 dní ako BL/PL? **Odporúčam:** posledná zadaná (marža je odhad); ak neexistuje, marža „–“.
+
+### 26.6 Odpovede 26–32 a overenie nanečisto (14. 10. 2026)
+
+**Peter:**
+- **26:** áno. Zmluvy pred 2026 bez príznaku. Snímku ceny pre obchodníka doplní prenos z HubSpotu (nákupná cena pri deale). História BL/PL od 1. 1. 2026 príde z Cockpitu (dáta sú vo Firebase) – samostatný skript.
+- **27:** áno – pridaná hodnota z odhadu ku dňu podpisu, marža firmy z dnešného.
+- **28:** áno – zmluva bez obchodníka sa počíta ako obchodník.
+- **29:** parameter „Minimálny aditív – výkup“ (0 €) a prepis pri konkrétnej výkupnej zmluve, ktorý zadá Nákup.
+- **30:** áno – „Pod hranicou“ iba pri individuálnej cene.
+- **31:** áno – rok bilancie predvolene bežný, s prepínačom.
+- **32:** áno – pri marži dátum použitého odhadu; starší ako 30 dní = „starý odhad“.
+
+**Implementácia `0027_zmluvy_bilancia`:**
+- `contract_year_basis`: snímka pre podpísanú zmluvu × rok.
+  - Obsahuje typ predajcu, cenu pre obchodníka, odhad portfólia s dátumom, minimálny aditív, cenu energopomoci, aditív VIWA a výnimku.
+  - Zdroj `vypocet` (BL/PL ku dňu podpisu) alebo **`hubspot`**: miesto pre zmluvy pred 2026 je existujúca tabuľka `contract_purchase` (nákupná cena z HubSpotu, rok dodávky). Prenos ju naplní a snímka si cenu vezme odtiaľ, ak BL/PL ku dňu podpisu chýbajú.
+  - Aplikácia snímku nečíta (obsahuje odhad portfólia); bilanciu vracia `contract_year_calc`.
+- `contract_year_calc(zmluva, rok)`:
+  - bilancia po mesiacoch (časť 26.1);
+  - marža, odhad portfólia a jeho dátum iba s právom „vidieť maržu“, inak NULL;
+  - príznak „starý odhad“ (`portfolio_stale`);
+  - riadok iba pre zmluvu, ktorú používateľ vidí.
+- `contract_basis_refresh`: snímka, párovanie výnimky, príznaky.
+  - Volá ho import (aj doplnenie z XM Trade), zmena balíka VIWA, obchodníka a aditívu výkupu a schválenie výnimky.
+  - Pri migrácii sa prepočítajú všetky zmluvy, ktoré už sú na Teste.
+- **Párovanie výnimky:** iba s individuálnou cenou z importu (cena prolongácie výnimku nespotrebuje); schválenie spáruje aj už importované zmluvy (dodatočné schválenie).
+- **„Chýba cena pre obchodníka“** je príznak „Chýba cena“ **s rokom**; „Chýba cena“ z `0026` (komodita, balík VIWA) je bez roka.
+- **Hranica výnimky** sa doplní v databáze pri žiadosti z aplikácie:
+  - FIX: cena pre obchodníka prvého roka dnes;
+  - SPOT: minimálny aditív podľa typu predajcu autora;
+  - výkup: minimálny aditív výkupu;
+  - keď hodnota chýba, žiadosť sa odmietne s hláškou.
+- **Minimálny aditív výkupu:**
+  - parameter `min_aditiv_vykup` (0 €, mení admin; pri lokálnom zdroji ostáva `min_aditiv_vykup_lz`);
+  - pri zmluve `contract.vykup_min_additive` – iba výkup (obmedzenie tabuľky), mení Nákup alebo admin.
+
+**Overenie (dočasný Postgres, `0001`–`0027` + cenníky 2026, nie Neon):**
+
+| Krok | Výsledok |
+| --- | --- |
+| `0027` hore | OK |
+| Testy | **155 kontrol OK** (152 + Z3-1 až Z3-3 v `db/test/checks_zmluvy_bilancia.sql`) |
+| **Príklady zo zadania** | **všetkých 6 na halier:** FIX 575,10 / 1 808,10 · SPOT 150 / 570 · energopomoc 51,26 / 87,26 · VIWA 240 / 346,80 · lokálny zdroj 43,80 · výkup −10 % 700 |
+| Neúplný rok, krátka zmluva | 2026 = 4/12; 1. 10. 2026 – 31. 3. 2027, 10 MWh = 5 + 5 |
+| Manažér | pridaná hodnota z odhadu ku dňu podpisu (97), marža z dnešného (96) s dátumom |
+| Výnimka | hranica 106 z databázy (nie zo žiadosti); po schválení Použitá, pridaná hodnota (104 − 103) × 50 = 50, príznak uzavretý; expirovaná sa nespáruje |
+| Príznaky | FIX pod cenou pre obchodníka = „Pod hranicou“; cenník pod odhadom bez príznaku; podpis od 2026 bez BL/PL = „Chýba cena pre obchodníka“; pred 2026 bez príznaku; cena z HubSpotu doplní snímku |
+| Práva | obchodník vidí pridanú hodnotu, nie maržu; snímku nečíta; aditív výkupu nezmení |
+| `0027` dole / znova hore | schéma = `0026` / rovnaká |
+
+Upravené staršie testy:
+- Z1-4: výnimka na rok 2029 a ceny BL/PL dňa, lebo hranicu dopĺňa databáza;
+- Z2-1: príznaky bez roka.
+
+**Otázka 33 – výkup s pevnou cenou** (`GREENVYR_PC_R`): zadanie (časť 8) nepopisovalo pridanú hodnotu výkupu FIX.
+
+**Odpoveď (Peter, 14. 10.):** výkup s pevnou cenou nemá žiadnu zložku SPOT. Nákup doplní trader ručne a rovná sa predaju, takže pridaná hodnota aj marža firmy sú vždy 0 €. V `contract_year_calc` platí pre výkup FIX: výnos = pevná cena × objem, náklad aj náklad marže = pevná cena (tranša FIX); test Z3-1 overuje 0 / 0.
+
+### 26.7 API a obrazovky F3 (lokálne overené 14. 10. 2026)
+
+**API:**
+- `GET /api/contracts?rok=` – stĺpce „Pridaná hodnota“ a „Marža firmy“ za rok (marža iba s právom), výpočet `contract_year_calc` iba pre zmluvy na stránke; čip „Končí do 4 mesiacov“.
+- `GET /api/contracts/export` – .xlsx podľa filtra, právo „exportovať“ v module Zmluvy, záznam v `export_log`; stĺpec marže iba s právom.
+- `GET /api/contracts/:id` – bilancia po rokoch, výnimky zákazníka, `can_edit_vykup`; `PATCH` aj s `vykup_min_additive` (Nákup alebo admin, iba výkup – stráži databáza).
+- `/api/price-exceptions` – zoznam s počtami podľa stavu, nová žiadosť (hranicu doplní databáza), rozhodnutie (iba „schvaľuje ceny“ a nie autor), zmazanie čakajúcej autorom.
+- Karta zákazníka: sekcia Zmluvy so súčtom pridanej hodnoty (a marže s právom) za bežný rok.
+- Cenové parametre: nový parameter `min_aditiv_vykup`.
+- Hyperdrive nečíta typy, polia (`text[]`, `smallint[]`) chodia ako text: v dotazoch `to_jsonb(...)` a `IN ${sql(ids)}`.
+
+**Obrazovky** (snímky v headless prehliadači, porovnané s dizajnom):
+- 25 Zoznam: rok bilancie, stĺpce Pridaná hodnota a Marža firmy, Export, čip „Končí do 4 mesiacov“.
+- 26 Karta: KPI pridanej hodnoty a marže za rok (marža s dátumom odhadu, „starý odhad“ nad 30 dní), karta Bilancia s prepínačom rokov, výnimky, minimálny aditív výkupu v úprave CRM údajov. Opravené po snímke: preširoká tabuľka OOM, orezaný popis KPI.
+- 28 Výnimky z ceny (`/vynimky`, položka menu): čipy stavov, tabuľka, detail so schválením / zamietnutím, nová žiadosť. Opravené po snímke: orezané stĺpce.
+- 29 Cenové parametre: riadok „Minimálny aditív – výkup“; poznámka pod tabuľkou, že pri konkrétnej výkupnej zmluve ho prepíše Nákup.
+
+**Úmyselné rozdiely oproti dizajnu:**
+- 26: chýba „Otvoriť v Office portáli“ a záložky Kontaktné osoby a Dokumenty (zatiaľ bez zdroja údajov).
+- 29: aditívy VIWA nie sú zoskupené do jedného riadku a energopomoc nie je po rokoch (stav z F1).
 

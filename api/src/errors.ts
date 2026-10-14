@@ -26,6 +26,7 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   org_legal_name_check: 'Chýba obchodné meno.',
   company_country_ico_key: 'Firma s týmto IČO / OIB už v CRM je.',
   contract_viwa_package_type_check: 'Balík VIWA sa zadáva iba pri zmluve VIWA.',
+  contract_vykup_min_additive_type_check: 'Minimálny aditív výkupu sa zadáva iba pri výkupnej zmluve.',
   contract_viwa_package_check: 'Balík VIWA: Basic, Plus alebo Pro.',
   contract_previous_check: 'Predošlá zmluva nemôže byť tá istá zmluva.',
   contract_related_check: 'Súvisiaca zmluva nemôže byť tá istá zmluva.',

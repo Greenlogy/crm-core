@@ -112,6 +112,11 @@ export type ContractRow = {
   deal_name: string | null;
   oom_count: number;
   price_count: number;
+  /** bilancia bežného roka (0027); marža iba s právom */
+  balance_year: number;
+  added_value_eur: Num;
+  margin_eur: Num;
+  year_volume_mwh: Num;
 };
 
 export type PriceRow = {
@@ -476,10 +481,18 @@ export type ContractListItem = {
   flags: string[];
   org_id: string;
   org_name: string;
+  ending?: boolean;
+  /** bilancia roka zoznamu (0027) */
+  year_volume_mwh?: Num;
+  added_value_eur?: Num;
+  margin_eur?: Num;
+  portfolio_stale?: boolean | null;
+  balance_missing?: string | null;
 };
 export type ContractList = {
   page: number;
   pageSize: number;
+  year: number;
   total: number;
   counts: Record<string, number>;
   items: ContractListItem[];
@@ -502,6 +515,11 @@ export type ContractCard = ContractListItem & {
   related_type: string | null;
   can_edit: boolean;
   can_change_owner: boolean;
+  can_edit_vykup: boolean;
+  vykup_min_additive: Num;
+  balance: ContractYear[];
+  exceptions: { id: string; years: number[]; price_model: string; requested_value: Num; threshold_value: Num; state: string;
+                decided_at: string | null; decided_by_name: string | null; requested_by_name: string | null; reason: string }[];
   ooms: {
     id: string;
     eic: string;
@@ -532,6 +550,29 @@ export type ContractCard = ContractListItem & {
   flag_rows: ContractFlagRow[];
   imports: { import_id: string; action: 'nova' | 'zmena'; summary: string; created_at: string; op_file_name: string | null; xm_file_name: string | null; user_name: string | null }[];
   predecessors: { id: string; number: string }[];
+};
+/** Ročná bilancia zmluvy (contract_year_calc, 0027) */
+export type ContractYear = {
+  year: number;
+  months: number;
+  volume_mwh: Num;
+  revenue_eur: Num;
+  fees_eur: Num;
+  cost_eur: Num;
+  added_value_eur: Num;
+  margin_cost_eur: Num;
+  margin_eur: Num;
+  model: string | null;
+  tranche: string | null;
+  basis_stored: boolean | null;
+  basis_source: string | null;
+  trader_price: Num;
+  exception_id: string | null;
+  exception_value: Num;
+  portfolio_eur_mwh: Num;
+  portfolio_on: string | null;
+  portfolio_stale: boolean | null;
+  missing: string | null;
 };
 export type ContractFlagRow = { id: string; code: string; year: number | null; detail: string | null; raised_at: string; resolved_at: string | null; resolved_by_name: string | null };
 

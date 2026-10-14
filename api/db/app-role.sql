@@ -66,6 +66,10 @@ GRANT DELETE ON price_exception TO crm_app;
 -- Balík VIWA zadá Servis (otázka 20), obchodníka zmluvy zmení vedenie – stráži contract_guard.
 REVOKE INSERT, UPDATE ON contract_import, contract_import_change FROM crm_app;
 GRANT UPDATE (viwa_package, owner_id) ON contract TO crm_app;
+-- 0027: minimálny aditív výkupu pri zmluve (Nákup) – stráži contract_guard; snímku ku dňu podpisu aplikácia nečíta
+-- (bilanciu vracia contract_year_calc, marža iba s právom).
+GRANT UPDATE (vykup_min_additive) ON contract TO crm_app;
+REVOKE ALL ON contract_year_basis FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

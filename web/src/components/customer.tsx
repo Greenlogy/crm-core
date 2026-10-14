@@ -2,7 +2,7 @@
 
 import { Link } from 'react-router-dom';
 import type { ContractRow, DealRow, OomRow, StatusChange } from '../lib/api';
-import { date, mwh, period, sumNum } from '../lib/format';
+import { date, mwh, num, period, sumNum } from '../lib/format';
 import { CONTRACT_STATUS, CUSTOMER_STATUS, dealTone, label, OOM_STATUS, OOM_TYPE, showFormer, STATUS_SOURCE } from '../lib/labels';
 import { Card, Empty, Item, Pill, StatusPill } from './ui';
 import { planText } from './oom-actions';
@@ -136,8 +136,25 @@ export function DealsCard(props: { deals: DealRow[] }) {
 }
 
 export function ContractsCard(props: { contracts: ContractRow[] }) {
+  // súčet bilancie bežného roka (0027): pridaná hodnota; marža iba s právom (inak NULL)
+  const year = props.contracts[0]?.balance_year;
+  const sum = (k: 'added_value_eur' | 'margin_eur') => {
+    const v = props.contracts.map((z) => z[k]).filter((x) => x !== null && x !== undefined);
+    return v.length ? v.reduce((n: number, x) => n + Number(x), 0) : null;
+  };
+  const av = sum('added_value_eur');
+  const mg = sum('margin_eur');
   return (
-    <Card title={`Zmluvy (${props.contracts.length})`}>
+    <Card
+      title={`Zmluvy (${props.contracts.length})`}
+      aside={
+        year && av !== null ? (
+          <span className="caption">
+            {year}: pridaná hodnota {num(av, 2)} €{mg !== null ? ` · marža firmy ${num(mg, 2)} €` : ''}
+          </span>
+        ) : undefined
+      }
+    >
       {props.contracts.length === 0 ? (
         <Empty>Zatiaľ žiadne zmluvy.</Empty>
       ) : (
@@ -145,7 +162,9 @@ export function ContractsCard(props: { contracts: ContractRow[] }) {
           <Item
             key={z.id}
             title={<Link to={`/zmluvy/${z.id}`}>{z.number ?? `(bez čísla) ${z.deal_name ?? ''}`}</Link>}
-            meta={`${period(z.valid_from, z.valid_to)} · ${z.oom_count} OOM · ${z.price_count} cien`}
+            meta={`${period(z.valid_from, z.valid_to)} · ${z.oom_count} OOM · ${z.price_count} cien${
+              z.added_value_eur !== null && z.added_value_eur !== undefined ? ` · PH ${z.balance_year}: ${num(z.added_value_eur, 2)} €` : ''
+            }${z.margin_eur !== null && z.margin_eur !== undefined ? ` · marža ${num(z.margin_eur, 2)} €` : ''}`}
             side={
               <>
                 <StatusPill map={CONTRACT_STATUS} value={z.status} />

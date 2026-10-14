@@ -15,6 +15,7 @@ import { oomImport } from './routes/oom-import';
 import { oomWrite } from './routes/oom-write';
 import { priceLists } from './routes/pricelists';
 import { priceListsWrite } from './routes/pricelists-write';
+import { priceExceptions } from './routes/price-exceptions';
 import { pricing } from './routes/pricing';
 import { productsWrite } from './routes/products-write';
 import { settings } from './routes/settings';
@@ -129,6 +130,7 @@ app.route('/', priceLists);
 app.route('/', priceListsWrite);
 app.route('/', productsWrite);
 app.route('/', pricing);
+app.route('/', priceExceptions);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).
