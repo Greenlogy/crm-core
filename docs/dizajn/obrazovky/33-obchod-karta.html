@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karta obchodu</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}
+.al{background:#fdecea;color:#b42318}
+.wa{background:#fff4e0;color:#b45309}
+.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.pri{background:#1a6b4a;border-color:#1a6b4a;color:#ffffff}
+.btn:focus-visible,.nav:focus-visible,.snav:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.snav{display:block;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:13px;line-height:19px}
+.snav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6f7f8}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.av{width:28px;height:28px;border-radius:7px;background:#f0f1f3;color:#0f172a;font-size:11px;font-weight:600;display:grid;place-items:center;flex:none}
+.sub{font-size:12px;color:#64748b;line-height:16px}
+.mu{color:#64748b}
+.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:#64748b}
+.inp{font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid #e7e9ec;border-radius:8px;color:#0f172a;background:#ffffff;box-sizing:border-box;width:100%}
+.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:#0f172a}
+.ck input{accent-color:#1a6b4a;width:15px;height:15px;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px}
+.ch h2{margin:0;font-size:15px;font-weight:600}
+.lock{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #f0f1f3;font-size:13px;line-height:19px;white-space:nowrap}
+.row:last-child{border-bottom:0}
+.row dt{color:#64748b;flex:none}
+.row dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:12px}
+.num{text-align:right}
+.tbl th.num{text-align:right}
+.chip{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip:hover{color:#0f172a}
+.chip:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.cc{color:#94a3b8;font-variant-numeric:tabular-nums}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note{font-size:12px;line-height:17px;color:#64748b;padding:10px 16px;border-top:1px solid #e7e9ec}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #f0f1f3}
+.ev:last-child{border-bottom:0}
+.evi{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:12px}
+.evt{font-size:13px;line-height:19px}
+.evm{font-size:12px;line-height:17px;color:#64748b}
+.tab{font-family:inherit;font-size:13px;font-weight:500;padding:9px 2px;border:0;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;white-space:nowrap}
+.tab:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.priv{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;font-weight:500}
+.kcol{flex:1 1 200px;min-width:200px;background:#eef0f2;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.kcard{background:#ffffff;border:1px solid #e7e9ec;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:18px}
+.ban{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:10px;font-size:13px;line-height:19px}
+.cp{font-family:inherit;font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;border:1px solid #e7e9ec;background:#ffffff;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.cp:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.miss{background:#fff4e0}
+
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+<nav aria-label="Hlavné menu" style="flex: 1 1 232px; max-width: 232px; min-width: 200px; box-sizing: border-box; background: #ffffff; border-right: 1px solid #e7e9ec; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 6px 8px;">
+<span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span>
+<div><div style="font-size: 14px; font-weight: 600; line-height: 17px;">Greenlogy</div><div style="font-size: 11px; color: #64748b; line-height: 15px;">CRM</div></div>
+</div>
+<div class="grp">Obchod</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"></path></svg>Domov</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Zákazníci</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>Odberné miesta</a>
+<a class="nav" href="#" aria-current="page" style="background: #f0f1f3; color: #0f172a; font-weight: 600;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Obchody</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>Schvaľovanie<span class="pill wa" style="margin-left: auto;">3</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 12h6M9 16h6"></path></svg>Zmluvy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>Cenníky</a>
+<div class="grp">Servis</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.4A8 8 0 1121 12z"></path></svg>Konverzácie</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>SLA prehľad</a>
+<div class="grp">Marketing</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>Segmenty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Kampane</a>
+<div style="flex-grow: 1; min-height: 24px;"></div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"></path></svg>Nastavenia</a>
+<div style="display: flex; align-items: center; gap: 8px; background: #f0f1f3; border-radius: 8px; padding: 7px 10px; font-size: 12px; color: #64748b; margin-top: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a6b4a;"></span>Test · Greenlogy a.s.</div>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 36px 48px; display: flex; flex-direction: column; gap: 16px;">
+<section aria-label="Hlavička" style="display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between;">
+<div style="min-width: 0;"><div style="font-size: 12px; color: #64748b; line-height: 16px;"><a href="#" style="color: #64748b;">Obchody</a> / Agro Turiec 2027</div>
+<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;">Agro Turiec 2027</h1><span class="pill in"><span class="dot"></span>Vyjednávanie</span><span class="pill ">B2B dodávka</span>
+<span style="font-size: 13px; color: #64748b;"><a href="#">Agro Turiec s.r.o.</a> · Martin Horák</span>
+</div></div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;"><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg>Poslať e-mail</button><button class="btn" type="button">Ďalší krok</button><button class="btn pri" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Otvoriť ponuku</button></div>
+</section>
+<section aria-label="Štádium" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;"><ol style="list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex: 1 1 600px; flex-wrap: wrap;"><li style="flex: 1 1 120px; padding: 8px 12px; border-radius: 8px; background: #e8f2ee; color: #155a3d; font-size: 13px; font-weight: 500; text-align: center; white-space: nowrap;">✓ Príležitosť</li><li style="flex: 1 1 120px; padding: 8px 12px; border-radius: 8px; background: #e8f2ee; color: #155a3d; font-size: 13px; font-weight: 500; text-align: center; white-space: nowrap;">✓ Cenová ponuka</li><li style="flex: 1 1 120px; padding: 8px 12px; border-radius: 8px; background: #1a6b4a; color: #ffffff; font-size: 13px; font-weight: 600; text-align: center; white-space: nowrap;">Vyjednávanie</li><li style="flex: 1 1 120px; padding: 8px 12px; border-radius: 8px; background: #f0f1f3; color: #64748b; font-size: 13px; font-weight: 500; text-align: center; white-space: nowrap;">Akceptácia</li><li style="flex: 1 1 120px; padding: 8px 12px; border-radius: 8px; background: #f0f1f3; color: #64748b; font-size: 13px; font-weight: 500; text-align: center; white-space: nowrap;">Vyhraté</li></ol><button class="btn" type="button">Prehraté…</button></section><section aria-label="Kľúčové údaje" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px;">
+<div class="card" style="padding: 14px 16px;"><div class="kl">Objem</div><div class="kv">252,0 <span style="font-size: 13px; font-weight: 500; color: #64748b; letter-spacing: 0;">MWh / rok</span></div><div class="ks">4 OOM · NN 40,0 · VN 212,0</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Pridaná hodnota – variant A</div><div class="kv">1 625,92 €</div><div class="ks">2027 + 2028 · s výnimkou 103,00 na VN 2027</div></div>
+<div class="card" style="padding: 14px 16px;"><div class="kl">Odhad provízie (40 %)</div><div class="kv">650,37 €</div><div class="ks">z pridanej hodnoty variantu A</div></div>
+<div class="card" style="padding: 14px 16px; background: #fdecea;"><div class="kl" style="color: #b42318;">Ďalší krok · po termíne</div><div class="kv" style="font-size: 16px;">Zavolať k ponuke</div><div class="ks" style="color: #b42318;">13. 10. 2026 · Martin Horák</div></div>
+</section><div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;"><section class="card" aria-label="Odberné miesta" style="flex: 2 1 560px; min-width: 0; overflow: hidden;">
+<div class="ch"><h2>Odberné miesta</h2><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Pridať OOM</button></div>
+<div style="overflow-x: auto;"><table class="tbl">
+<thead><tr><th scope="col">EIC</th><th scope="col">Adresa</th><th scope="col">Napätie</th><th scope="col">Sadzba</th><th scope="col" class="num">VT [MWh]</th><th scope="col" class="num">NT</th><th scope="col">Stav v CRM</th></tr></thead>
+<tbody><tr><td class="mono">24ZSS4100078200A</td><td>Martin, Priemyselná 8</td><td>NN</td><td>C2-X3</td><td class="num">18,0</td><td class="num mu">–</td><td><span class="pill ok"><span class="dot"></span>Aktívne – iný dodávateľ</span></td></tr><tr><td class="mono">24ZSS4100078218C</td><td>Martin, Priemyselná 8</td><td>NN</td><td>C2-X3</td><td class="num">14,0</td><td class="num mu">–</td><td><span class="pill ok"><span class="dot"></span>Aktívne – iný dodávateľ</span></td></tr><tr><td class="mono">24ZSS4100078226E</td><td>Martin, Priemyselná 10</td><td>NN</td><td>C1-X3</td><td class="num">8,0</td><td class="num mu">–</td><td><span class="pill ok"><span class="dot"></span>Aktívne – iný dodávateľ</span></td></tr><tr><td class="mono">24ZSS4000301150N</td><td>Martin, nová hala VN</td><td>VN</td><td>X1-X3</td><td class="num">212,0</td><td class="num mu">–</td><td><span class="pill in"><span class="dot"></span>Pripravované</span></td></tr></tbody></table></div>
+<div class="note">NN a VN sú jeden obchod a jedna ponuka. Na dve zmluvy (NN, VN) sa rozdelia až v podkladoch pre Office portál. Nové OOM vzniká v stave Pripravované.</div>
+</section><section class="card" aria-label="Ponuky" style="flex: 1 1 340px; min-width: 300px; overflow: hidden;">
+<div class="ch"><h2>Ponuky</h2><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Nová verzia</button></div>
+<div style="overflow-x: auto;"><table class="tbl">
+<thead><tr><th scope="col">Číslo</th><th scope="col">Stav</th><th scope="col">Platí do</th></tr></thead>
+<tbody>
+<tr><td><a href="#" class="mono">P26-000123/2</a><div class="sub">2 varianty · SK</div></td><td><span class="pill in"><span class="dot"></span>Otvorená 3×</span></td><td>15. 10. 16:00</td></tr>
+<tr><td><a href="#" class="mono">P26-000123</a><div class="sub">1 variant · SK</div></td><td><span class="pill "><span class="dot"></span>Nahradená</span></td><td class="mu">12. 10. 16:00</td></tr>
+</tbody></table></div>
+</section></div><div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;"><section class="card" aria-label="Časová os" style="flex: 2 1 560px; min-width: 0;">
+<div class="ch"><h2>Časová os</h2><div style="display: flex; gap: 6px;"><button class="btn" type="button">Poznámka</button><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg>E-mail</button></div></div>
+<ol style="list-style: none; margin: 0; padding: 0 16px 12px;"><li class="ev"><span class="evi" style="background: #e8f0fd; color: #2f62c8;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></span><div><div class="evt">Zákazník otvoril ponuku P26-000123/2</div><div class="evm">3× · naposledy 14. 10. 9:41</div></div></li><li class="ev"><span class="evi" style="background: #e8f2ee; color: #155a3d;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg></span><div><div class="evt">E-mail odoslaný: Cenová ponuka P26-000123/2 – Agro Turiec s.r.o.</div><div class="evm">13. 10. 15:02 · Martin Horák → p.mraz@…</div></div></li><li class="ev"><span class="evi" style="background: #e8f2ee; color: #155a3d;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><path d="M20 6L9 17l-5-5"></path></svg></span><div><div class="evt">Výnimka schválená: VN 2027 hranica 103,00 €/MWh</div><div class="evm">13. 10. 14:40 · Daniel Dérer · platí do 16. 10.</div></div></li><li class="ev"><span class="evi" style="background: #fff4e0; color: #b45309;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"></path></svg></span><div><div class="evt">Požiadavka na schválenie: VN 2027 104,00 < 106,00</div><div class="evm">13. 10. 11:15 · Martin Horák</div></div></li><li class="ev"><span class="evi" style="background: #f0f1f3; color: #64748b;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg></span><div><div class="evt">Odpoveď zákazníka: „Vedeli by ste ísť nižšie na VN?“</div><div class="evm">12. 10. 17:20 · p.mraz@… · vo vlákne ponuky</div></div></li><li class="ev"><span class="evi" style="background: #f0f1f3; color: #64748b;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg></span><div><div class="evt">Štádium Cenová ponuka → Vyjednávanie</div><div class="evm">12. 10. 17:25 · Martin Horák</div></div></li></ol>
+</section><section class="card" aria-label="Údaje obchodu" style="flex: 1 1 300px; min-width: 260px;">
+<div class="ch"><h2>Údaje obchodu</h2></div>
+<dl style="margin: 0; padding: 0 16px 10px;">
+<div class="row"><dt>Pipeline</dt><dd>B2B dodávka</dd></div>
+<div class="row"><dt>Vlastník</dt><dd>Martin Horák</dd></div>
+<div class="row"><dt>Zdroj</dt><dd>Odporúčanie</dd></div>
+<div class="row"><dt>Očakávané uzavretie</dt><dd>31. 10. 2026</dd></div>
+<div class="row"><dt>Začiatok dodávky</dt><dd>1. 1. 2027</dd></div>
+<div class="row"><dt>Kontaktná osoba</dt><dd>Ing. Pavol Mráz · konateľ</dd></div>
+<div class="row"><dt>Finstat</dt><dd><span class="pill ok"><span class="dot"></span>bez výstrah</span></dd></div>
+<div class="row"><dt>Predošlá zmluva</dt><dd><a href="#" class="mono">1120241925</a></dd></div>
+</dl>
+</section></div>
+</main>
+</div>
+</body>
+</html>

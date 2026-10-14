@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Náhľad PDF ponuky</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}
+.al{background:#fdecea;color:#b42318}
+.wa{background:#fff4e0;color:#b45309}
+.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.pri{background:#1a6b4a;border-color:#1a6b4a;color:#ffffff}
+.btn:focus-visible,.nav:focus-visible,.snav:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.snav{display:block;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:13px;line-height:19px}
+.snav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6f7f8}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.av{width:28px;height:28px;border-radius:7px;background:#f0f1f3;color:#0f172a;font-size:11px;font-weight:600;display:grid;place-items:center;flex:none}
+.sub{font-size:12px;color:#64748b;line-height:16px}
+.mu{color:#64748b}
+.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:#64748b}
+.inp{font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid #e7e9ec;border-radius:8px;color:#0f172a;background:#ffffff;box-sizing:border-box;width:100%}
+.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:#0f172a}
+.ck input{accent-color:#1a6b4a;width:15px;height:15px;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px}
+.ch h2{margin:0;font-size:15px;font-weight:600}
+.lock{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #f0f1f3;font-size:13px;line-height:19px;white-space:nowrap}
+.row:last-child{border-bottom:0}
+.row dt{color:#64748b;flex:none}
+.row dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:12px}
+.num{text-align:right}
+.tbl th.num{text-align:right}
+.chip{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip:hover{color:#0f172a}
+.chip:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.cc{color:#94a3b8;font-variant-numeric:tabular-nums}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note{font-size:12px;line-height:17px;color:#64748b;padding:10px 16px;border-top:1px solid #e7e9ec}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #f0f1f3}
+.ev:last-child{border-bottom:0}
+.evi{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:12px}
+.evt{font-size:13px;line-height:19px}
+.evm{font-size:12px;line-height:17px;color:#64748b}
+.tab{font-family:inherit;font-size:13px;font-weight:500;padding:9px 2px;border:0;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;white-space:nowrap}
+.tab:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.priv{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;font-weight:500}
+.kcol{flex:1 1 200px;min-width:200px;background:#eef0f2;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.kcard{background:#ffffff;border:1px solid #e7e9ec;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:18px}
+.ban{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:10px;font-size:13px;line-height:19px}
+.cp{font-family:inherit;font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;border:1px solid #e7e9ec;background:#ffffff;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.cp:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.miss{background:#fff4e0}
+
+</style>
+</head>
+<body>
+<div style="min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #e9ecef; -webkit-font-smoothing: antialiased;">
+<div style="padding: 32px 40px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"><div><div style="font-size: 12px; color: #64748b;">Ponuka P26-000123/2 · šablóna Dodávka · SK</div><h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em;">Náhľad PDF ponuky</h1></div><div style="display: flex; gap: 8px;"><button class="btn" type="button">SK / EN</button><button class="btn pri" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path></svg>Stiahnuť PDF</button></div></div>
+<div style="display: grid; grid-template-columns: repeat(2, 600px); gap: 28px; justify-content: center;"><article style="width: 600px; height: 849px; box-sizing: border-box; background: #ffffff; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 8px 24px rgba(15,23,42,.08); padding: 0; overflow: hidden; position: relative; font-size: 9.5px; line-height: 1.45; color: #1f2937;"><img src="assets/ponuka-titulna.png" alt="Titulná strana Greenlogy – The future is renewable" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;">
+<div style="position: absolute; left: 46px; top: 54px; right: 46px; color: #0f3a5c;"><div style="font-size: 26px; font-weight: 700; line-height: 1.15;">Cenová ponuka</div><div style="font-size: 15px; margin-top: 4px;">pre spoločnosť</div><div style="font-size: 20px; font-weight: 700; margin-top: 2px;">Agro Turiec s.r.o.</div></div></article><article style="width: 600px; height: 849px; box-sizing: border-box; background: #ffffff; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 8px 24px rgba(15,23,42,.08); padding: 44px 46px; overflow: hidden; position: relative; font-size: 9.5px; line-height: 1.45; color: #1f2937;"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><div style="font-size: 16px; font-weight: 700; color: #1f6aa5;">CENOVÁ PONUKA</div><div>č.: P26-000123/2</div><div style="margin-top: 2px;">združenej dodávky zelenej elektriny vyrobenej na Slovensku<br>s prevzatím zodpovednosti za odchýlku</div></div><div style="text-align: right;">Greenlogy a.s.<br>Závodská cesta 2945/38<br>010 01 Žilina<br>02/3305 6444</div></div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">1. ÚDAJE O ODBERATEĽOVI</div><div>Názov odberateľa: Agro Turiec s.r.o. · Sídlo: Priemyselná 8, Martin, 036 01<br>IČO: 51234567 · IČ DPH: SK2120123456 · Kontaktná osoba: Ing. Pavol Mráz</div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">2. PREDMET PONUKY</div><div>2.1 Predmetom cenovej ponuky je združená dodávka zelenej elektriny s prevzatím zodpovednosti za odchýlku vr. distribučných a prenosových služieb, v súlade s bodom 3 a platnými Obchodnými podmienkami.</div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">3. CENOVÁ PONUKA DODÁVKY ELEKTRINY</div><div>3.1 Greenlogy ponúka nasledovné ceny dodávky elektriny (€/MWh):</div><table style="width: 100%; border-collapse: collapse; font-size: 9px; margin-top: 4px;">
+<thead><tr style="background: #eaf2f8;"><th style="text-align: left; padding: 4px 6px;">Variant / produkt</th><th style="text-align: left; padding: 4px 6px;">Popis</th><th style="text-align: right; padding: 4px 6px;">2027</th><th style="text-align: right; padding: 4px 6px;">2028</th></tr></thead>
+<tbody>
+<tr><td colspan="4" style="padding: 5px 6px 2px; font-weight: 700;">Variant A – FIX, 01.01.2027 – 31.12.2028</td></tr>
+<tr><td style="padding: 3px 6px;">Green_E_1T_FIX – NN</td><td style="padding: 3px 6px;">Jednotarifný produkt s fixnou cenou počas trvania zmluvy</td><td style="text-align: right; padding: 3px 6px;">118,00 €</td><td style="text-align: right; padding: 3px 6px;">112,00 €</td></tr>
+<tr><td style="padding: 3px 6px;">Green_E_1T_FIX – VN</td><td style="padding: 3px 6px;">Jednotarifný produkt s fixnou cenou počas trvania zmluvy</td><td style="text-align: right; padding: 3px 6px;">104,00 €</td><td style="text-align: right; padding: 3px 6px;">101,00 €</td></tr>
+<tr><td colspan="4" style="padding: 7px 6px 2px; font-weight: 700;">Variant B – SPOT, 01.01.2027 – na neurčito</td></tr>
+<tr><td style="padding: 3px 6px;">Green_E_1T_SPOT+ aditív</td><td style="padding: 3px 6px;">Jednotarifný produkt so spotovou cenou, aditív</td><td colspan="2" style="text-align: right; padding: 3px 6px;">9,00 €</td></tr>
+</tbody></table>
+<div style="margin-top: 5px;">3.2 Ceny sú výhradne za služby Dodávateľa, bez DPH, spotrebnej dane, distribučných a prenosových poplatkov.<br>3.3 Cenová ponuka obsahuje Flexibilitu odberu na úrovni <b>PLNÁ FLEXIBILITA</b> bez dodatočných poplatkov.<br>3.4 Plánovaný ročný objem odberu: <b>252 MWh</b> (NN 40 MWh, VN 212 MWh).</div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">4. PLATOBNÉ PODMIENKY</div><div>4.1 Odberateľ uhrádza 1× mesačne preddavok vo výške <b>100 % z 1/12</b> plánovaného ročného odberu. 4.2 Splatnosť preddavku je <b>5. deň</b> v mesiaci. 4.3 Splatnosť vyúčtovacej faktúry je <b>14 dní</b>.</div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">5. PLATNOSŤ CENOVEJ PONUKY</div><div>5.1 Cenová ponuka platí do <b>16:00 hod. 15.10.2026</b>. 5.2 Ponuku prijmete tlačidlom „Záväzne objednávam“ na stránke ponuky alebo podpísanou Záväznou objednávkou.</div>
+<div style="font-weight: 700; color: #1f6aa5; font-size: 10.5px; margin: 10px 0 4px;">6. VŠEOBECNÉ USTANOVENIA</div><div>6.1 Obchodné podmienky sú dostupné na www.greenlogy.com v sekcii Pomoc a podpora.</div>
+<div style="position: absolute; left: 46px; right: 46px; bottom: 36px; border-top: 1px solid #e5e7eb; padding-top: 6px;">Cenovú ponuku spracoval: Martin Horák / +421 900 000 000 / martin.horak@greenlogy.com</div></article><article style="width: 600px; height: 849px; box-sizing: border-box; background: #ffffff; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 8px 24px rgba(15,23,42,.08); padding: 44px 46px; overflow: hidden; position: relative; font-size: 9.5px; line-height: 1.45; color: #1f2937;"><div style="font-weight: 700; color: #1f6aa5; font-size: 13px;">PREHĽAD REFERENCIÍ</div>
+<img src="assets/referencie-2.png" alt="Logá zákazníkov Greenlogy" style="width: 100%; margin-top: 10px;">
+<img src="assets/referencie-1.png" alt="Logá výrobcov a partnerov" style="width: 100%; margin-top: 8px;">
+<div style="display: flex; gap: 14px; align-items: center; margin-top: 10px;"><img src="assets/energeticky-mix.png" alt="Náš aktuálny energetický mix: voda 43 %, slnko 36 %, bioplyn 17 %, vietor 4 %" style="width: 210px;"><div><div style="font-weight: 700; color: #1f6aa5; font-size: 11px;">PRÍBEH GREENLOGY</div><div style="margin-top: 4px;">Spoločnosť Greenlogy začala svoju činnosť v energetike v roku 2021 … [text šablóny]</div><div style="font-weight: 700; color: #1f6aa5; font-size: 11px; margin-top: 10px;">VÍZIA GREENLOGY</div><div style="margin-top: 4px;">V Greenlogy pracujeme na tom, aby aj naše deti poznali modrú oblohu a zelenú krajinu … [text šablóny]</div></div></div>
+<div style="position: absolute; left: 46px; bottom: 36px; font-weight: 600; color: #1f6aa5;">www.greenlogy.com · The future is renewable.</div></article><article style="width: 600px; height: 849px; box-sizing: border-box; background: #ffffff; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 8px 24px rgba(15,23,42,.08); padding: 44px 46px; overflow: hidden; position: relative; font-size: 9.5px; line-height: 1.45; color: #1f2937;"><div style="text-align: center; font-weight: 700; font-size: 13px; color: #1f6aa5;">POTVRDENIE O PRIJATÍ PONUKY<br>ZÁVÄZNÁ OBJEDNÁVKA</div>
+<div style="display: flex; gap: 20px; margin-top: 12px;"><div style="flex: 1;"><b>DODÁVATEĽ</b><br>Greenlogy a.s.<br>Závodská cesta 2945/38, 010 01 Žilina<br>IČO: 53223713 · IČ DPH: SK2121307474</div><div style="flex: 1;"><b>ODBERATEĽ</b><br>Agro Turiec s.r.o.<br>Priemyselná 8, 036 01 Martin<br>IČO: 51234567 · IČ DPH: SK2120123456</div></div>
+<div style="margin-top: 12px;">Odberateľ potvrdzuje, že úplne prijíma od Dodávateľa Cenovú ponuku č. P26-000123/2 zo dňa 13.10.2026, variant <b>A – FIX 2027–2028</b>, ktorá je platná do 15.10.2026 …</div>
+<div style="margin-top: 6px;">Akceptáciou sa Odberateľ zaväzuje uzatvoriť s Dodávateľom najneskôr do 14 kalendárnych dní Zmluvu o združenej dodávke … [text šablóny]</div>
+<div style="margin-top: 6px;">Odberateľ sa zároveň zaväzuje uhradiť zmluvnú pokutu vo výške <b>50,00 €</b> za každú objednanú MWh … [text šablóny]</div>
+<div style="margin-top: 16px; padding: 10px 12px; background: #eaf2f8; border-radius: 6px;"><b>Elektronicky potvrdené</b> 14.10.2026 10:12:31 · Ing. Pavol Mráz, konateľ · IP 178.41.x.x · odtlačok znenia 3f9a…c21e<br><span style="color: #475569;">(pri ručnom podpise je tu miesto, dátum a podpis oprávnenej osoby)</span></div></article></div>
+<div class="sub" style="text-align: center;">Firmy: iba cena za komoditu. Domácnosti: aj ceny s DPH, mesačné poplatky a odhad ročných nákladov. Texty v hranatých zátvorkách sú pevné texty šablóny. Strana 4 je pri VIWA nahradená podpisom ponuky bez zmluvnej pokuty.</div>
+</div>
+</div>
+</body>
+</html>

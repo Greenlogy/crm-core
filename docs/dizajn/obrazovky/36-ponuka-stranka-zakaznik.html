@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stránka ponuky pre zákazníka</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}
+.al{background:#fdecea;color:#b42318}
+.wa{background:#fff4e0;color:#b45309}
+.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.pri{background:#1a6b4a;border-color:#1a6b4a;color:#ffffff}
+.btn:focus-visible,.nav:focus-visible,.snav:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.snav{display:block;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:13px;line-height:19px}
+.snav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6f7f8}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.av{width:28px;height:28px;border-radius:7px;background:#f0f1f3;color:#0f172a;font-size:11px;font-weight:600;display:grid;place-items:center;flex:none}
+.sub{font-size:12px;color:#64748b;line-height:16px}
+.mu{color:#64748b}
+.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:#64748b}
+.inp{font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid #e7e9ec;border-radius:8px;color:#0f172a;background:#ffffff;box-sizing:border-box;width:100%}
+.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:#0f172a}
+.ck input{accent-color:#1a6b4a;width:15px;height:15px;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px}
+.ch h2{margin:0;font-size:15px;font-weight:600}
+.lock{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #f0f1f3;font-size:13px;line-height:19px;white-space:nowrap}
+.row:last-child{border-bottom:0}
+.row dt{color:#64748b;flex:none}
+.row dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:12px}
+.num{text-align:right}
+.tbl th.num{text-align:right}
+.chip{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip:hover{color:#0f172a}
+.chip:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.cc{color:#94a3b8;font-variant-numeric:tabular-nums}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note{font-size:12px;line-height:17px;color:#64748b;padding:10px 16px;border-top:1px solid #e7e9ec}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #f0f1f3}
+.ev:last-child{border-bottom:0}
+.evi{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:12px}
+.evt{font-size:13px;line-height:19px}
+.evm{font-size:12px;line-height:17px;color:#64748b}
+.tab{font-family:inherit;font-size:13px;font-weight:500;padding:9px 2px;border:0;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;white-space:nowrap}
+.tab:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.priv{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;font-weight:500}
+.kcol{flex:1 1 200px;min-width:200px;background:#eef0f2;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.kcard{background:#ffffff;border:1px solid #e7e9ec;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:18px}
+.ban{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:10px;font-size:13px;line-height:19px}
+.cp{font-family:inherit;font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;border:1px solid #e7e9ec;background:#ffffff;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.cp:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.miss{background:#fff4e0}
+
+</style>
+</head>
+<body>
+<div style="min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+<header style="background: #ffffff; border-bottom: 1px solid #e7e9ec;"><div style="max-width: 1040px; margin: 0 auto; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;"><div style="display: flex; align-items: center; gap: 10px;"><span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span><span style="font-weight: 700; font-size: 17px; color: #1a6b4a;">greenlogy</span></div><div role="group" aria-label="Jazyk" style="display: flex; gap: 2px;"><button class="chip" type="button" aria-pressed="true" style="background: #f0f1f3; color: #0f172a;">SK</button><button class="chip" type="button" aria-pressed="false">EN</button></div></div></header>
+<main style="max-width: 1040px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 18px;">
+<section style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-end;"><div><div class="sub">Cenová ponuka P26-000123/2 · 13. 10. 2026</div><h1 style="margin: 4px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -.02em;">Dodávka zelenej elektriny pre Agro Turiec s.r.o.</h1><div class="mu" style="margin-top: 4px;">4 odberné miesta · plánovaný odber 252 MWh ročne · ceny bez DPH a regulovaných poplatkov</div></div>
+<div class="card" style="padding: 10px 14px; background: #fff4e0; border-color: #f6d9a8;"><div class="kl" style="color: #b45309;">Ponuka platí do</div><div style="font-size: 18px; font-weight: 600;">16:00 · 15. 10. 2026</div></div></section>
+<section aria-label="Varianty" style="display: flex; gap: 16px; flex-wrap: wrap;"><label class="card" style="flex: 1 1 340px; min-width: 300px; padding: 16px; border: 2px solid #1a6b4a; display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
+<span style="display: flex; gap: 10px; align-items: center;"><input type="radio" name="var" checked style="accent-color: #1a6b4a; width: 18px; height: 18px; margin: 0;"><span style="font-size: 16px; font-weight: 600;">Variant A · FIX 2027–2028</span></span>
+<dl style="margin: 0;"><div class="row"><dt>NN (3 miesta) 2027 / 2028</dt><dd>118,00 / 112,00 €/MWh</dd></div><div class="row"><dt>VN (1 miesto) 2027 / 2028</dt><dd>104,00 / 101,00 €/MWh</dd></div><div class="row"><dt>Obdobie</dt><dd>1. 1. 2027 – 31. 12. 2028</dd></div><div class="row"><dt>Flexibilita odberu</dt><dd>plná</dd></div></dl><span class="sub">Fixná cena počas celého obdobia.</span></label><label class="card" style="flex: 1 1 340px; min-width: 300px; padding: 16px; border: 1px solid #e7e9ec; display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
+<span style="display: flex; gap: 10px; align-items: center;"><input type="radio" name="var"  style="accent-color: #1a6b4a; width: 18px; height: 18px; margin: 0;"><span style="font-size: 16px; font-weight: 600;">Variant B · SPOT + aditív</span></span>
+<dl style="margin: 0;"><div class="row"><dt>Aditív k spotovej cene</dt><dd>9,00 €/MWh</dd></div><div class="row"><dt>Obdobie</dt><dd>od 1. 1. 2027 na neurčito</dd></div><div class="row"><dt>Ocenenie</dt><dd>ISOT OKTE + aditív, po štvrťhodinách</dd></div><div class="row"><dt>Flexibilita odberu</dt><dd>plná</dd></div></dl><span class="sub">Cena sa mení podľa denného trhu.</span></label></section>
+<section class="card" style="padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;"><div><b style="font-weight: 600;">Ponuka v PDF</b><div class="sub">podmienky, platobné podmienky, referencie a znenie Záväznej objednávky</div></div><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path></svg>Stiahnuť PDF</button></section>
+<section class="card" aria-label="Záväzná objednávka" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600;">Prijatie ponuky – Záväzná objednávka</h2>
+<div class="mu" style="font-size: 13px;">Kliknutím záväzne objednávate zvolený variant. Odberateľ sa zaväzuje uzavrieť zmluvu do 14 dní; pri nedodržaní platí zmluvná pokuta 50,00 € za každú objednanú MWh. <a href="#">Zobraziť celé znenie Záväznej objednávky</a></div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+<label class="fl">Meno a priezvisko<input class="inp" value="Ing. Pavol Mráz"></label>
+<label class="fl">Funkcia<input class="inp" value="konateľ"></label>
+<label class="fl">Zvolený variant<input class="inp" value="A · FIX 2027–2028" disabled></label>
+</div>
+<label class="ck"><input type="checkbox" checked>Som oprávnený konať za spoločnosť Agro Turiec s.r.o. a súhlasím so znením Záväznej objednávky.</label>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;"><button class="btn pri" type="button" style="padding: 12px 18px; font-size: 15px;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>Záväzne objednávam</button><span class="sub">Uložíme čas, meno, funkciu a znenie, ktoré ste videli. Potvrdenie s PDF príde e-mailom.</span></div>
+<div class="sub">Radšej podpíšete ručne? Stiahnite PDF, podpíšte stranu Záväzná objednávka a pošlite ju obchodníkovi.</div>
+</section>
+<section class="card" style="padding: 14px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;"><span class="av" style="width: 44px; height: 44px; border-radius: 50%; font-size: 14px;">MH</span><div><b style="font-weight: 600;">Martin Horák</b> · obchodník<div class="sub">martin.horak@greenlogy.com · +421 900 000 000</div></div></section>
+</main>
+</div>
+</body>
+</html>

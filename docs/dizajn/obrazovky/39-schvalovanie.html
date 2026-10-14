@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schvaľovanie</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f6f7f8}
+a{color:#1a6b4a;text-decoration:none}a:hover{color:#155a3d;text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e7e9ec;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.03)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px 8px;white-space:nowrap;background:#f0f1f3;color:#64748b}
+.ok{background:#e8f2ee;color:#155a3d}
+.al{background:#fdecea;color:#b42318}
+.wa{background:#fff4e0;color:#b45309}
+.in{background:#e8f0fd;color:#2f62c8}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:14px;line-height:21px}
+.nav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.grp{font-size:11px;font-weight:500;color:#94a3b8;padding:14px 10px 6px;letter-spacing:.02em}
+.btn{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:8px 12px;border-radius:8px;border:1px solid #e7e9ec;background:#ffffff;color:#0f172a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,.04);white-space:nowrap}
+.btn:hover{border-color:#cfd4da}
+.pri{background:#1a6b4a;border-color:#1a6b4a;color:#ffffff}
+.btn:focus-visible,.nav:focus-visible,.snav:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.snav{display:block;padding:7px 10px;border-radius:8px;color:#64748b;font-weight:500;font-size:13px;line-height:19px}
+.snav:hover{background:#f0f1f3;color:#0f172a;text-decoration:none}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:19px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:500;color:#64748b;text-align:left;padding:8px 10px;border-bottom:1px solid #e7e9ec;white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6f7f8}
+.tbl th:first-child,.tbl td:first-child{padding-left:16px}
+.tbl th:last-child,.tbl td:last-child{padding-right:16px}
+.av{width:28px;height:28px;border-radius:7px;background:#f0f1f3;color:#0f172a;font-size:11px;font-weight:600;display:grid;place-items:center;flex:none}
+.sub{font-size:12px;color:#64748b;line-height:16px}
+.mu{color:#64748b}
+.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:#64748b}
+.inp{font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid #e7e9ec;border-radius:8px;color:#0f172a;background:#ffffff;box-sizing:border-box;width:100%}
+.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:#0f172a}
+.ck input{accent-color:#1a6b4a;width:15px;height:15px;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px}
+.ch h2{margin:0;font-size:15px;font-weight:600}
+.lock{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #f0f1f3;font-size:13px;line-height:19px;white-space:nowrap}
+.row:last-child{border-bottom:0}
+.row dt{color:#64748b;flex:none}
+.row dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:12px}
+.num{text-align:right}
+.tbl th.num{text-align:right}
+.chip{font-family:inherit;font-size:13px;line-height:19px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip:hover{color:#0f172a}
+.chip:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.cc{color:#94a3b8;font-variant-numeric:tabular-nums}
+.kl{font-size:12px;font-weight:500;color:#64748b;white-space:nowrap}
+.kv{font-size:22px;line-height:1.1;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:6px}
+.ks{font-size:12px;color:#64748b;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note{font-size:12px;line-height:17px;color:#64748b;padding:10px 16px;border-top:1px solid #e7e9ec}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #f0f1f3}
+.ev:last-child{border-bottom:0}
+.evi{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:12px}
+.evt{font-size:13px;line-height:19px}
+.evm{font-size:12px;line-height:17px;color:#64748b}
+.tab{font-family:inherit;font-size:13px;font-weight:500;padding:9px 2px;border:0;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;white-space:nowrap}
+.tab:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.priv{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;font-weight:500}
+.kcol{flex:1 1 200px;min-width:200px;background:#eef0f2;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.kcard{background:#ffffff;border:1px solid #e7e9ec;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:18px}
+.ban{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:10px;font-size:13px;line-height:19px}
+.cp{font-family:inherit;font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;border:1px solid #e7e9ec;background:#ffffff;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.cp:focus-visible{outline:2px solid #1a6b4a;outline-offset:2px}
+.miss{background:#fff4e0}
+
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Geist, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f6f7f8; -webkit-font-smoothing: antialiased;">
+<nav aria-label="Hlavné menu" style="flex: 1 1 232px; max-width: 232px; min-width: 200px; box-sizing: border-box; background: #ffffff; border-right: 1px solid #e7e9ec; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 6px 8px;">
+<span style="width: 30px; height: 30px; border-radius: 8px; background: #1a6b4a; display: grid; place-items: center;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="color: #ffffff;"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg></span>
+<div><div style="font-size: 14px; font-weight: 600; line-height: 17px;">Greenlogy</div><div style="font-size: 11px; color: #64748b; line-height: 15px;">CRM</div></div>
+</div>
+<div class="grp">Obchod</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"></path></svg>Domov</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Zákazníci</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>Odberné miesta</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Obchody</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="nav" href="#" aria-current="page" style="background: #f0f1f3; color: #0f172a; font-weight: 600;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>Schvaľovanie<span class="pill wa" style="margin-left: auto;">3</span></a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 12h6M9 16h6"></path></svg>Zmluvy</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>Cenníky</a>
+<div class="grp">Servis</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.4A8 8 0 1121 12z"></path></svg>Konverzácie</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>SLA prehľad</a>
+<div class="grp">Marketing</div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>Segmenty</a>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-7-7 18-2-8z"></path></svg>Kampane</a>
+<div style="flex-grow: 1; min-height: 24px;"></div>
+<a class="nav" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"></path></svg>Nastavenia</a>
+<div style="display: flex; align-items: center; gap: 8px; background: #f0f1f3; border-radius: 8px; padding: 7px 10px; font-size: 12px; color: #64748b; margin-top: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a6b4a;"></span>Test · Greenlogy a.s.</div>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 36px 48px; display: flex; flex-direction: column; gap: 16px;">
+<section aria-label="Hlavička" style="display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between;">
+<div style="min-width: 0;">
+<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;">Schvaľovanie</h1>
+<span style="font-size: 13px; color: #64748b;">výnimky, konkurz a rating, platnosť, pridelenie firmy</span>
+</div></div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;"><section class="card" aria-label="Žiadosti" style="flex: 2 1 640px; min-width: 0; overflow: hidden;">
+<div style="display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e7e9ec;">
+<button class="chip" type="button" aria-pressed="true" style="background: #f0f1f3; color: #0f172a;">Čakajú <span class="cc">3</span></button>
+<button class="chip" type="button" aria-pressed="false">Výnimky z ceny</button>
+<button class="chip" type="button" aria-pressed="false">Konkurz / rating</button>
+<button class="chip" type="button" aria-pressed="false">Predĺženie platnosti</button>
+<button class="chip" type="button" aria-pressed="false">Pridelenie firmy</button>
+<button class="chip" type="button" aria-pressed="false">Vybavené</button>
+</div>
+<div style="overflow-x: auto;"><table class="tbl">
+<thead><tr><th scope="col">Typ</th><th scope="col">Obchod / firma</th><th scope="col">Žiadosť</th><th scope="col">Žiada</th><th scope="col">Stav</th><th scope="col">Kedy</th></tr></thead>
+<tbody><tr style="background: #f6f7f8;"><td>Výnimka z ceny</td><td><a href="#">Stavmont 2027</a></td><td style="white-space: normal; max-width: 300px;">FIX 2027 101,50 < 106,00 · 212,5 MWh</td><td>Martin Horák</td><td><span class="pill wa"><span class="dot"></span>Čaká</span></td><td class="mu">14. 10. 9:05</td></tr><tr><td>Konkurz / rating E/X</td><td><a href="#">Stavmont 2027</a></td><td style="white-space: normal; max-width: 300px;">konkurz od 2. 10. 2026</td><td>Martin Horák</td><td><span class="pill wa"><span class="dot"></span>Čaká</span></td><td class="mu">14. 10. 9:05</td></tr><tr><td>Pridelenie firmy</td><td><a href="#">Agro Turiec s.r.o.</a></td><td style="white-space: normal; max-width: 300px;">od Z. Bielikovej k M. Horákovi</td><td>Martin Horák</td><td><span class="pill wa"><span class="dot"></span>Čaká</span></td><td class="mu">14. 10. 8:20</td></tr><tr><td>Výnimka z ceny</td><td><a href="#">Agro Turiec 2027</a></td><td style="white-space: normal; max-width: 300px;">VN 2027 104,00 < 106,00 → 103,00</td><td>Martin Horák</td><td><span class="pill ok"><span class="dot"></span>Schválená</span></td><td class="mu">platí do 16. 10.</td></tr><tr><td>Predĺženie platnosti</td><td><a href="#">Hotel Fatra 2027–2028</a></td><td style="white-space: normal; max-width: 300px;">do 20. 10. 16:00</td><td>Zuzana Bieliková</td><td><span class="pill ok"><span class="dot"></span>Schválená</span></td><td class="mu">13. 10.</td></tr><tr><td>Výnimka z ceny</td><td><a href="#">Mlyn Kysuce 2027</a></td><td style="white-space: normal; max-width: 300px;">SPOT aditív 4,00 < 6,00</td><td>Peter Novák</td><td><span class="pill al"><span class="dot"></span>Zamietnutá</span></td><td class="mu">12. 10.</td></tr></tbody></table></div>
+<div class="note">Výnimky, konkurz/E/X a predĺženie platnosti schvaľuje CEO alebo obchodný riaditeľ (príznak „schvaľuje ceny“). Pridelenie firmy schvaľuje manažér alebo obchodný riaditeľ. Schválená výnimka platí 3 dni na odoslanie ponuky.</div>
+</section><section class="card" aria-label="Detail žiadosti" style="flex: 1 1 340px; min-width: 300px;">
+<div class="ch"><h2>Výnimka z ceny · Stavmont 2027</h2><span class="pill wa"><span class="dot"></span>Čaká</span></div>
+<div style="margin: 0 16px 8px;" class="ban al"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"></path></svg><div>Zákazník je v konkurze od 2. 10. 2026 – samostatná žiadosť čaká tiež.</div></div>
+<dl style="margin: 0; padding: 0 16px 10px;">
+<div class="row"><dt>Ponuka · variant</dt><dd><a href="#" class="mono">P26-000131</a> · A FIX 2027</dd></div>
+<div class="row"><dt>Žiadaná cena</dt><dd>101,50 €/MWh</dd></div>
+<div class="row"><dt>Cena pre obchodníka</dt><dd>106,00 €/MWh (13. 10.)</dd></div>
+<div class="row"><dt>Objem</dt><dd>212,5 MWh</dd></div>
+<div class="row"><dt>Pridaná hodnota s výnimkou</dt><dd>0,00 €</dd></div>
+<div class="row" style="background: #fafbfb;"><dt>Marža firmy (odhad 96,00)</dt><dd>1 168,75 €</dd></div>
+</dl>
+<div style="padding: 0 16px 6px; font-size: 13px;"><div class="kl" style="margin-bottom: 4px;">Dôvod</div>Konkurencia ponúkla 101,00 €/MWh, zákazník zvažuje VIWA.</div>
+<div style="padding: 10px 16px 16px; display: flex; flex-direction: column; gap: 8px;">
+<label class="fl">Schválená hranica [€/MWh]<input class="inp" value="101,50"></label>
+<label class="fl" for="kom">Komentár<textarea id="kom" class="inp" rows="2"></textarea></label>
+<div style="display: flex; gap: 8px;"><button class="btn" type="button" style="flex: 1; justify-content: center;">Zamietnuť</button><button class="btn pri" type="button" style="flex: 1; justify-content: center;">Schváliť na 3 dni</button></div>
+</div>
+</section></div>
+</main>
+</div>
+</body>
+</html>
