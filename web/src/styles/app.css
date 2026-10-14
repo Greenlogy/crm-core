@@ -1702,3 +1702,8 @@ a.tab {
   padding: 3px 10px;
   font-size: 12px;
 }
+
+/* Nastavenia – Cenové parametre a Preklady importov (modul 4, F1a) */
+.tbl td.strong { font-weight: 600; }
+.tbl tr.sub-row td { background: var(--surface-muted); }
+.tbl td.actions { white-space: nowrap; text-align: right; }

@@ -148,7 +148,6 @@ export function ContractsCard(props: { contracts: ContractRow[] }) {
             meta={`${period(z.valid_from, z.valid_to)} · ${z.oom_count} OOM · ${z.price_count} cien`}
             side={
               <>
-                {!z.confirmed && <Pill tone="warning">Nepotvrdená</Pill>}
                 <StatusPill map={CONTRACT_STATUS} value={z.status} />
               </>
             }

@@ -7,18 +7,19 @@ import { Link, useParams } from 'react-router-dom';
 import { CustomFieldsCard, formatCustom, useFieldDefs, type FieldDef } from '../components/custom-fields';
 import { canEditOomData, ContactsCard, DevicesCard } from '../components/oom-children';
 import { OomActions, PLAN_DATE_LABEL, PLAN_KIND, PlanBanner } from '../components/oom-actions';
+import { RegulationPanel, RegulationValue } from '../components/oom-regulation';
 import { BackLink, Card, Empty, ErrorState, HubSpotLink, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
-import { useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
+import { send, useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
 import { useMe } from '../lib/me';
 import { date, eurMonth, eurMwh, kw, mwh, num, pct, period, sumNum, text } from '../lib/format';
 import {
   dealTone,
   DEVICE_TYPE,
-  DIRECTION,
   label,
   LINK_END_REASON,
   OOM_STATUS,
   OOM_TYPE,
+  PRICE_SLOT,
   PRICE_STATUS,
   SOURCE_CATEGORY,
   SOURCE_KIND,
@@ -94,7 +95,16 @@ export function OomPage() {
 
       <section className="kpis" aria-label="Ukazovatele">
         {o.type === 'vyroba' ? (
-          <Kpi label="Plánovaný výkup" value={mwh(o.planned_feed_in_mwh)} sub={o.source_power_kw ? `zdroj ${kw(o.source_power_kw)}` : undefined} />
+          <Kpi
+            label="Plánovaný výkup"
+            value={mwh(o.planned_feed_in_mwh)}
+            sub={[
+              o.source_power_kw ? `zdroj ${kw(o.source_power_kw)}` : '',
+              o.source_category === 'lokalny_zdroj' ? (o.planned_feed_in_manual ? 'zadané ručne' : 'vypočítané z výkonu') : '',
+            ]
+              .filter(Boolean)
+              .join(' · ') || undefined}
+          />
         ) : (
           <Kpi
             label="Plánovaná spotreba"
@@ -150,6 +160,19 @@ function nextStep(o: OomCard) {
 
 function Overview(props: { o: OomCard; onChanged: () => void }) {
   const o = props.o;
+  const [regulationOpen, setRegulationOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const canEdit = canEditOomData(o);
+  // „Vrátiť výpočet“: plán výkupu lokálneho zdroja sa znova počíta z výkonu (výkon × 4 × 365 × 0,1 / 1000)
+  const resetPlan = async () => {
+    setBusy(true);
+    try {
+      await send('PATCH', `/api/oom/${o.id}`, { planned_feed_in_manual: false });
+      props.onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="columns">
       <div className="col-left">
@@ -168,14 +191,28 @@ function Overview(props: { o: OomCard; onChanged: () => void }) {
               ['Rezervovaná kapacita', kw(o.reserved_capacity_kw)],
               ['Max. rezerv. kapacita', kw(o.max_reserved_capacity_kw)],
               ['Spôsob rezervácie', text(o.capacity_reservation_method)],
+              ['Verejné osvetlenie', o.public_lighting ? 'áno' : 'nie'],
             ]}
           />
         </Card>
-        <Card title="Fakturácia">
+        <Card
+          title="Fakturácia"
+          aside={
+            canEdit ? (
+              <button type="button" className="link-button" onClick={() => setRegulationOpen(true)}>
+                Zmeniť reguláciu
+              </button>
+            ) : o.regulation.length > 0 ? (
+              <button type="button" className="link-button" onClick={() => setRegulationOpen(true)}>
+                História regulácie
+              </button>
+            ) : undefined
+          }
+        >
           <Rows
             stacked
             rows={[
-              ['Cenová regulácia', regulation(o.price_regulation)],
+              ['Cenová regulácia', <RegulationValue o={o} />],
               ['Spotrebná daň', text(o.excise_tax)],
               ['Fakturačné obdobie', text(o.billing_period_label)],
               ['Zálohy', text(o.advance_payment_method_label)],
@@ -191,6 +228,24 @@ function Overview(props: { o: OomCard; onChanged: () => void }) {
                 ['Druh zdroja', text(label(SOURCE_KIND, o.source_kind))],
                 ['Kategória zdroja', text(label(SOURCE_CATEGORY, o.source_category))],
                 ['Výkon zdroja', kw(o.source_power_kw)],
+                ...(o.source_category === 'lokalny_zdroj'
+                  ? ([
+                      [
+                        'Plánovaný výkup',
+                        <span>
+                          {mwh(o.planned_feed_in_mwh)} · {o.planned_feed_in_manual ? 'zadané ručne' : 'vypočítané z výkonu'}
+                          {o.planned_feed_in_manual && canEdit && (
+                            <>
+                              {' '}
+                              <button type="button" className="link-button" disabled={busy} onClick={resetPlan}>
+                                Vrátiť výpočet
+                              </button>
+                            </>
+                          )}
+                        </span>,
+                      ],
+                    ] as [string, ReactNode][])
+                  : []),
                 ['Výkon striedača', kw(o.inverter_power_kw)],
                 ['Výkon panelov', kw(o.panels_power_kw)],
                 ['Typ výkupnej zmluvy', text(o.feed_in_contract_type_label)],
@@ -211,6 +266,16 @@ function Overview(props: { o: OomCard; onChanged: () => void }) {
         <Card title="Spoločnosť">
           <Rows stacked rows={[['Spoločnosť skupiny', o.org_name]]} />
         </Card>
+        {regulationOpen && (
+          <RegulationPanel
+            o={o}
+            onClose={() => setRegulationOpen(false)}
+            onChanged={() => {
+              setRegulationOpen(false);
+              props.onChanged();
+            }}
+          />
+        )}
       </div>
       <div className="col-wide">
         <div className="columns">
@@ -332,6 +397,8 @@ const FIELD_LABEL: Record<string, string> = {
   planned_consumption_vt_mwh: 'Plánovaná spotreba VT',
   planned_consumption_nt_mwh: 'Plánovaná spotreba NT',
   planned_feed_in_mwh: 'Plánovaný výkup',
+  planned_feed_in_manual: 'Plán výkupu zadaný ručne',
+  public_lighting: 'Verejné osvetlenie',
   source_power_kw: 'Výkon zdroja',
   source_kind: 'Druh zdroja',
   source_category: 'Kategória zdroja',
@@ -540,11 +607,11 @@ function ContractsTab(props: { o: OomCard }) {
                   <tr>
                     <th>Zmluva</th>
                     <th>Produkt</th>
-                    <th>Smer</th>
+                    <th>Zložka</th>
                     <th className="num">VT / 1T</th>
                     <th className="num">NT</th>
-                    <th className="num">Odchýlka</th>
-                    <th className="num">Poplatok OM</th>
+                    <th className="num">Aditív</th>
+                    <th className="num">Mesačne</th>
                     <th>Účinnosť</th>
                     <th>Stav</th>
                   </tr>
@@ -556,11 +623,11 @@ function ContractsTab(props: { o: OomCard }) {
                         <Link to={`/zmluvy/${p.contract_id}`}>{p.contract_number ?? '(bez čísla)'}</Link>
                       </td>
                       <td title={p.product ?? undefined}>{text(p.product)}</td>
-                      <td>{text(label(DIRECTION, p.direction))}</td>
+                      <td>{text(PRICE_SLOT[p.slot] ?? p.slot)}</td>
                       <td className="num">{eurMwh(p.price_vt_eur_mwh)}</td>
                       <td className="num">{eurMwh(p.price_nt_eur_mwh)}</td>
-                      <td className="num">{eurMwh(p.imbalance_price_eur_mwh)}</td>
-                      <td className="num">{eurMonth(p.fee_oom_eur_month)}</td>
+                      <td className="num">{p.additive_pct !== null && p.additive_pct !== undefined ? pct(p.additive_pct) : eurMwh(p.additive_eur_mwh)}</td>
+                      <td className="num">{eurMonth(p.fee_eur_month)}</td>
                       <td>{period(p.valid_from, p.valid_to)}</td>
                       <td>
                         <StatusPill map={PRICE_STATUS} value={p.status} />

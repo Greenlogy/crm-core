@@ -68,6 +68,19 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   price_list_item_price_check: 'Každá položka musí mať aspoň jednu cenu.',
   price_list_item_nt_check: 'Cena NT sa dá zadať iba spolu s VT.',
   price_list_item_program_item_id_key: 'Parametre programu už pri položke sú.',
+  // Zmluvy F1 (0023, 0024)
+  team_permission_margin_check: 'Maržu firmy možno povoliť iba v module Zmluvy.',
+  product_tariff_variant_check: 'Vykurovanie iba pri dvojtarife, verejné osvetlenie iba pri jednotarife.',
+  price_parameter_key: 'Tento parameter už má hodnotu s rovnakým dátumom „platí od“ – oprav ju alebo zvoľ iný dátum.',
+  price_parameter_ratio_check: 'Pomer BL: 0 až 100 %.',
+  price_parameter_value_check: 'Hodnota nemôže byť záporná.',
+  price_parameter_year_check: 'Rok dodávky sa zadáva iba pri nákupnej cene energopomoci.',
+  market_price_daily_check: 'Zadajte aspoň jednu cenu.',
+  market_price_daily_check1: 'Zadajte BL aj PL (alebo ani jedno).',
+  market_price_daily_current_key: 'Cena pre tento deň a rok sa práve zmenila – obnovte stránku.',
+  import_alias_key: 'Tento názov už má preklad (aj s iným zápisom veľkých písmen, medzier či diakritiky).',
+  import_alias_name_sample_check: 'Chýba názov z importu.',
+  import_alias_target_check: 'Chýba hodnota v CRM.',
 };
 
 export type ApiErrorBody = { error: string; code?: string; field?: string; constraint?: string };

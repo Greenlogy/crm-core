@@ -1,6 +1,6 @@
 // Typy a texty Nastavení (odpovede /api/settings/*).
 
-import type { ModuleCode, Permission, Scope } from './api';
+import type { ModuleCode, Permission, Scope, SellerType } from './api';
 
 export type UserStatus = 'pozvany' | 'aktivny' | 'deaktivovany';
 
@@ -9,6 +9,8 @@ export type SettingsUser = {
   name: string;
   email: string;
   is_admin: boolean;
+  seller_type: SellerType | null;
+  approves_prices: boolean;
   status: UserStatus;
   last_login_at: string | null;
   invited_at: string;
@@ -41,6 +43,12 @@ export type Handover = {
   open_deals: number;
   owners: { id: string; name: string; team_name: string }[];
 };
+
+export const SELLER_TYPES: { value: SellerType | ''; label: string }[] = [
+  { value: '', label: 'Nepredáva' },
+  { value: 'obchodnik', label: 'Obchodník' },
+  { value: 'manazer', label: 'Manažér' },
+];
 
 export const USER_STATUS: Record<UserStatus, { label: string; tone: 'positive' | 'info' | 'neutral' }> = {
   aktivny: { label: 'Aktívny', tone: 'positive' },

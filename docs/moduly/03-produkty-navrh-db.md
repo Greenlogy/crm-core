@@ -238,7 +238,7 @@ CREATE TABLE price_list_item (
   price_vt_eur_mwh       numeric(12,4) CHECK (price_vt_eur_mwh >= 0),   -- VT / jednotarif
   price_nt_eur_mwh       numeric(12,4) CHECK (price_nt_eur_mwh >= 0),
   fee_oom_eur_month      numeric(12,4) CHECK (fee_oom_eur_month >= 0),  -- mesačná platba za OM (aj ZEM, poplatok B2B)
-  fee_program_eur_month  numeric(12,4) CHECK (fee_program_eur_month >= 0), -- mesačný poplatok programu (VBattery, VIWA za OOM)
+  fee_program_eur_month  numeric(12,4) CHECK (fee_program_eur_month >= 0), -- mesačný poplatok programu (VBattery za OOM, VIWA za účet – oprava 0023)
   fee_kw_eur_month       numeric(12,4) CHECK (fee_kw_eur_month >= 0),   -- VIWA: poplatok za odchýlku za kW výkonu mesačne
   vat_rate               numeric(5,2),          -- kópia DPH produktu, vyplní schválenie (odpoveď 7)
   sort_order             integer NOT NULL DEFAULT 0,

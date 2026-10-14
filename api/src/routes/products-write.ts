@@ -48,6 +48,12 @@ function productValues(b: Body) {
   if (b.segment !== undefined) out.segment = pick(b.segment, ['domacnost', 'firma'] as const, 'Segment');
   if (b.vat_rate !== undefined) out.vat_rate = vat(b.vat_rate);
   if (b.tariff_type !== undefined) out.tariff_type = pick(b.tariff_type, TARIFFS, 'Typ tarifu');
+  // variant tarifu (0023): vykurovanie (dvojtarif), verejné osvetlenie (jednotarif); null = bez variantu
+  if (b.tariff_variant !== undefined) {
+    out.tariff_variant = b.tariff_variant === null || b.tariff_variant === ''
+      ? null
+      : pick(b.tariff_variant, ['vykurovanie', 'verejne_osvetlenie'] as const, 'Variant tarifu');
+  }
   if (b.price_models !== undefined) {
     if (!Array.isArray(b.price_models) || b.price_models.length === 0) throw new BadRequest('Cenové modely: vyberte aspoň jeden.');
     // text poľa {cennik,fix} (hodnoty iba z pevného zoznamu) – ovládač pole enumov inak nepošle správne
@@ -79,6 +85,7 @@ async function lockProduct(sql: Sql, pid: string, b: Body): Promise<'ok' | 'stal
 
 const CAST: Record<string, string> = {
   name: 'text', category: 'product_category', segment: 'customer_segment', vat_rate: 'numeric', tariff_type: 'tariff_type',
+  tariff_variant: 'text',
   price_models: 'price_model[]', price_regulation: 'boolean', status: 'product_status', sort_order: 'integer',
 };
 
@@ -99,11 +106,12 @@ productsWrite.post('/products', async (c) => {
     const code = n === 1 ? base : `${base}_${n}`;
     try {
       const [row] = await tx.savepoint((sp) => sp<{ id: string }[]>`
-        INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, price_models, price_regulation,
-                             status, sort_order)
+        INSERT INTO product (org_id, code, name, category, segment, vat_rate, tariff_type, tariff_variant, price_models,
+                             price_regulation, status, sort_order)
         VALUES (coalesce(${org}::uuid, crm_default_org()), ${code}, ${v.name as string}, ${v.category as string}::product_category,
                 ${v.segment as string}::customer_segment, ${(v.vat_rate as string | null) ?? null}::numeric,
-                ${v.tariff_type as string}::tariff_type, ${v.price_models as string}::price_model[],
+                ${v.tariff_type as string}::tariff_type, ${(v.tariff_variant as string | null | undefined) ?? null}::text,
+                ${v.price_models as string}::price_model[],
                 ${(v.price_regulation as boolean | null | undefined) ?? null}::boolean,
                 coalesce(${(v.status as string | undefined) ?? null}::product_status, 'predava_sa'),
                 coalesce(${(v.sort_order as number | undefined) ?? null}::integer,

@@ -1,6 +1,7 @@
 // Modul 3 F3 – nový produkt a úprava produktu (obrazovka 22, iba admin).
 // Produkt sa nemaže, iba ukončí. Pri použitom produkte (je v cenníku) sa nemení kategória, segment, typ tarifu,
-// cenová regulácia ani model „cenník“ (databáza, 0022); panel to vysvetlí a polia uzamkne. Súbežná úprava → 409.
+// cenová regulácia ani model „cenník“ (databáza, 0022), ani variant tarifu (0023); panel to vysvetlí a polia uzamkne.
+// Súbežná úprava → 409.
 
 import { useState } from 'react';
 import { send, type ProductRow } from '../lib/api';
@@ -18,6 +19,7 @@ export function ProductPanel(props: { product?: ProductRow; onClose: () => void;
   const [segment, setSegment] = useState(p?.segment ?? '');
   const [vat, setVat] = useState(p?.vat_rate === null || p?.vat_rate === undefined ? '' : dec(p.vat_rate as string, 0));
   const [tariff, setTariff] = useState(p?.tariff_type ?? 'netyka_sa');
+  const [variant, setVariant] = useState<string>(p?.tariff_variant ?? '');
   const [models, setModels] = useState<string[]>(p?.price_models ?? ['cennik']);
   const [regulation, setRegulation] = useState(p?.price_regulation === null || p?.price_regulation === undefined ? '' : p.price_regulation ? 'ano' : 'nie');
   const [status, setStatus] = useState(p?.status ?? 'predava_sa');
@@ -32,7 +34,15 @@ export function ProductPanel(props: { product?: ProductRow; onClose: () => void;
         price_models: models,
         status,
       };
-      if (!used) Object.assign(body, { category, segment, tariff_type: tariff, price_regulation: regulation === '' ? null : regulation === 'ano' });
+      if (!used) {
+        Object.assign(body, {
+          category,
+          segment,
+          tariff_type: tariff,
+          tariff_variant: variant === '' ? null : variant,
+          price_regulation: regulation === '' ? null : regulation === 'ano',
+        });
+      }
       if (p) await send('PATCH', `/api/products/${p.id}`, { ...body, updated_at: p.updated_at });
       else await send('POST', '/api/products', body);
       props.onDone();
@@ -56,7 +66,7 @@ export function ProductPanel(props: { product?: ProductRow; onClose: () => void;
       {error && <Notice tone="error">{error}</Notice>}
       {used && (
         <p className="caption">
-          Produkt je v cenníku: kategória, segment, typ tarifu, cenová regulácia a model „cenník“ sa nemenia. Zmeniť sa dá názov, DPH
+          Produkt je v cenníku: kategória, segment, typ a variant tarifu, cenová regulácia a model „cenník“ sa nemenia. Zmeniť sa dá názov, DPH
           (schválené verzie majú kópiu DPH), ďalšie cenové modely a stav.
         </p>
       )}
@@ -73,8 +83,32 @@ export function ProductPanel(props: { product?: ProductRow; onClose: () => void;
         <TextInput value={fve ? '' : vat} onChange={setVat} disabled={fve} />
       </Field>
       <Field label="Typ tarifu">
-        <Select value={tariff} onChange={setTariff} options={opts(TARIFF_TYPE)} disabled={used} />
+        <Select
+          value={tariff}
+          onChange={(t) => {
+            setTariff(t);
+            // vykurovanie iba pri dvojtarife, verejné osvetlenie iba pri jednotarife (databáza, 0023)
+            if ((variant === 'vykurovanie' && t !== 'dvojtarif') || (variant === 'verejne_osvetlenie' && t !== 'jednotarif')) setVariant('');
+          }}
+          options={opts(TARIFF_TYPE)}
+          disabled={used}
+        />
       </Field>
+      {(tariff === 'dvojtarif' || tariff === 'jednotarif') && (
+        <Field label="Variant tarifu" hint="podľa neho prolongácia navrhne produkt (Green 2T Vykurovanie, Green 1T VO)">
+          <Select
+            value={variant}
+            onChange={setVariant}
+            options={[
+              { value: '', label: 'bez variantu' },
+              tariff === 'dvojtarif'
+                ? { value: 'vykurovanie', label: 'vykurovanie' }
+                : { value: 'verejne_osvetlenie', label: 'verejné osvetlenie' },
+            ]}
+            disabled={used}
+          />
+        </Field>
+      )}
       <Field label="Cenové modely">
         <div className="params">
           {Object.entries(PRICE_MODEL).map(([m, label]) => (

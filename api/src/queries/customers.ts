@@ -200,7 +200,7 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
              sum(o.planned_feed_in_mwh) AS planned_feed_in_mwh,
              sum(o.source_power_kw) AS source_power_kw,
              count(*) FILTER (WHERE o.type = 'vyroba')::int AS production_count,
-             (SELECT count(*)::int FROM contract WHERE ${owner} AND status = 'aktivna') AS active_contracts
+             (SELECT count(*)::int FROM contract k WHERE ${owner} AND contract_state(k) = 'ucinna') AS active_contracts
         FROM oom_customer l JOIN oom o ON o.id = l.oom_id
        WHERE l.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id} AND l.valid_to IS NULL`,
     kind === 'company'
@@ -257,14 +257,15 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
        WHERE d.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY d.closed_at DESC NULLS LAST, d.created_at DESC`,
     sql`
-      SELECT k.id, k.number, k.status, k.confirmed, k.valid_from, k.valid_to, d.name AS deal_name, pl.name AS pipeline,
-             (SELECT count(DISTINCT oom_id)::int FROM contract_price cp WHERE cp.contract_id = k.id) AS oom_count,
+      SELECT k.id, k.number, contract_state(k) AS status, k.type, k.valid_from, contract_effective_to(k) AS valid_to,
+             d.name AS deal_name, pl.name AS pipeline,
+             (SELECT count(*)::int FROM contract_oom co WHERE co.contract_id = k.id) AS oom_count,
              (SELECT count(*)::int FROM contract_price cp WHERE cp.contract_id = k.id) AS price_count
         FROM contract k
         LEFT JOIN deal d ON d.id = k.deal_id
         LEFT JOIN pipeline pl ON pl.id = d.pipeline_id
        WHERE k.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
-       ORDER BY k.valid_to DESC NULLS FIRST, k.valid_from DESC`,
+       ORDER BY contract_effective_to(k) DESC NULLS FIRST, k.valid_from DESC`,
     statusHistory(sql, kind === 'company' ? 'company' : 'contact', id),
     // Časová os: poznámky a ďalšie aktivity (najnovšie hore); pri firme aj meno osoby, ak sa aktivita týka aj jej.
     sql`

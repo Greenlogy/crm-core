@@ -6,12 +6,14 @@ import type { Sql } from '../db';
 import { type AppEnv, UUID } from '../types';
 import { auditSettings } from './settings-audit';
 import { contentSettings } from './settings-content';
+import { importAliases } from './settings-aliases';
 import { orgSettings } from './settings-org';
 import { BadRequest, bool, EMAIL, oneOf, readBody, str, uuid, uuids, type Body } from '../validate';
 
 export const settings = new Hono<AppEnv>();
 
 settings.use('*', async (c, next) => {
+  // Cenové parametre (obrazovka 29) sú pod /api/pricing – smie ich aj „schvaľuje ceny“; ostatné Nastavenia iba admin.
   const [row] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() AS ok`;
   if (!row?.ok) return c.json({ error: 'Nastavenia môže otvoriť iba admin.' }, 403);
   await next();
@@ -20,6 +22,7 @@ settings.use('*', async (c, next) => {
 settings.route('/', orgSettings);
 settings.route('/', contentSettings);
 settings.route('/', auditSettings);
+settings.route('/', importAliases);
 
 // Prehľad pre úvod Nastavení
 settings.get('/', async (c) => {
@@ -37,6 +40,7 @@ settings.get('/', async (c) => {
 settings.get('/users', async (c) => {
   const rows = await c.var.sql`
     SELECT u.id, u.name, u.email, u.is_admin, u.status, u.last_login_at, u.invited_at, u.deactivated_at,
+           u.seller_type, u.approves_prices,
            t.id AS team_id, t.code AS team_code, t.name AS team_name, t.all_orgs, t.is_external,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name)
                                      ORDER BY o.is_default DESC, o.legal_name)
@@ -78,10 +82,13 @@ settings.post('/users', async (c) => {
   const teamId = uuid(b, 'team_id', 'Tím')!;
   const orgIds = uuids(b, 'org_ids', 'Spoločnosti') ?? [];
   const isAdmin = bool(b, 'is_admin', 'Admin') ?? false;
+  const sellerType = sellerTypeOf(b);
+  const approves = bool(b, 'approves_prices', 'Schvaľuje ceny') ?? false;
   const sql = c.var.sql;
   await checkOrgs(sql, teamId, orgIds);
   const [user] = await sql<{ id: string }[]>`
-    INSERT INTO app_user (email, name, team_id, is_admin) VALUES (${email}, ${name}, ${teamId}, ${isAdmin})
+    INSERT INTO app_user (email, name, team_id, is_admin, seller_type, approves_prices)
+    VALUES (${email}, ${name}, ${teamId}, ${isAdmin}, ${sellerType ?? null}::seller_type, ${approves})
     RETURNING id`;
   await setUserOrgs(sql, user.id, orgIds);
   return c.json({ id: user.id }, 201);
@@ -95,6 +102,8 @@ settings.patch('/users/:id', async (c) => {
   const teamId = uuid(b, 'team_id', 'Tím', true);
   const orgIds = uuids(b, 'org_ids', 'Spoločnosti');
   const isAdmin = bool(b, 'is_admin', 'Admin');
+  const sellerType = sellerTypeOf(b);
+  const approves = bool(b, 'approves_prices', 'Schvaľuje ceny');
   const sql = c.var.sql;
   const [cur] = await sql<{ team_id: string }[]>`SELECT team_id FROM app_user WHERE id = ${id}`;
   if (!cur) return c.json({ error: 'Používateľ neexistuje.' }, 404);
@@ -103,12 +112,21 @@ settings.patch('/users/:id', async (c) => {
     UPDATE app_user
        SET name = coalesce(${name ?? null}, name),
            team_id = coalesce(${teamId ?? null}::uuid, team_id),
-           is_admin = coalesce(${isAdmin ?? null}::boolean, is_admin)
+           is_admin = coalesce(${isAdmin ?? null}::boolean, is_admin),
+           seller_type = CASE WHEN ${sellerType !== undefined} THEN ${sellerType ?? null}::seller_type ELSE seller_type END,
+           approves_prices = coalesce(${approves ?? null}::boolean, approves_prices)
      WHERE id = ${id}`;
   if (orgIds !== undefined) await setUserOrgs(sql, id, orgIds);
   await checkOrgs(sql, teamId ?? cur.team_id, undefined, id);
   return c.json({ ok: true });
 });
+
+// Typ predajcu: 'obchodnik' | 'manazer' | null (nepredáva); chýbajúci kľúč = bez zmeny.
+function sellerTypeOf(b: Body): 'obchodnik' | 'manazer' | null | undefined {
+  if (!('seller_type' in b)) return undefined;
+  if (b.seller_type === null || b.seller_type === '') return null;
+  return oneOf(b, 'seller_type', 'Typ predajcu', ['obchodnik', 'manazer'] as const);
+}
 
 // Čo používateľ vlastní (pred deaktiváciou) a komu sa to dá odovzdať.
 settings.get('/users/:id/handover', async (c) => {
@@ -150,7 +168,8 @@ settings.get('/teams', async (c) => {
                ORDER BY lower(u.name) LIMIT 3) x) AS member_names,
            coalesce((SELECT json_object_agg(p.module, json_build_object('view', p.view_scope, 'edit', p.edit_scope,
                                                                         'archive', p.can_archive, 'export', p.can_export,
-                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom))
+                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom,
+                                                                        'margin', p.can_see_company_margin))
                        FROM team_permission p WHERE p.team_id = t.id), '{}') AS permissions
       FROM team t
      ORDER BY t.archived_at IS NOT NULL,
@@ -197,8 +216,9 @@ settings.patch('/teams/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Celá matica práv tímu naraz: { permissions: { zakaznici: { view, edit, archive, export, import, edit_active }, … } }
-// import a edit_active sú nepovinné (staršia obrazovka ich neposiela → bez zmeny); edit_active iba pri OOM.
+// Celá matica práv tímu naraz: { permissions: { zakaznici: { view, edit, archive, export, import, edit_active, margin }, … } }
+// import, edit_active a margin sú nepovinné (staršia obrazovka ich neposiela → bez zmeny); edit_active iba pri OOM,
+// margin (vidieť maržu firmy) iba pri Zmluvách.
 settings.patch('/teams/:id/permissions', async (c) => {
   const id = c.req.param('id');
   if (!UUID.test(id)) throw new BadRequest('Neplatné ID.');
@@ -214,13 +234,15 @@ settings.patch('/teams/:id/permissions', async (c) => {
     const exp = bool(pb, 'export', 'Exportovať')!;
     const imp = bool(pb, 'import', 'Importovať');
     const editActive = module === 'odberne_miesta' ? bool(pb, 'edit_active', 'Upravovať Aktívne OOM') : undefined;
+    const margin = module === 'zmluvy' ? bool(pb, 'margin', 'Vidieť maržu firmy') : undefined;
     if ([view, edit, archive, exp].some((v) => v === undefined)) throw new BadRequest('Neúplné práva modulu.');
     await c.var.sql`
       UPDATE team_permission
          SET view_scope = ${view}::access_scope, edit_scope = ${edit}::access_scope,
              can_archive = ${archive}, can_export = ${exp},
              can_import = coalesce(${imp ?? null}::boolean, can_import),
-             can_edit_active_oom = coalesce(${editActive ?? null}::boolean, can_edit_active_oom)
+             can_edit_active_oom = coalesce(${editActive ?? null}::boolean, can_edit_active_oom),
+             can_see_company_margin = coalesce(${margin ?? null}::boolean, can_see_company_margin)
        WHERE team_id = ${id} AND module = ${module}::crm_module`;
   }
   return c.json({ ok: true });

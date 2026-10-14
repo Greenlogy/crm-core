@@ -1,6 +1,6 @@
 # Stav projektu
 
-Aktualizované: 13. 10. 2026
+Aktualizované: 14. 10. 2026
 
 ## Hotové
 
@@ -17,6 +17,7 @@ Aktualizované: 13. 10. 2026
 - **Modul 1 Zákazníci uzavretý** (Peter, 12. 10. 2026): F1–F4 na Teste (commity `7b40c4c`, `527992a`), zadanie v0.4 s časťou 15. Na `main` (Ostré) zatiaľ nie.
 - **Modul 2 Odberné miesta – databáza hotová na `dev`:** návrh v0.4 (`docs/moduly/02-odberne-miesta-navrh-db.md`), migrácie `0013`–`0015` (Peter, 12. 10.), testy prešli (108 kontrol), prepínač `customer_status_auto` na `dev` zapnutý (na `main` vypnutý do modulu Zmluvy), Cron dennej aktivácie na Teste. OOM má „iba svoje“ v databáze; externý tím ostáva zamknutý, kým RLS nemajú dealy a zmluvy.
 - **Modul 3 Produkty a cenníky uzavretý** (Peter, 13. 10. 2026): zadanie v0.3, návrh DB v0.3, migrácie `0019`–`0022` na `dev`, cenníky 2026 nahraté (`db/seed/cenniky-2026.sh`), fázy F1–F3 na Teste (126 kontrol). Testy (126 kontrol) prejdú aj s inými dátami – overené na `dev` s testovacími dátami a cenníkmi 2026. Na `main` (Ostré) zatiaľ nie. Inventár produktov z HubSpotu v `exports/modul3-produkty/` – mapovanie na katalóg (stĺpec „Nový produkt“) doplní Peter pred presunom dát.
+- **Modul 4 Zmluvy a ceny – `0025_zmluvy_jadro` overená nanečisto** (14. 10.): `0023`, `0024` na `dev`; `0025` + úprava API a webu kariet (zmluva, zákazník, OOM) overené lokálne (140 kontrol), na `dev` a Test čakajú na Petra – migrácia a nasadenie Workera hneď po sebe. `api/db/app-role.sql` zároveň opravuje 0024 (aplikácia nemá UPDATE na trhové ceny). Ďalej: `0026_zmluvy_import` (Office portal, XM Trade, trieda TDO, overenie na vzorových exportoch) a obrazovky 25–27.
 - Modul 2: prototyp na prezeranie dát – kroky 1 (výber vzorky), 2 (nahratie na `dev`) 1–7 hotové, prototyp nasadený za Cloudflare Access
 
 - Modul 1: databáza jadra – hotové na `dev`, čaká na nasadenie na `main` (Peter rozhodne, kedy; zatiaľ sa na `main` nič nespúšťa)
@@ -47,7 +48,7 @@ Aktualizované: 13. 10. 2026
 
 ## Ďalší krok
 
-- **Migrácie 0001–0022 overené na skúšobnej vetve `skuska-main` z prázdneho `main`** (Peter schválil, 13. 10.): `up` všetkých 22 bez chyby, schéma zhodná s `dev` (0 riadkov rozdielu), testy 126 OK; návrat všetkých 22 bez chyby (ostane iba `schema_migrations` a rozšírenie `btree_gist`), opätovné `up` = rovnaká schéma, testy znova 126 OK. `main` nezmenený (prázdny). Ďalej: Peter zmaže vetvu `skuska-main` a riadok `DATABASE_URL_SKUSKA` v `.dev.vars`; nasadenie na `main` je samostatné rozhodnutie (rola `crm_app` s heslom, `customer_status_auto` vypnutý do modulu Zmluvy, cenníky 2026, Hyperdrive, Worker, Access).
+- **Migrácie 0001–0022 overené na skúšobnej vetve `skuska-main` z prázdneho `main`** (Peter schválil, 13. 10.): `up` všetkých 22 bez chyby, schéma zhodná s `dev` (0 riadkov rozdielu), testy 126 OK; návrat všetkých 22 bez chyby (ostane iba `schema_migrations` a rozšírenie `btree_gist`), opätovné `up` = rovnaká schéma, testy znova 126 OK. `main` nezmenený (prázdny). Vetva `skuska-main` a riadok `DATABASE_URL_SKUSKA` v `.dev.vars` zmazané (Peter, 13. 10.). Nasadenie na `main` je samostatné rozhodnutie (rola `crm_app` s heslom, `customer_status_auto` vypnutý do modulu Zmluvy, cenníky 2026, Hyperdrive, Worker, Access).
 - Modul 2 Odberné miesta: F1 a F2 (F2a stav/prepis/plány, F2b založenie a úprava, F2c zariadenia, kontakty, mazanie, Nastavenia) hotové; migrácie `0016`, `0017`. F3 (vlastné polia OOM, export .xlsx) na Teste. F4 (import z Excelu, migrácia `0018`) na Teste, Peter overil 13. 10. Ďalej: uzavretie modulu 2, potom samostatný krok aktualizácia wranglera. Testovacie dáta `db/test-data/oom-test.sh dev vytvor|zmaz|beh RRRR-MM-DD`.
 - **Po module 2 (samostatný krok, Peter 13. 10.):** aktualizácia wranglera a nástrojov na vývoj (`npm audit` hlási vysoké zraniteľnosti iba vo wrangler, miniflare, sharp, undici – nie v kóde Workera ani v SheetJS). Teraz sa nerobí.
 - Modul 0 Nastavenia: kroky A–C hotové na Teste (12. 10.): rola `crm_app` (migrácia 0009), Hyperdrive `crm-core-dev` → `crm_app` s vypnutou cache, Worker nasadený s prihlásením (overenie tokenu Access + používateľ CRM); `/api/me` overené (Peter: CEO, admin, 3 spoločnosti). Ďalej: v Access povoliť @greenlogy.com (Google), potom obrazovky Nastavení (11–16) a zápis v API.

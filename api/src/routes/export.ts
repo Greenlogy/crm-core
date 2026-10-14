@@ -199,7 +199,8 @@ exportRoutes.get('/oom/export', async (c) => {
   const header = [
     ...OOM_COLUMNS.map((col) => col.label), ...cdefs.map(customLabel),
     ro('Zákazník'), ro('Stav'), ro('Vlastník'), ro('Spoločnosť'), ro('Dodávka do'), ro('Prechod sa zasekol'),
-    ro('Plánovaná zmena'), ro('Prepis od'), ...extra.map((d) => ro(d.label)),
+    ro('Plánovaná zmena'), ro('Prepis od'), ro('Verejné osvetlenie'), ro('Plán výkupu zadaný ručne'),
+    ...extra.map((d) => ro(d.label)),
   ];
   const date = (v: string | null) => (v ? v.split('-').reverse().map(Number).join('. ') : null);
   const SOURCE_KIND_L: Record<string, string> = {
@@ -232,6 +233,8 @@ exportRoutes.get('/oom/export', async (c) => {
       o.switch_stuck ? 'áno' : null,
       o.plan_kind ? `${PLAN_LABEL[o.plan_kind]} k ${date(o.plan_date)}` : o.plan_failed ? 'plán zlyhal' : null,
       o.transferred_from_name,
+      d.public_lighting ? 'áno' : null,
+      d.source_category === 'lokalny_zdroj' ? (d.planned_feed_in_manual ? 'áno' : 'nie (výpočet)') : null,
       ...extra.map((cd) => customCell(cd, (o.custom ?? {})[cd.key])),
     ];
   });

@@ -3,13 +3,14 @@
 import { useMemo, useState } from 'react';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../../components/form';
 import { Avatar, ErrorState, Pill, Skeleton, StatusPill } from '../../components/ui';
-import { send, useApi } from '../../lib/api';
+import { type SellerType, send, useApi } from '../../lib/api';
 import { EMPTY, lastSeen } from '../../lib/format';
 import { ENVIRONMENT_LABEL, useMe } from '../../lib/me';
 import {
   type Handover,
   invitationText,
   isGoogleLogin,
+  SELLER_TYPES,
   type SettingsTeam,
   type SettingsUser,
   USER_STATUS,
@@ -124,7 +125,15 @@ export function UsersPage() {
                       <Pill tone={u.is_external ? 'warning' : 'neutral'}>{u.team_name}</Pill>
                     </td>
                     <td>{u.all_orgs ? 'Všetky' : u.orgs.map((o) => o.name).join(', ') || EMPTY}</td>
-                    <td>{u.is_admin ? <Pill tone="info">Admin</Pill> : EMPTY}</td>
+                    <td>
+                      {u.is_admin || u.approves_prices ? (
+                        <>
+                          {u.is_admin && <Pill tone="info">Admin</Pill>} {u.approves_prices && <Pill tone="info">Schvaľuje ceny</Pill>}
+                        </>
+                      ) : (
+                        EMPTY
+                      )}
+                    </td>
                     <td>{isGoogleLogin(u.email) ? 'Google' : 'kód e-mailom'}</td>
                     <td>{lastSeen(u.last_login_at)}</td>
                     <td>
@@ -176,6 +185,8 @@ function UserForm(props: {
   const [teamId, setTeamId] = useState(u?.team_id ?? '');
   const [orgIds, setOrgIds] = useState<string[]>(u?.orgs.map((o) => o.id) ?? me.orgs.filter((o) => o.default).map((o) => o.id));
   const [isAdmin, setIsAdmin] = useState(u?.is_admin ?? false);
+  const [sellerType, setSellerType] = useState<SellerType | ''>(u?.seller_type ?? '');
+  const [approves, setApproves] = useState(u?.approves_prices ?? false);
   const [deactivate, setDeactivate] = useState(false);
   const save = useSave();
   const team = props.teams.find((t) => t.id === teamId);
@@ -186,7 +197,14 @@ function UserForm(props: {
   }
 
   const submit = async () => {
-    const body = { name, team_id: teamId, org_ids: team?.all_orgs ? [] : orgIds, is_admin: team?.is_external ? false : isAdmin };
+    const body = {
+      name,
+      team_id: teamId,
+      org_ids: team?.all_orgs ? [] : orgIds,
+      is_admin: team?.is_external ? false : isAdmin,
+      seller_type: sellerType === '' ? null : sellerType,
+      approves_prices: team?.is_external ? false : approves,
+    };
     const ok = await save.run(() =>
       u ? send('PATCH', `/api/settings/users/${u.id}`, body) : send('POST', '/api/settings/users', { ...body, email }),
     );
@@ -253,6 +271,19 @@ function UserForm(props: {
         <div className="fl-wide">
           <Check checked={isAdmin && !team?.is_external} disabled={readOnly || team?.is_external} onChange={setIsAdmin}>
             Admin – smie meniť Nastavenia
+          </Check>
+        </div>
+        <Field label="Typ predajcu" hint="Podľa neho sa volí minimálny aditív a cena pre obchodníka.">
+          <Select
+            value={sellerType}
+            onChange={(v) => setSellerType(v as SellerType | '')}
+            disabled={readOnly}
+            options={SELLER_TYPES.map((s) => ({ value: s.value, label: s.label }))}
+          />
+        </Field>
+        <div className="fl-wide">
+          <Check checked={approves && !team?.is_external} disabled={readOnly || team?.is_external} onChange={setApproves}>
+            Schvaľuje ceny – výnimky z ceny a cenové parametre; vidí všetky zmluvy a maržu firmy bez ohľadu na tím
           </Check>
         </div>
       </div>

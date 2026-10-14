@@ -13,6 +13,7 @@ import { oomImport } from './routes/oom-import';
 import { oomWrite } from './routes/oom-write';
 import { priceLists } from './routes/pricelists';
 import { priceListsWrite } from './routes/pricelists-write';
+import { pricing } from './routes/pricing';
 import { productsWrite } from './routes/products-write';
 import { settings } from './routes/settings';
 import { type AppEnv, UUID } from './types';
@@ -99,6 +100,7 @@ app.get('/me', async (c) => {
   const [me] = await c.var.sql`
     SELECT u.id, u.name, u.email, u.is_admin, t.code AS team_code, t.name AS team_name,
            t.can_change_owner OR u.is_admin AS can_change_owner,
+           u.seller_type, u.approves_prices, crm_can_see_margin() AS can_see_margin,
            ${c.env.ENVIRONMENT ?? 'test'}::text AS environment,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
                                                        'currency', o.currency, 'status', o.status, 'default', o.is_default)
@@ -106,7 +108,8 @@ app.get('/me', async (c) => {
                        FROM org o WHERE o.id = ANY (crm_user_orgs())), '[]') AS orgs,
            coalesce((SELECT json_object_agg(p.module, json_build_object('view', p.view_scope, 'edit', p.edit_scope,
                                                                         'archive', p.can_archive, 'export', p.can_export,
-                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom))
+                                                                        'import', p.can_import, 'edit_active', p.can_edit_active_oom,
+                                                                        'margin', p.can_see_company_margin))
                        FROM team_permission p WHERE p.team_id = u.team_id), '{}') AS permissions
       FROM app_user u
       JOIN team t ON t.id = u.team_id
@@ -122,6 +125,7 @@ app.route('/', oomWrite);
 app.route('/', priceLists);
 app.route('/', priceListsWrite);
 app.route('/', productsWrite);
+app.route('/', pricing);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).

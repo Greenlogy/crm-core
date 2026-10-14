@@ -101,18 +101,22 @@ INSERT INTO deal_contact (deal_id, contact_id, role) VALUES
   ('00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000201', 'zakaznik');
 
 -- Zmluva so zmluvnými a nákupnými cenami
-INSERT INTO contract (id, deal_id, company_id, number, status, confirmed, valid_from, valid_to, signed_at) VALUES
+-- (štruktúra zmluvy od 0025: typ, fáza z Office portálu, OOM v zmluve, ceny po zložkách)
+INSERT INTO contract (id, deal_id, company_id, number, type, phase, valid_from, valid_to, signed_on) VALUES
   ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000601',
-   '00000000-0000-4000-8000-000000000101', 'TEST-2026-0001', 'podpisana', true,
-   '2027-01-01', '2028-12-31', '2026-09-15 10:00+02');
-INSERT INTO contract_price (id, contract_id, oom_id, product_id, direction,
-                            price_vt_eur_mwh, price_nt_eur_mwh, fee_oom_eur_month, valid_from, valid_to) VALUES
+   '00000000-0000-4000-8000-000000000101', 'TEST-2026-0001', 'dodavka_firma_nn', 'podpisana',
+   '2027-01-01', '2028-12-31', '2026-09-15');
+INSERT INTO contract_oom (contract_id, oom_id, qty_vt_mwh, qty_nt_mwh) VALUES
+  ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000301', 12.000, 3.000),
+  ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000303', 5.000, 0);
+INSERT INTO contract_price (id, contract_id, oom_id, slot, product_id, price_model,
+                            price_vt_eur_mwh, price_nt_eur_mwh, valid_from, valid_to) VALUES
   ('00000000-0000-4000-8000-000000000711', '00000000-0000-4000-8000-000000000701',
-   '00000000-0000-4000-8000-000000000301', '00000000-0000-4000-8000-000000000401', 'odber',
-   125.0000, 98.5000, 3.00, '2027-01-01', NULL),
+   '00000000-0000-4000-8000-000000000301', 'komodita', '00000000-0000-4000-8000-000000000401', 'fix',
+   125.0000, 98.5000, '2027-01-01', NULL),
   ('00000000-0000-4000-8000-000000000712', '00000000-0000-4000-8000-000000000701',
-   '00000000-0000-4000-8000-000000000303', '00000000-0000-4000-8000-000000000401', 'odber',
-   125.0000, NULL, 3.00, '2027-01-01', NULL);
+   '00000000-0000-4000-8000-000000000303', 'komodita', '00000000-0000-4000-8000-000000000401', 'fix',
+   125.0000, NULL, '2027-01-01', NULL);
 INSERT INTO contract_purchase (contract_id, product_code, delivery_year, priced_on, price_eur_mwh, cockpit_ref) VALUES
   ('00000000-0000-4000-8000-000000000701', 'SK BL CAL2027', 2027, '2026-09-14', 96.4000, 'TEST-TRANZA-1'),
   ('00000000-0000-4000-8000-000000000701', 'SK BL CAL2028', 2028, '2026-09-14', 89.1500, 'TEST-TRANZA-2');

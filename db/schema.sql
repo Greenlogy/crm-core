@@ -128,28 +128,57 @@ CREATE TYPE public.consent_status AS ENUM (
 
 
 --
--- Name: contract_price_status; Type: TYPE; Schema: public; Owner: -
+-- Name: contract_close_reason; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.contract_price_status AS ENUM (
-    'platna',
-    'neplatna'
+CREATE TYPE public.contract_close_reason AS ENUM (
+    'akvizicia',
+    'retencia',
+    'autoprolong',
+    'prepis',
+    'nove_oom'
 );
 
 
 --
--- Name: contract_status; Type: TYPE; Schema: public; Owner: -
+-- Name: contract_flag_code; Type: TYPE; Schema: public; Owner: -
 --
 
-CREATE TYPE public.contract_status AS ENUM (
+CREATE TYPE public.contract_flag_code AS ENUM (
+    'pod_hranicou_bez_vynimky',
+    'chyba_cena',
+    'sprolongovane_bez_ceny',
+    'konci_do_4_mesiacov',
+    'kontrola_importu'
+);
+
+
+--
+-- Name: contract_phase; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.contract_phase AS ENUM (
     'rozpracovana',
     'caka_na_podpis',
+    'fyzicke_podpisovanie',
+    'elektronicke_podpisovanie',
     'podpisana',
-    'caka_na_zaradenie',
-    'aktivna',
+    'odmietnuta',
     'ukoncena',
-    'vypoved_neakceptovana',
-    'zmena_neuspesna'
+    'neuspesna'
+);
+
+
+--
+-- Name: contract_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.contract_type AS ENUM (
+    'dodavka_domacnost',
+    'dodavka_firma_nn',
+    'dodavka_firma_vn',
+    'vykup',
+    'viwa'
 );
 
 
@@ -457,6 +486,18 @@ CREATE TYPE public.price_direction AS ENUM (
 
 
 --
+-- Name: price_exception_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.price_exception_status AS ENUM (
+    'caka',
+    'schvalena',
+    'zamietnuta',
+    'pouzita'
+);
+
+
+--
 -- Name: price_list_version_status; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -507,6 +548,16 @@ CREATE TYPE public.product_status AS ENUM (
     'predava_sa',
     'dobieha',
     'ukonceny'
+);
+
+
+--
+-- Name: seller_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.seller_type AS ENUM (
+    'obchodnik',
+    'manazer'
 );
 
 
@@ -711,6 +762,9 @@ BEGIN
     SELECT t.is_external INTO v_external FROM team t WHERE t.id = NEW.team_id;
     IF v_external AND NEW.is_admin THEN
       RAISE EXCEPTION 'Člen externého tímu nemôže byť admin.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_external AND NEW.approves_prices THEN
+      RAISE EXCEPTION 'Člen externého tímu nemôže schvaľovať ceny.' USING ERRCODE = 'check_violation';
     END IF;
     IF v_external AND NOT crm_external_ready()
        AND (TG_OP = 'INSERT' OR NEW.team_id IS DISTINCT FROM OLD.team_id) THEN
@@ -1132,6 +1186,480 @@ $$;
 
 
 --
+-- Name: contract_child_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_child_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$  -- práva volajúceho: current_user = skutočná rola (import a nočný beh = vlastník)
+BEGIN
+  IF NOT (crm_owner_session()
+          OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = TG_RELID)) THEN
+    RAISE EXCEPTION 'OOM a ceny zmluvy mení iba import z Office portálu.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END;
+$$;
+
+
+--
+-- Name: contract_crm_end_refresh(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_crm_end_refresh(p_contract_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_end date;
+  v_all boolean;
+BEGIN
+  SELECT max(valid_to), bool_and(valid_to IS NOT NULL) INTO v_end, v_all FROM contract_oom WHERE contract_id = p_contract_id;
+  UPDATE contract
+     SET crm_valid_to = CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END
+   WHERE id = p_contract_id
+     AND crm_valid_to IS DISTINCT FROM (CASE WHEN v_all AND v_end IS DISTINCT FROM valid_to THEN v_end ELSE NULL END);
+END;
+$$;
+
+
+--
+-- Name: contract; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contract (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deal_id uuid,
+    company_id uuid,
+    person_id uuid,
+    number text NOT NULL,
+    segment public.customer_segment,
+    auto_prolong boolean DEFAULT false NOT NULL,
+    valid_from date,
+    valid_to date,
+    payment_terms_days integer,
+    consumption_tolerance numeric(5,2),
+    advance_payment_pct numeric(5,2),
+    hubspot_deal_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
+    op_id uuid,
+    type public.contract_type NOT NULL,
+    phase public.contract_phase NOT NULL,
+    signed_on date,
+    crm_valid_to date,
+    small_business boolean DEFAULT false NOT NULL,
+    list_price boolean DEFAULT false NOT NULL,
+    viwa_package text,
+    close_reason public.contract_close_reason,
+    owner_id uuid,
+    created_by_name text,
+    previous_contract_id uuid,
+    related_contract_id uuid,
+    note text,
+    op_updated_at timestamp with time zone,
+    CONSTRAINT contract_crm_valid_to_check CHECK (((crm_valid_to IS NULL) OR (valid_from IS NULL) OR (crm_valid_to >= (valid_from - 1)))),
+    CONSTRAINT contract_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT contract_payment_terms_days_check CHECK ((payment_terms_days >= 0)),
+    CONSTRAINT contract_previous_check CHECK ((previous_contract_id IS DISTINCT FROM id)),
+    CONSTRAINT contract_related_check CHECK ((related_contract_id IS DISTINCT FROM id)),
+    CONSTRAINT contract_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from))),
+    CONSTRAINT contract_viwa_package_check CHECK ((viwa_package = ANY (ARRAY['basic'::text, 'plus'::text, 'pro'::text])))
+);
+
+
+--
+-- Name: COLUMN contract.segment; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.segment IS 'preberá sa od zákazníka pri vzniku, ak nie je zadaný';
+
+
+--
+-- Name: COLUMN contract.valid_from; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.valid_from IS 'účinnosť od (Office portal; domácnosti z XM Trade)';
+
+
+--
+-- Name: COLUMN contract.valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.valid_to IS 'účinnosť do z Office portálu; NULL = na neurčito';
+
+
+--
+-- Name: COLUMN contract.consumption_tolerance; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.consumption_tolerance IS 'tolerancia odberu v %';
+
+
+--
+-- Name: COLUMN contract.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN contract.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.org_id IS 'preberá sa od zákazníka';
+
+
+--
+-- Name: COLUMN contract.op_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.op_id IS 'ID zmluvy v Office portáli (stabilný kľúč importu popri čísle)';
+
+
+--
+-- Name: COLUMN contract.phase; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.phase IS 'fáza v Office portáli; stav zmluvy sa počíta (contract_state)';
+
+
+--
+-- Name: COLUMN contract.signed_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.signed_on IS 'platnosť od (deň podpisu) z Office portálu';
+
+
+--
+-- Name: COLUMN contract.crm_valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.crm_valid_to IS 'koniec podľa CRM: automatická prolongácia alebo skrátenie nástupníckou zmluvou; NULL = podľa valid_to';
+
+
+--
+-- Name: COLUMN contract.owner_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.owner_id IS 'Uzatvoril (obchodník) – z Office portálu cez preklad mena';
+
+
+--
+-- Name: COLUMN contract.previous_contract_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.previous_contract_id IS 'predošlá zmluva (retencia, prepis, obnova); nastaví aj nástupníctvo na OOM';
+
+
+--
+-- Name: COLUMN contract.related_contract_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract.related_contract_id IS 'súvisiaca zmluva: VIWA ↔ dodávka toho istého zákazníka';
+
+
+--
+-- Name: contract_effective_to(public.contract); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_effective_to(c public.contract) RETURNS date
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT coalesce(c.crm_valid_to, c.valid_to)
+$$;
+
+
+--
+-- Name: FUNCTION contract_effective_to(c public.contract); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.contract_effective_to(c public.contract) IS 'skutočný koniec zmluvy: koniec podľa CRM (prolongácia, nástupca), inak účinnosť do z Office portálu; NULL = neurčito';
+
+
+--
+-- Name: contract_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$  -- práva volajúceho: current_user = skutočná rola (import a nočný beh = vlastník)
+DECLARE
+  v_system boolean := crm_owner_session()
+    OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'contract'::regclass);
+  r contract;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF NOT v_system THEN
+      RAISE EXCEPTION 'Zmluva sa nemaže – opravuje sa v Office portáli a ďalším importom.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NOT v_system
+     AND (to_jsonb(NEW) - ARRAY['previous_contract_id', 'related_contract_id', 'close_reason', 'note', 'custom', 'updated_at'])
+         <> (to_jsonb(OLD) - ARRAY['previous_contract_id', 'related_contract_id', 'close_reason', 'note', 'custom', 'updated_at']) THEN
+    RAISE EXCEPTION 'Údaje z Office portálu sa v CRM nemenia – opravte ich v Office portáli a nahrajte export.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  -- súvisiaca zmluva: VIWA ↔ dodávka toho istého zákazníka
+  IF NEW.related_contract_id IS NOT NULL THEN
+    SELECT * INTO r FROM contract WHERE id = NEW.related_contract_id;
+    IF (r.company_id, r.person_id) IS DISTINCT FROM (NEW.company_id, NEW.person_id)
+       OR NOT ((NEW.type = 'viwa' AND r.type::text LIKE 'dodavka%') OR (r.type = 'viwa' AND NEW.type::text LIKE 'dodavka%')) THEN
+      RAISE EXCEPTION 'Súvisiaca zmluva: VIWA a zmluva o dodávke toho istého zákazníka.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: contract_oom_fill(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_oom_fill() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  c contract;
+BEGIN
+  SELECT * INTO c FROM contract WHERE id = NEW.contract_id;
+  IF (SELECT org_id FROM oom WHERE id = NEW.oom_id) <> c.org_id THEN
+    RAISE EXCEPTION 'OOM patrí inej spoločnosti ako zmluva.' USING ERRCODE = 'check_violation';
+  END IF;
+  NEW.org_id := c.org_id;
+  NEW.grp := CASE WHEN c.type IN ('vykup', 'viwa') THEN 'vykup_viwa' ELSE 'dodavka' END;
+  NEW.is_binding := c.phase = 'podpisana';
+  IF TG_OP = 'INSERT' THEN
+    NEW.valid_from := coalesce(NEW.valid_from, c.valid_from);
+    NEW.op_valid_to := c.valid_to;
+    NEW.valid_to := coalesce(NEW.valid_to, contract_effective_to(c));
+  END IF;
+  IF NEW.is_binding AND NEW.valid_from IS NOT NULL
+     AND (TG_OP = 'INSERT' OR NOT OLD.is_binding OR NEW.valid_from < OLD.valid_from
+          OR (NEW.valid_to IS NULL AND OLD.valid_to IS NOT NULL) OR NEW.valid_to > OLD.valid_to
+          OR NEW.oom_id <> OLD.oom_id) THEN
+    PERFORM contract_oom_succession(NEW, c);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: contract_oom; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contract_oom (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    contract_id uuid NOT NULL,
+    oom_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    grp text NOT NULL,
+    valid_from date,
+    op_valid_to date,
+    valid_to date,
+    successor_id uuid,
+    is_binding boolean DEFAULT false NOT NULL,
+    product_id uuid,
+    qty_vt_mwh numeric(12,3) DEFAULT 0 NOT NULL,
+    qty_nt_mwh numeric(12,3) DEFAULT 0 NOT NULL,
+    source_power_kw numeric(12,3),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT contract_oom_grp_check CHECK ((grp = ANY (ARRAY['dodavka'::text, 'vykup_viwa'::text]))),
+    CONSTRAINT contract_oom_period_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= (valid_from - 1)))),
+    CONSTRAINT contract_oom_qty_nt_mwh_check CHECK ((qty_nt_mwh >= (0)::numeric)),
+    CONSTRAINT contract_oom_qty_vt_mwh_check CHECK ((qty_vt_mwh >= (0)::numeric)),
+    CONSTRAINT contract_oom_source_power_kw_check CHECK ((source_power_kw >= (0)::numeric)),
+    CONSTRAINT contract_oom_trim_check CHECK (((successor_id IS NULL) OR (op_valid_to IS NULL) OR (valid_to >= op_valid_to)))
+);
+
+
+--
+-- Name: TABLE contract_oom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.contract_oom IS 'OOM v zmluve: zmluvné množstvo za rok (MWh), skutočná doba platnosti, nástupnícka zmluva';
+
+
+--
+-- Name: COLUMN contract_oom.valid_to; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract_oom.valid_to IS 'skutočný koniec OOM v zmluve: účinnosť + prolongácia, skrátený nástupcom; NULL = neurčito';
+
+
+--
+-- Name: COLUMN contract_oom.successor_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract_oom.successor_id IS 'zmluva, ktorá na tomto OOM nastúpila a skrátila túto';
+
+
+--
+-- Name: contract_oom_succession(public.contract_oom, public.contract); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_oom_succession(r public.contract_oom, p_new public.contract) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o     record;
+  v_eic text;
+BEGIN
+  UPDATE contract SET previous_contract_id = (
+           SELECT co.contract_id FROM contract_oom co
+            WHERE co.oom_id = r.oom_id AND co.grp = r.grp AND co.is_binding AND co.contract_id <> r.contract_id
+              AND co.valid_to = r.valid_from - 1
+            ORDER BY co.valid_to DESC LIMIT 1)
+   WHERE id = r.contract_id AND previous_contract_id IS NULL
+     AND EXISTS (SELECT 1 FROM contract_oom co
+                  WHERE co.oom_id = r.oom_id AND co.grp = r.grp AND co.is_binding AND co.contract_id <> r.contract_id
+                    AND co.valid_to = r.valid_from - 1);
+  FOR o IN
+    SELECT co.id, co.contract_id, co.valid_from, co.valid_to, co.op_valid_to, k.number, k.signed_on
+      FROM contract_oom co JOIN contract k ON k.id = co.contract_id
+     WHERE co.oom_id = r.oom_id AND co.grp = r.grp AND co.is_binding AND co.contract_id <> r.contract_id
+       AND co.valid_from IS NOT NULL AND (co.valid_to IS NULL OR co.valid_to >= co.valid_from)
+       AND daterange(co.valid_from, co.valid_to, '[]') && daterange(r.valid_from, r.valid_to, '[]')
+  LOOP
+    IF r.valid_from > o.valid_from
+       AND (o.op_valid_to IS NULL OR o.op_valid_to < r.valid_from)
+       AND (p_new.signed_on IS NULL OR o.signed_on IS NULL OR p_new.signed_on >= o.signed_on) THEN
+      UPDATE contract_oom SET valid_to = r.valid_from - 1, successor_id = r.contract_id WHERE id = o.id;
+      -- ceny starej zmluvy na tomto OOM po začiatku novej: celé obdobia preč, presahujúce skrátiť
+      DELETE FROM contract_price WHERE contract_id = o.contract_id AND oom_id = r.oom_id AND valid_from >= r.valid_from;
+      UPDATE contract_price SET valid_to = r.valid_from - 1
+       WHERE contract_id = o.contract_id AND oom_id = r.oom_id AND (valid_to IS NULL OR valid_to >= r.valid_from);
+      UPDATE contract SET previous_contract_id = o.contract_id WHERE id = r.contract_id AND previous_contract_id IS NULL;
+      PERFORM contract_crm_end_refresh(o.contract_id);
+      -- príznak „Sprolongované bez novej ceny“ sa uzavrie, keď má každé sprolongované OOM starej zmluvy nástupcu
+      UPDATE contract_flag SET resolved_at = now()
+       WHERE contract_id = o.contract_id AND code = 'sprolongovane_bez_ceny' AND resolved_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM contract_oom x WHERE x.contract_id = o.contract_id AND x.successor_id IS NULL
+                          AND x.op_valid_to IS NOT NULL AND (x.valid_to IS NULL OR x.valid_to > x.op_valid_to));
+    ELSE
+      SELECT eic INTO v_eic FROM oom WHERE id = r.oom_id;
+      RAISE EXCEPTION 'OOM % je v zmluve % do % – prekrytie.', v_eic, o.number,
+        coalesce(to_char(o.valid_to, 'FMDD. FMMM. YYYY'), 'neurčita')
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
+END;
+$$;
+
+
+--
+-- Name: contract_price_fill(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_price_fill() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  i  record;
+BEGIN
+  NEW.org_id := (SELECT org_id FROM contract WHERE id = NEW.contract_id);
+  IF NEW.oom_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM contract_oom WHERE contract_id = NEW.contract_id AND oom_id = NEW.oom_id) THEN
+    RAISE EXCEPTION 'OOM ceny nie je v zmluve.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.price_list_item_id IS NOT NULL THEN
+    SELECT it.*, v.status AS version_status INTO i
+      FROM price_list_item it JOIN price_list_version v ON v.id = it.version_id
+     WHERE it.id = NEW.price_list_item_id;
+    IF i.version_status <> 'schvalena' THEN
+      RAISE EXCEPTION 'Cenníková cena musí byť zo schválenej verzie cenníka.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF i.product_id <> NEW.product_id
+       OR i.price_vt_eur_mwh IS DISTINCT FROM NEW.price_vt_eur_mwh
+       OR i.price_nt_eur_mwh IS DISTINCT FROM NEW.price_nt_eur_mwh
+       OR coalesce(i.fee_oom_eur_month, i.fee_program_eur_month) IS DISTINCT FROM NEW.fee_eur_month
+       OR i.fee_kw_eur_month IS DISTINCT FROM NEW.fee_kw_eur_month
+       OR i.vat_rate IS DISTINCT FROM NEW.vat_rate THEN
+      RAISE EXCEPTION 'Cenníková cena sa nezhoduje s položkou cenníka.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: crm_today(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_today() RETURNS date
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT (now() AT TIME ZONE 'Europe/Bratislava')::date
+$$;
+
+
+--
+-- Name: contract_state(public.contract, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_state(c public.contract, p_today date DEFAULT public.crm_today()) RETURNS text
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT CASE c.phase
+           WHEN 'odmietnuta' THEN 'odmietnuta'
+           WHEN 'neuspesna'  THEN 'neuspesna'
+           WHEN 'ukoncena'   THEN 'skoncena'
+           WHEN 'podpisana'  THEN
+             CASE WHEN c.valid_from IS NULL OR c.valid_from > p_today THEN 'podpisana'
+                  WHEN contract_effective_to(c) IS NOT NULL AND p_today > contract_effective_to(c) THEN 'skoncena'
+                  ELSE 'ucinna' END
+           ELSE 'v_priprave'
+         END
+$$;
+
+
+--
+-- Name: FUNCTION contract_state(c public.contract, p_today date); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.contract_state(c public.contract, p_today date) IS 'v_priprave, podpisana, ucinna, skoncena, odmietnuta, neuspesna';
+
+
+--
+-- Name: contract_sync(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_sync() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  UPDATE contract_oom
+     SET valid_from = NEW.valid_from,
+         op_valid_to = NEW.valid_to,
+         valid_to = CASE WHEN successor_id IS NULL THEN contract_effective_to(NEW) ELSE valid_to END
+   WHERE contract_id = NEW.id;
+  IF NEW.phase IN ('odmietnuta', 'neuspesna') AND OLD.phase IS DISTINCT FROM NEW.phase THEN
+    INSERT INTO contract_flag (contract_id, code, detail)
+    SELECT DISTINCT co.contract_id, 'kontrola_importu'::contract_flag_code,
+           format('Nástupnícka zmluva %s je %s – skrátenie tejto zmluvy na OOM skontrolujte.', NEW.number,
+                  CASE NEW.phase WHEN 'odmietnuta' THEN 'odmietnutá' ELSE 'neúspešná' END)
+      FROM contract_oom co
+     WHERE co.successor_id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: crm_active_user_id(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1142,6 +1670,25 @@ CREATE FUNCTION public.crm_active_user_id() RETURNS uuid
   SELECT u.id FROM app_user u JOIN team t ON t.id = u.team_id
    WHERE u.id = crm_current_user_id() AND u.status = 'aktivny' AND t.archived_at IS NULL
 $$;
+
+
+--
+-- Name: crm_approves_prices(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_approves_prices() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM app_user u WHERE u.id = crm_active_user_id() AND u.approves_prices)
+$$;
+
+
+--
+-- Name: FUNCTION crm_approves_prices(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_approves_prices() IS 'prihlásený používateľ „schvaľuje ceny“ (CEO, obchodný riaditeľ)';
 
 
 --
@@ -1282,6 +1829,28 @@ $$;
 
 
 --
+-- Name: crm_can_see_margin(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_can_see_margin() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service()
+      OR crm_approves_prices()
+      OR EXISTS (SELECT 1 FROM app_user u JOIN team_permission p ON p.team_id = u.team_id
+                  WHERE u.id = crm_active_user_id() AND p.module = 'zmluvy' AND p.can_see_company_margin)
+$$;
+
+
+--
+-- Name: FUNCTION crm_can_see_margin(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_can_see_margin() IS 'vidí maržu firmy: tím s can_see_company_margin (modul zmluvy) alebo „schvaľuje ceny“';
+
+
+--
 -- Name: crm_company_access(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1328,6 +1897,34 @@ CREATE FUNCTION public.crm_contact_on_own_company(p_contact_id uuid) RETURNS boo
                   WHERE cc.contact_id = p_contact_id
                     AND c.owner_id = crm_active_user_id()
                     AND c.org_id = ANY (crm_user_orgs()))
+$$;
+
+
+--
+-- Name: crm_contract_editable(uuid, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_contract_editable(p_company_id uuid, p_person_id uuid, p_owner_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_scope('zmluvy', 'edit') = 'vsetko'
+      OR (crm_scope('zmluvy', 'edit') = 'iba_svoje'
+          AND (crm_customer_owned(p_company_id, p_person_id) OR p_owner_id = crm_active_user_id()))
+$$;
+
+
+--
+-- Name: crm_contract_visible(uuid, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_contract_visible(p_company_id uuid, p_person_id uuid, p_owner_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_sees_all_contracts()
+      OR (crm_scope('zmluvy', 'view') = 'iba_svoje'
+          AND (crm_customer_owned(p_company_id, p_person_id) OR p_owner_id = crm_active_user_id()))
 $$;
 
 
@@ -1512,6 +2109,25 @@ $$;
 
 
 --
+-- Name: crm_sees_all_contracts(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_sees_all_contracts() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_scope('zmluvy', 'view') = 'vsetko' OR crm_approves_prices()
+$$;
+
+
+--
+-- Name: FUNCTION crm_sees_all_contracts(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_sees_all_contracts() IS 'vidí všetky zmluvy a výnimky (tím „všetko“ v module zmluvy alebo „schvaľuje ceny“); použije RLS zmlúv v 0024';
+
+
+--
 -- Name: crm_session_ok(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1557,17 +2173,6 @@ CREATE FUNCTION public.crm_slug(p text) RETURNS text
   SELECT nullif(btrim(regexp_replace(lower(translate(p,
            'áäčďéěíĺľňóôöŕřšťúůüýžÁÄČĎÉĚÍĹĽŇÓÔÖŔŘŠŤÚŮÜÝŽ',
            'aacdeeillnooorrstuuuyzAACDEEILLNOOORRSTUUUYZ')), '[^a-z0-9]+', '_', 'g'), '_'), '')
-$$;
-
-
---
--- Name: crm_today(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.crm_today() RETURNS date
-    LANGUAGE sql STABLE
-    AS $$
-  SELECT (now() AT TIME ZONE 'Europe/Bratislava')::date
 $$;
 
 
@@ -1974,7 +2579,7 @@ BEGIN
     RETURN 'zakaznik';
   END IF;
 
-  -- 2. OOM Pripravované alebo podpísaná zmluva s budúcou účinnosťou (aj vracajúci sa zákazník)
+  -- 2. OOM Pripravované alebo podpísaná zmluva (fáza z Office portálu, 0025) s budúcou účinnosťou (aj vracajúci sa zákazník)
   IF EXISTS (SELECT 1 FROM oom_customer l
               WHERE l.company_id IS NOT DISTINCT FROM p_company_id
                 AND l.person_id IS NOT DISTINCT FROM p_person_id
@@ -1982,7 +2587,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM contract c
                  WHERE c.company_id IS NOT DISTINCT FROM p_company_id
                    AND c.person_id IS NOT DISTINCT FROM p_person_id
-                   AND c.status IN ('podpisana', 'caka_na_zaradenie', 'aktivna')
+                   AND c.phase = 'podpisana'
                    AND c.valid_from > p_today) THEN
     RETURN 'cakajuci_zakaznik';
   END IF;
@@ -2107,6 +2712,141 @@ COMMENT ON FUNCTION public.eic_is_valid(p text) IS 'formát a kontrolná čísli
 
 
 --
+-- Name: import_alias_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.import_alias_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_owner boolean := crm_owner_session();
+  v_ok    boolean;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.is_system AND NOT v_owner THEN
+      RAISE EXCEPTION 'Systémový preklad sa nemaže, iba skryje.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF NOT v_owner THEN
+    IF TG_OP = 'INSERT' AND NEW.is_system THEN
+      RAISE EXCEPTION 'Systémový preklad zakladá iba migrácia alebo skript.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF TG_OP = 'UPDATE' AND (NEW.is_system <> OLD.is_system
+         OR (OLD.is_system AND (NEW.target <> OLD.target OR NEW.target_extra <> OLD.target_extra
+                                OR NEW.name_sample <> OLD.name_sample OR NEW.kind <> OLD.kind OR NEW.source <> OLD.source))) THEN
+      RAISE EXCEPTION 'Systémový preklad sa nemení, iba skryje.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.org_id <> OLD.org_id THEN
+    RAISE EXCEPTION 'Spoločnosť prekladu sa nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+  v_ok := CASE NEW.kind
+    WHEN 'produkt_op' THEN NEW.target IN ('cennik', 'fix', 'spot_plus_eur', 'spot_minus_eur', 'spot_minus_pct')
+    WHEN 'produkt_oom' THEN EXISTS (SELECT 1 FROM product p WHERE p.code = NEW.target AND p.org_id = NEW.org_id)
+    WHEN 'sadzba' THEN EXISTS (SELECT 1 FROM lookup_value v
+                                WHERE v.list_code = 'sadzba_distribucie' AND v.hidden_at IS NULL
+                                  AND v.code = v.parent_code || '_' || NEW.target)
+    WHEN 'pds' THEN EXISTS (SELECT 1 FROM lookup_value v
+                             WHERE v.list_code = 'pds' AND v.code = NEW.target AND v.hidden_at IS NULL)
+    WHEN 'obchodnik' THEN EXISTS (SELECT 1 FROM app_user u
+                                   WHERE u.id::text = NEW.target AND u.status <> 'deaktivovany')
+    WHEN 'iny' THEN true
+    WHEN 'faza' THEN NEW.target IN (SELECT unnest(enum_range(NULL::contract_phase))::text)
+    ELSE EXISTS (SELECT 1 FROM lookup_value v
+                  WHERE v.list_code = NEW.kind AND v.code = NEW.target AND v.hidden_at IS NULL)
+  END;
+  IF NOT v_ok THEN
+    RAISE EXCEPTION 'Preklad „%“: cieľová hodnota „%“ v CRM neexistuje.', NEW.name_sample, NEW.target
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' AND NOT v_owner THEN
+    NEW.created_by := crm_active_user_id();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: import_name_norm(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.import_name_norm(p text) RETURNS text
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $_$
+  SELECT regexp_replace(
+           btrim(regexp_replace(
+             translate(lower(p), 'áäčďéěíĺľňóôöŕřšťúůüýž', 'aacdeeillnooorrstuuuyz'),
+             '\s+', ' ', 'g')),
+           '(^|[^0-9])(19|20)[0-9]{2}(?=[^0-9]|$)', '\1rrrr', 'g')
+$_$;
+
+
+--
+-- Name: FUNCTION import_name_norm(p text); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.import_name_norm(p text) IS 'normalizácia názvu z importu: „VBattery  - V“ = „vbattery - v“, GREEN_1T_INDIVIDUAL_2027 = green_1t_individual_rrrr';
+
+
+--
+-- Name: import_alias; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.import_alias (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    source text NOT NULL,
+    kind text NOT NULL,
+    name_sample text NOT NULL,
+    name_norm text GENERATED ALWAYS AS (public.import_name_norm(name_sample)) STORED,
+    target text NOT NULL,
+    target_extra jsonb DEFAULT '{}'::jsonb NOT NULL,
+    is_system boolean DEFAULT false NOT NULL,
+    hidden_at timestamp with time zone,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT import_alias_kind_check CHECK ((kind = ANY (ARRAY['produkt_op'::text, 'produkt_oom'::text, 'sadzba'::text, 'pds'::text, 'obchodnik'::text, 'typ_merania'::text, 'fakturacne_obdobie'::text, 'sposob_zaloh'::text, 'iny'::text, 'faza'::text]))),
+    CONSTRAINT import_alias_name_sample_check CHECK ((btrim(name_sample) <> ''::text)),
+    CONSTRAINT import_alias_source_check CHECK ((source = ANY (ARRAY['office_portal'::text, 'xm_trade'::text, 'vsetky'::text]))),
+    CONSTRAINT import_alias_target_check CHECK ((btrim(target) <> ''::text)),
+    CONSTRAINT import_alias_target_extra_check CHECK ((jsonb_typeof(target_extra) = 'object'::text))
+);
+
+
+--
+-- Name: TABLE import_alias; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.import_alias IS 'preklad názvu z importu (Office portal, XM Trade) na hodnotu CRM; spravuje admin (rozhodnutie 2026-10-13)';
+
+
+--
+-- Name: COLUMN import_alias.target; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.import_alias.target IS 'produkt_op: cenový model; produkt_oom: kód produktu; sadzba: kód sadzby bez PDS (d1); pds a číselníky: kód hodnoty; obchodnik: id používateľa';
+
+
+--
+-- Name: import_alias_resolve(uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.import_alias_resolve(p_org uuid, p_source text, p_kind text, p_name text) RETURNS public.import_alias
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT a.* FROM import_alias a
+   WHERE a.org_id = p_org AND a.kind = p_kind AND a.source IN (p_source, 'vsetky')
+     AND a.name_norm = import_name_norm(p_name) AND a.hidden_at IS NULL
+   ORDER BY (a.source = p_source) DESC
+   LIMIT 1
+$$;
+
+
+--
 -- Name: inherit_customer_segment(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2206,6 +2946,53 @@ BEGIN
     UPDATE contact SET is_household = true WHERE id = NEW.person_id AND NOT is_household;
   END IF;
   RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: market_price_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
+     AND current_setting('crm.market_price_correction', true) = 'on' THEN
+    RETURN NEW;                                   -- označenie opravy z tejto funkcie (nižšie)
+  END IF;
+  IF crm_owner_session() THEN
+    IF TG_OP = 'INSERT' THEN
+      PERFORM set_config('crm.market_price_correction', 'on', true);
+      UPDATE market_price_daily SET corrected_at = now(), corrected_by = NULL
+       WHERE org_id = NEW.org_id AND on_date = NEW.on_date AND delivery_year = NEW.delivery_year AND corrected_at IS NULL;
+      PERFORM set_config('crm.market_price_correction', '', true);
+    END IF;
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Trhové ceny sa nemažú – chybný záznam oprav novým.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'Trhová cena sa nemení – chybný záznam oprav novým (tlačidlo Opraviť).' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.on_date < crm_today() THEN
+    RAISE EXCEPTION 'Ceny sa zadávajú iba pre dnešný deň alebo neskôr.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT (crm_is_admin() OR crm_approves_prices()) THEN
+    RAISE EXCEPTION 'Trhové ceny zadáva admin alebo obchodný riaditeľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  NEW.source := 'rucne';
+  NEW.changed_by := crm_active_user_id();
+  NEW.corrected_at := NULL;
+  NEW.corrected_by := NULL;
+  PERFORM set_config('crm.market_price_correction', 'on', true);
+  UPDATE market_price_daily SET corrected_at = now(), corrected_by = NEW.changed_by
+   WHERE org_id = NEW.org_id AND on_date = NEW.on_date AND delivery_year = NEW.delivery_year AND corrected_at IS NULL;
+  PERFORM set_config('crm.market_price_correction', '', true);
+  RETURN NEW;
 END;
 $$;
 
@@ -2340,6 +3127,8 @@ CREATE TABLE public.oom (
     switch_notice_sent_on date,
     switch_notice_accepted_on date,
     switch_confirmed_on date,
+    planned_feed_in_manual boolean DEFAULT false NOT NULL,
+    public_lighting boolean DEFAULT false NOT NULL,
     CONSTRAINT oom_advance_payment_eur_check CHECK ((advance_payment_eur >= (0)::numeric)),
     CONSTRAINT oom_advance_pct_check CHECK (((advance_payment_pct >= (0)::numeric) AND (advance_payment_pct <= (100)::numeric))),
     CONSTRAINT oom_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
@@ -2481,6 +3270,20 @@ COMMENT ON COLUMN public.oom.switch_notice_accepted_on IS 'prechod, krok 2: výp
 --
 
 COMMENT ON COLUMN public.oom.switch_confirmed_on IS 'prechod, krok 3: zmena dodávateľa potvrdená; krok 4 = supply_from';
+
+
+--
+-- Name: COLUMN oom.planned_feed_in_manual; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.planned_feed_in_manual IS 'plán výkupu lokálneho zdroja zadaný ručne (vzorec výkon × 4 × 365 × 0,1 / 1000 sa nepoužije)';
+
+
+--
+-- Name: COLUMN oom.public_lighting; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.public_lighting IS 'verejné osvetlenie (prolongácia navrhne Green 1T VO); nastaví import zmlúv pri DMP10 / 1T VO';
 
 
 --
@@ -2747,14 +3550,19 @@ DECLARE
   v_id     uuid;
   v_done   integer := 0;
   v_failed integer := 0;
+  v_reg    integer := 0;
 BEGIN
   FOR v_id IN SELECT id FROM oom_planned_change
                WHERE status = 'planovana' AND oom_plan_due_on(kind, effective_date) <= p_today
                ORDER BY effective_date, created_at LOOP
     IF oom_plan_execute(v_id) THEN v_done := v_done + 1; ELSE v_failed := v_failed + 1; END IF;
   END LOOP;
+  FOR v_id IN SELECT DISTINCT oom_id FROM oom_price_regulation_change
+               WHERE applied_at IS NULL AND valid_from <= p_today LOOP
+    IF oom_price_regulation_apply(v_id, p_today) THEN v_reg := v_reg + 1; END IF;
+  END LOOP;
   RETURN jsonb_build_object('plany_vykonane', v_done, 'plany_zlyhali', v_failed,
-                            'aktivovane', oom_activate_due_at(p_today));
+                            'aktivovane', oom_activate_due_at(p_today), 'regulacia', v_reg);
 END;
 $$;
 
@@ -2833,6 +3641,57 @@ CREATE FUNCTION public.oom_eic_normalize() RETURNS trigger
     AS $$
 BEGIN
   NEW.eic := upper(regexp_replace(NEW.eic, '\s', '', 'g'));
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_feed_in_formula(numeric); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_feed_in_formula(p_power_kw numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $$
+  SELECT round(p_power_kw * 4 * 365 * 0.1 / 1000, 3)
+$$;
+
+
+--
+-- Name: FUNCTION oom_feed_in_formula(p_power_kw numeric); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.oom_feed_in_formula(p_power_kw numeric) IS 'plán výkupu lokálneho zdroja [MWh] = výkon [kW] × 4 h × 365 × 0,1 / 1000 (zadanie modulu 4, časť 9)';
+
+
+--
+-- Name: oom_feed_in_plan(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_feed_in_plan() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_formula numeric;
+BEGIN
+  IF NEW.source_category IS DISTINCT FROM 'lokalny_zdroj' THEN
+    RETURN NEW;
+  END IF;
+  v_formula := oom_feed_in_formula(NEW.source_power_kw);
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.planned_feed_in_mwh IS NOT NULL AND NEW.planned_feed_in_mwh IS DISTINCT FROM v_formula THEN
+      NEW.planned_feed_in_manual := true;
+    END IF;
+  ELSIF NEW.planned_feed_in_mwh IS DISTINCT FROM OLD.planned_feed_in_mwh THEN
+    IF NEW.planned_feed_in_mwh IS NULL THEN
+      NEW.planned_feed_in_manual := false;
+    ELSIF NEW.planned_feed_in_mwh IS DISTINCT FROM v_formula THEN
+      NEW.planned_feed_in_manual := true;
+    END IF;
+  END IF;
+  IF NOT NEW.planned_feed_in_manual THEN
+    NEW.planned_feed_in_mwh := v_formula;
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -3518,6 +4377,89 @@ $$;
 
 
 --
+-- Name: oom_price_regulation_apply(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_price_regulation_apply(p_oom_id uuid, p_today date) RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_value boolean;
+  v_found boolean;
+BEGIN
+  SELECT value, true INTO v_value, v_found
+    FROM oom_price_regulation_change
+   WHERE oom_id = p_oom_id AND valid_from <= p_today
+   ORDER BY valid_from DESC
+   LIMIT 1;
+  IF NOT coalesce(v_found, false) THEN
+    RETURN false;
+  END IF;
+  UPDATE oom SET price_regulation = v_value WHERE id = p_oom_id AND price_regulation IS DISTINCT FROM v_value;
+  UPDATE oom_price_regulation_change SET applied_at = now()
+   WHERE oom_id = p_oom_id AND valid_from <= p_today AND applied_at IS NULL;
+  RETURN true;
+END;
+$$;
+
+
+--
+-- Name: oom_price_regulation_cancel(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_price_regulation_cancel(p_change_id uuid) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_oom uuid;
+BEGIN
+  SELECT oom_id INTO v_oom FROM oom_price_regulation_change
+   WHERE id = p_change_id AND applied_at IS NULL AND valid_from > crm_today();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Naplánovaná zmena neexistuje alebo už platí.' USING ERRCODE = 'P0002';
+  END IF;
+  UPDATE oom SET price_regulation = price_regulation WHERE id = v_oom;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Odberné miesto neexistuje alebo k nemu nemáte prístup.' USING ERRCODE = 'P0002';
+  END IF;
+  DELETE FROM oom_price_regulation_change WHERE id = p_change_id;
+END;
+$$;
+
+
+--
+-- Name: oom_price_regulation_set(uuid, boolean, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_price_regulation_set(p_oom_id uuid, p_value boolean, p_valid_from date) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF p_valid_from IS NULL THEN
+    RAISE EXCEPTION 'Zadaj dátum „platí od“.' USING ERRCODE = 'check_violation';
+  END IF;
+  -- prístup k OOM a právo ho upraviť (RLS a spúšťač Aktívneho OOM) overí zápis bez zmeny hodnoty
+  UPDATE oom SET price_regulation = price_regulation WHERE id = p_oom_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Odberné miesto neexistuje alebo k nemu nemáte prístup.' USING ERRCODE = 'P0002';
+  END IF;
+  INSERT INTO oom_price_regulation_change (oom_id, valid_from, value, applied_at, created_by)
+  VALUES (p_oom_id, p_valid_from, p_value, NULL, crm_active_user_id())
+  ON CONFLICT (oom_id, valid_from) DO UPDATE
+     SET value = EXCLUDED.value, applied_at = NULL, created_by = EXCLUDED.created_by;
+  PERFORM oom_price_regulation_apply(p_oom_id, crm_today());
+END;
+$$;
+
+
+--
+-- Name: FUNCTION oom_price_regulation_set(p_oom_id uuid, p_value boolean, p_valid_from date); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.oom_price_regulation_set(p_oom_id uuid, p_value boolean, p_valid_from date) IS 'zmena cenovej regulácie OOM s dátumom (minulý, dnešný, budúci); budúcu uplatní nočný beh';
+
+
+--
 -- Name: oom_reconnect(uuid, uuid, uuid, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3698,6 +4640,68 @@ CREATE FUNCTION public.pipeline_no_delete() RETURNS trigger
     AS $$
 BEGIN
   RAISE EXCEPTION 'Pipeline ani stage sa nemažú, iba archivujú.' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+--
+-- Name: price_exception_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_exception_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$  -- práva volajúceho: current_user = skutočná rola (import a nočný beh = vlastník)
+DECLARE
+  v_system boolean := crm_owner_session()
+    OR current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'price_exception'::regclass);
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.org_id := coalesce((SELECT org_id FROM company WHERE id = NEW.company_id), (SELECT org_id FROM contact WHERE id = NEW.person_id));
+    IF NOT v_system THEN
+      NEW.requested_by := crm_active_user_id();
+      IF NEW.status <> 'caka' THEN
+        RAISE EXCEPTION 'Nová žiadosť o výnimku čaká na schválenie.' USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    IF NOT v_system AND NOT (OLD.status = 'caka' AND OLD.requested_by = crm_active_user_id()) THEN
+      RAISE EXCEPTION 'Zmazať možno iba vlastnú žiadosť, ktorá ešte čaká.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF v_system THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.status = 'pouzita' OR OLD.status = 'pouzita' THEN
+    RAISE EXCEPTION 'Výnimku použije iba import zmluvy.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.status <> 'caka' THEN
+    RAISE EXCEPTION 'O výnimke už bolo rozhodnuté – podajte novú žiadosť.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.status = 'caka' THEN
+    IF OLD.requested_by IS DISTINCT FROM crm_active_user_id() THEN
+      RAISE EXCEPTION 'Žiadosť môže upraviť iba jej autor.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+  END IF;
+  -- rozhodnutie
+  IF NOT crm_approves_prices() THEN
+    RAISE EXCEPTION 'O výnimke rozhoduje CEO alebo obchodný riaditeľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.requested_by = crm_active_user_id() THEN
+    RAISE EXCEPTION 'Vlastnú žiadosť o výnimku nemôžete schváliť ani zamietnuť.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF (to_jsonb(NEW) - ARRAY['status', 'decision_note', 'decided_by', 'decided_at', 'valid_until', 'updated_at'])
+     <> (to_jsonb(OLD) - ARRAY['status', 'decision_note', 'decided_by', 'decided_at', 'valid_until', 'updated_at']) THEN
+    RAISE EXCEPTION 'Pri rozhodnutí sa žiadosť nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+  NEW.decided_by := crm_active_user_id();
+  NEW.decided_at := now();
+  NEW.valid_until := CASE WHEN NEW.status = 'schvalena' THEN crm_today() + 30 END;
+  RETURN NEW;
 END;
 $$;
 
@@ -4141,6 +5145,64 @@ $$;
 
 
 --
+-- Name: price_param(uuid, text, date, smallint); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_param(p_org uuid, p_code text, p_on date, p_year smallint DEFAULT NULL::smallint) RETURNS numeric
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT value FROM price_parameter
+   WHERE org_id = p_org AND code = p_code AND delivery_year IS NOT DISTINCT FROM p_year AND valid_from <= p_on
+   ORDER BY valid_from DESC
+   LIMIT 1
+$$;
+
+
+--
+-- Name: price_parameter_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.price_parameter_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_owner boolean := crm_owner_session();
+BEGIN
+  IF v_owner THEN
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  IF TG_OP IN ('UPDATE', 'DELETE') THEN
+    IF OLD.valid_from <= crm_today() THEN
+      RAISE EXCEPTION 'Platný parameter sa nemení ani nemaže – zadaj novú hodnotu s dátumom „platí od“.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.changed_by IS DISTINCT FROM crm_active_user_id() THEN
+      RAISE EXCEPTION 'Naplánovanú zmenu môže opraviť alebo zrušiť iba jej autor.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    IF NEW.code <> OLD.code OR NEW.org_id <> OLD.org_id OR NEW.delivery_year IS DISTINCT FROM OLD.delivery_year THEN
+      RAISE EXCEPTION 'Parameter, spoločnosť a rok sa nemenia.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF NEW.valid_from < crm_today() THEN
+    RAISE EXCEPTION 'Platí od musí byť dnes alebo neskôr.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT (crm_is_admin() OR (crm_approves_prices()
+                             AND NEW.code NOT IN ('min_aditiv_vykup_lz', 'nakup_energopomoc'))) THEN
+    RAISE EXCEPTION 'Tento cenový parameter smie meniť iba admin%.',
+      CASE WHEN NEW.code IN ('min_aditiv_vykup_lz', 'nakup_energopomoc') THEN '' ELSE ' alebo obchodný riaditeľ' END
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  NEW.changed_by := crm_active_user_id();
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: price_with_vat(numeric, numeric, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -4212,12 +5274,13 @@ BEGIN
   IF NEW.code <> OLD.code OR NEW.org_id <> OLD.org_id THEN
     RAISE EXCEPTION 'Kód a spoločnosť produktu sa nemenia.' USING ERRCODE = 'check_violation';
   END IF;
-  -- použitý produkt (je v položke cenníka): kategória, segment, typ tarifu, cenová regulácia a model „cenník“ sa nemenia
+  -- použitý produkt (je v položke cenníka): kategória, segment, typ a variant tarifu, cenová regulácia a model „cenník“ sa nemenia
   IF (NEW.category <> OLD.category OR NEW.segment <> OLD.segment OR NEW.tariff_type <> OLD.tariff_type
+      OR NEW.tariff_variant IS DISTINCT FROM OLD.tariff_variant
       OR NEW.price_regulation IS DISTINCT FROM OLD.price_regulation
       OR ('cennik' = ANY (OLD.price_models) AND NOT 'cennik' = ANY (NEW.price_models)))
      AND EXISTS (SELECT 1 FROM price_list_item WHERE product_id = OLD.id) THEN
-    RAISE EXCEPTION 'Produkt „%“ je v cenníku: kategória, segment, typ tarifu, cenová regulácia ani model cenník sa nemenia.', OLD.name
+    RAISE EXCEPTION 'Produkt „%“ je v cenníku: kategória, segment, typ ani variant tarifu, cenová regulácia ani model cenník sa nemenia.', OLD.name
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -4348,15 +5411,17 @@ CREATE FUNCTION public.team_external_guard() RETURNS trigger
     AS $$
 BEGIN
   IF TG_TABLE_NAME = 'team_permission' THEN
-    IF (NEW.view_scope = 'vsetko' OR NEW.edit_scope = 'vsetko')
+    IF (NEW.view_scope = 'vsetko' OR NEW.edit_scope = 'vsetko' OR NEW.can_see_company_margin)
        AND EXISTS (SELECT 1 FROM team t WHERE t.id = NEW.team_id AND t.is_external) THEN
-      RAISE EXCEPTION 'Externý tím nemôže vidieť ani upravovať „všetko“ (modul %).', NEW.module
+      RAISE EXCEPTION 'Externý tím nemôže vidieť ani upravovať „všetko“ ani vidieť maržu firmy (modul %).', NEW.module
         USING ERRCODE = 'check_violation';
     END IF;
-  ELSIF NEW.is_external AND EXISTS (SELECT 1 FROM team_permission p
-                                     WHERE p.team_id = NEW.id
-                                       AND (p.view_scope = 'vsetko' OR p.edit_scope = 'vsetko')) THEN
-    RAISE EXCEPTION 'Tím s právom „všetko“ nemôže byť externý.' USING ERRCODE = 'check_violation';
+  ELSIF NEW.is_external AND (EXISTS (SELECT 1 FROM team_permission p
+                                      WHERE p.team_id = NEW.id
+                                        AND (p.view_scope = 'vsetko' OR p.edit_scope = 'vsetko' OR p.can_see_company_margin))
+                             OR EXISTS (SELECT 1 FROM app_user u WHERE u.team_id = NEW.id AND u.approves_prices)) THEN
+    RAISE EXCEPTION 'Tím s právom „všetko“, maržou firmy alebo členom, ktorý schvaľuje ceny, nemôže byť externý.'
+      USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;
@@ -4376,6 +5441,44 @@ BEGIN
   RETURN NULL;
 END;
 $$;
+
+
+--
+-- Name: trader_price(uuid, smallint, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trader_price(p_org uuid, p_year smallint, p_on date) RETURNS numeric
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_bl numeric; v_pl numeric; v_ratio numeric; v_risk numeric; v_margin numeric;
+BEGIN
+  IF NOT crm_session_ok() OR NOT p_org = ANY (crm_user_orgs()) THEN
+    RETURN NULL;
+  END IF;
+  SELECT bl_eur_mwh, pl_eur_mwh INTO v_bl, v_pl
+    FROM market_price_daily
+   WHERE org_id = p_org AND delivery_year = p_year AND bl_eur_mwh IS NOT NULL AND corrected_at IS NULL
+     AND on_date BETWEEN p_on - 7 AND p_on
+   ORDER BY on_date DESC
+   LIMIT 1;
+  v_ratio  := price_param(p_org, 'pomer_bl_pct', p_on);
+  v_risk   := price_param(p_org, 'rizikova_prirazka', p_on);
+  v_margin := price_param(p_org, 'nasa_marza', p_on);
+  IF v_bl IS NULL OR v_ratio IS NULL OR v_risk IS NULL OR v_margin IS NULL THEN
+    RETURN NULL;
+  END IF;
+  RETURN round((v_bl * v_ratio + v_pl * (100 - v_ratio)) / 100 + v_risk + v_margin, 4);
+END;
+$$;
+
+
+--
+-- Name: FUNCTION trader_price(p_org uuid, p_year smallint, p_on date); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.trader_price(p_org uuid, p_year smallint, p_on date) IS 'cena pre obchodníka = (BL × pomer + PL × (100 − pomer)) / 100 + riziková prirážka + naša marža k dátumu';
 
 
 --
@@ -4450,6 +5553,8 @@ CREATE TABLE public.app_user (
     invited_at timestamp with time zone DEFAULT now() NOT NULL,
     last_login_at timestamp with time zone,
     deactivated_at timestamp with time zone,
+    seller_type public.seller_type,
+    approves_prices boolean DEFAULT false NOT NULL,
     CONSTRAINT app_user_deactivated_check CHECK (((status = 'deaktivovany'::public.user_status) = (deactivated_at IS NOT NULL))),
     CONSTRAINT app_user_email_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
     CONSTRAINT app_user_name_check CHECK ((btrim(name) <> ''::text))
@@ -4475,6 +5580,20 @@ COMMENT ON COLUMN public.app_user.is_admin IS 'smie meniť Nastavenia; prihláse
 --
 
 COMMENT ON COLUMN public.app_user.last_login_at IS 'posledné prihlásenie; nezapisuje sa do auditu';
+
+
+--
+-- Name: COLUMN app_user.seller_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.seller_type IS 'typ predajcu: obchodník / manažér (minimálny aditív a cena pre obchodníka); NULL = nepredáva';
+
+
+--
+-- Name: COLUMN app_user.approves_prices; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.approves_prices IS '„schvaľuje ceny“ (CEO, obchodný riaditeľ): výnimky z ceny, cenové parametre; nezávisle od tímu vidí všetky zmluvy a maržu firmy';
 
 
 --
@@ -4934,69 +6053,28 @@ COMMENT ON VIEW public.contact_v IS 'zoznam Kontakty: archived = skryť z Kontak
 
 
 --
--- Name: contract; Type: TABLE; Schema: public; Owner: -
+-- Name: contract_flag; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.contract (
+CREATE TABLE public.contract_flag (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    deal_id uuid,
-    company_id uuid,
-    person_id uuid,
-    number text,
-    segment public.customer_segment,
-    status public.contract_status DEFAULT 'rozpracovana'::public.contract_status NOT NULL,
-    confirmed boolean DEFAULT false NOT NULL,
-    auto_prolong boolean DEFAULT false NOT NULL,
-    valid_from date,
-    valid_to date,
-    signed_at timestamp with time zone,
-    payment_terms_days integer,
-    consumption_tolerance numeric(5,2),
-    advance_payment_pct numeric(5,2),
-    hubspot_deal_id text,
+    contract_id uuid NOT NULL,
+    code public.contract_flag_code NOT NULL,
+    year smallint,
+    detail text,
+    raised_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    resolved_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
-    org_id uuid NOT NULL,
-    CONSTRAINT contract_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
-    CONSTRAINT contract_payment_terms_days_check CHECK ((payment_terms_days >= 0)),
-    CONSTRAINT contract_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from)))
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
 --
--- Name: COLUMN contract.segment; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE contract_flag; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.contract.segment IS 'preberá sa od zákazníka pri vzniku, ak nie je zadaný';
-
-
---
--- Name: COLUMN contract.valid_to; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.contract.valid_to IS 'NULL = na neurčito';
-
-
---
--- Name: COLUMN contract.consumption_tolerance; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.contract.consumption_tolerance IS 'tolerancia odberu v %';
-
-
---
--- Name: COLUMN contract.custom; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.contract.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
-
-
---
--- Name: COLUMN contract.org_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.contract.org_id IS 'preberá sa od zákazníka';
+COMMENT ON TABLE public.contract_flag IS 'príznaky zmluvy na kontrolu (pod hranicou, chýba cena, sprolongované bez ceny, končí, import)';
 
 
 --
@@ -5006,41 +6084,65 @@ COMMENT ON COLUMN public.contract.org_id IS 'preberá sa od zákazníka';
 CREATE TABLE public.contract_price (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     contract_id uuid NOT NULL,
-    oom_id uuid NOT NULL,
-    product_id uuid,
-    direction public.price_direction NOT NULL,
+    oom_id uuid,
+    org_id uuid NOT NULL,
+    slot text NOT NULL,
+    product_id uuid NOT NULL,
+    price_model public.price_model NOT NULL,
+    price_list_item_id uuid,
+    valid_from date NOT NULL,
+    valid_to date,
     price_vt_eur_mwh numeric(12,4),
     price_nt_eur_mwh numeric(12,4),
     additive_eur_mwh numeric(12,4),
-    imbalance_price_eur_mwh numeric(12,4),
-    additive_coefficient_pct numeric(7,4),
-    fee_oom_eur_month numeric(12,2),
-    fee_zem_eur_month numeric(12,2),
-    fee_vbattery_eur_month numeric(12,2),
-    fee_rk_eur_kw_month numeric(12,4),
-    vbattery_program text,
-    valid_from date,
-    valid_to date,
-    status public.contract_price_status DEFAULT 'platna'::public.contract_price_status NOT NULL,
-    hubspot_id text,
+    additive_pct numeric(7,4),
+    fee_eur_month numeric(12,4),
+    fee_kw_eur_month numeric(12,4),
+    vat_rate numeric(5,2),
+    op_product_name text,
+    source text DEFAULT 'import'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT contract_price_validity_check CHECK (((valid_to IS NULL) OR (valid_from IS NULL) OR (valid_to >= valid_from)))
+    CONSTRAINT contract_price_fee_eur_month_check CHECK ((fee_eur_month >= (0)::numeric)),
+    CONSTRAINT contract_price_fee_kw_eur_month_check CHECK ((fee_kw_eur_month >= (0)::numeric)),
+    CONSTRAINT contract_price_list_check CHECK (((price_model = 'cennik'::public.price_model) = (price_list_item_id IS NOT NULL))),
+    CONSTRAINT contract_price_model_check CHECK (
+CASE price_model
+    WHEN 'fix'::public.price_model THEN (price_vt_eur_mwh IS NOT NULL)
+    WHEN 'spot_plus_eur'::public.price_model THEN (additive_eur_mwh IS NOT NULL)
+    WHEN 'spot_minus_eur'::public.price_model THEN (additive_eur_mwh IS NOT NULL)
+    WHEN 'spot_minus_pct'::public.price_model THEN (additive_pct IS NOT NULL)
+    WHEN 'cena_diela'::public.price_model THEN false
+    ELSE true
+END),
+    CONSTRAINT contract_price_oom_check CHECK (((oom_id IS NULL) = (slot = 'viwa_ucet'::text))),
+    CONSTRAINT contract_price_period_check CHECK (((valid_to IS NULL) OR (valid_to >= valid_from))),
+    CONSTRAINT contract_price_price_nt_eur_mwh_check CHECK ((price_nt_eur_mwh >= (0)::numeric)),
+    CONSTRAINT contract_price_price_vt_eur_mwh_check CHECK ((price_vt_eur_mwh >= (0)::numeric)),
+    CONSTRAINT contract_price_slot_check CHECK ((slot = ANY (ARRAY['komodita'::text, 'poplatok_om'::text, 'zem'::text, 'program'::text, 'viwa_ucet'::text, 'viwa_kw'::text]))),
+    CONSTRAINT contract_price_source_check CHECK ((source = ANY (ARRAY['import'::text, 'prolongacia'::text, 'cennik_prechod'::text, 'regulacia'::text, 'crm'::text])))
 );
 
 
 --
--- Name: COLUMN contract_price.fee_rk_eur_kw_month; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE contract_price; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.contract_price.fee_rk_eur_kw_month IS 'Green VIWA poplatok za rezervovanú kapacitu, €/kW/mesiac (HubSpot green_viwa_poplatok_za_rk__pomocny_)';
+COMMENT ON TABLE public.contract_price IS 'cena zmluvy: zložka (slot) × produkt × OOM (VIWA účet bez OOM) × obdobie; cenníková cena je kópia položky schválenej verzie';
 
 
 --
 -- Name: COLUMN contract_price.valid_to; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.contract_price.valid_to IS 'NULL = na neurčito (HubSpot 31. 12. 2099)';
+COMMENT ON COLUMN public.contract_price.valid_to IS 'NULL = bez konca (napr. výkup na neurčito)';
+
+
+--
+-- Name: COLUMN contract_price.fee_eur_month; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contract_price.fee_eur_month IS 'mesačná platba (za OM, ZEM, program, VIWA účet) bez DPH';
 
 
 --
@@ -5088,6 +6190,73 @@ COMMENT ON COLUMN public.contract_purchase.cockpit_ref IS 'odkaz na nákupnú tr
 --
 
 COMMENT ON COLUMN public.contract_purchase.hubspot_id IS 'záznam Nákupné ceny 2-22997964; jeden záznam patrí viacerým zmluvám';
+
+
+--
+-- Name: contract_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.contract_v WITH (security_invoker='true') AS
+ SELECT k.id,
+    k.deal_id,
+    k.company_id,
+    k.person_id,
+    k.number,
+    k.segment,
+    k.auto_prolong,
+    k.valid_from,
+    k.valid_to,
+    k.payment_terms_days,
+    k.consumption_tolerance,
+    k.advance_payment_pct,
+    k.hubspot_deal_id,
+    k.created_at,
+    k.updated_at,
+    k.custom,
+    k.org_id,
+    k.op_id,
+    k.type,
+    k.phase,
+    k.signed_on,
+    k.crm_valid_to,
+    k.small_business,
+    k.list_price,
+    k.viwa_package,
+    k.close_reason,
+    k.owner_id,
+    k.created_by_name,
+    k.previous_contract_id,
+    k.related_contract_id,
+    k.note,
+    k.op_updated_at,
+    public.contract_state(k.*) AS state,
+    public.contract_effective_to(k.*) AS effective_to,
+        CASE
+            WHEN (k.company_id IS NOT NULL) THEN 'company'::text
+            ELSE 'person'::text
+        END AS customer_kind,
+    COALESCE(c.name, NULLIF(concat_ws(' '::text, p.first_name, p.last_name), ''::text)) AS customer_name,
+    u.name AS owner_name,
+    ( SELECT (count(*))::integer AS count
+           FROM public.contract_oom co
+          WHERE (co.contract_id = k.id)) AS oom_count,
+    ( SELECT sum((co.qty_vt_mwh + co.qty_nt_mwh)) AS sum
+           FROM public.contract_oom co
+          WHERE (co.contract_id = k.id)) AS qty_mwh,
+    COALESCE(( SELECT array_agg(DISTINCT (f.code)::text) AS array_agg
+           FROM public.contract_flag f
+          WHERE ((f.contract_id = k.id) AND (f.resolved_at IS NULL))), '{}'::text[]) AS flags
+   FROM (((public.contract k
+     LEFT JOIN public.company c ON ((c.id = k.company_id)))
+     LEFT JOIN public.contact p ON ((p.id = k.person_id)))
+     LEFT JOIN public.app_user u ON ((u.id = k.owner_id)));
+
+
+--
+-- Name: VIEW contract_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.contract_v IS 'zmluva so stavom, skutočným koncom, zákazníkom, obchodníkom, počtom OOM, ročným množstvom a príznakmi';
 
 
 --
@@ -5561,6 +6730,84 @@ COMMENT ON COLUMN public.lookup_value.reg_no IS 'IČO (pri PDS – prevádzkovat
 
 
 --
+-- Name: market_price_daily; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.market_price_daily (
+    org_id uuid NOT NULL,
+    on_date date NOT NULL,
+    delivery_year smallint NOT NULL,
+    bl_eur_mwh numeric(12,4),
+    pl_eur_mwh numeric(12,4),
+    portfolio_eur_mwh numeric(12,4),
+    spot_fve_eur_mwh numeric(12,4),
+    source text DEFAULT 'rucne'::text NOT NULL,
+    changed_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    corrected_at timestamp with time zone,
+    corrected_by uuid,
+    CONSTRAINT market_price_corrected_check CHECK (((corrected_by IS NULL) OR (corrected_at IS NOT NULL))),
+    CONSTRAINT market_price_daily_bl_eur_mwh_check CHECK ((bl_eur_mwh >= (0)::numeric)),
+    CONSTRAINT market_price_daily_check CHECK ((num_nonnulls(bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh) >= 1)),
+    CONSTRAINT market_price_daily_check1 CHECK (((bl_eur_mwh IS NULL) = (pl_eur_mwh IS NULL))),
+    CONSTRAINT market_price_daily_delivery_year_check CHECK (((delivery_year >= 2000) AND (delivery_year <= 2100))),
+    CONSTRAINT market_price_daily_pl_eur_mwh_check CHECK ((pl_eur_mwh >= (0)::numeric)),
+    CONSTRAINT market_price_daily_portfolio_eur_mwh_check CHECK ((portfolio_eur_mwh >= (0)::numeric)),
+    CONSTRAINT market_price_daily_source_check CHECK ((source = ANY (ARRAY['cockpit'::text, 'rucne'::text, 'historia'::text]))),
+    CONSTRAINT market_price_daily_spot_fve_eur_mwh_check CHECK ((spot_fve_eur_mwh >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE market_price_daily; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.market_price_daily IS 'ceny BL/PL (CAL), odhad nákupnej ceny portfólia a očakávaná cena SPOT pre FVE podľa dňa a roka dodávky';
+
+
+--
+-- Name: COLUMN market_price_daily.corrected_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.market_price_daily.corrected_at IS 'záznam opravený novším záznamom toho istého dňa (platí najnovší); NULL = platný';
+
+
+--
+-- Name: market_price_history_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.market_price_history_v WITH (security_invoker='true') AS
+ SELECT m.id,
+    m.org_id,
+    m.on_date,
+    m.delivery_year,
+    m.bl_eur_mwh,
+    m.pl_eur_mwh,
+    m.portfolio_eur_mwh,
+    m.spot_fve_eur_mwh,
+    m.source,
+    m.created_at,
+    m.changed_by,
+    cu.name AS changed_by_name,
+    m.corrected_at,
+    m.corrected_by,
+    ku.name AS corrected_by_name,
+    (m.corrected_at IS NOT NULL) AS is_corrected
+   FROM ((public.market_price_daily m
+     LEFT JOIN public.app_user cu ON ((cu.id = m.changed_by)))
+     LEFT JOIN public.app_user ku ON ((ku.id = m.corrected_by)));
+
+
+--
+-- Name: VIEW market_price_history_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.market_price_history_v IS 'trhové ceny dňa s opravami (opravený záznam ostáva v histórii)';
+
+
+--
 -- Name: offer; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5713,6 +6960,36 @@ COMMENT ON COLUMN public.oom_planned_change.effective_date IS 'prepis: prvý de�
 --
 
 COMMENT ON COLUMN public.oom_planned_change.error IS 'dôvod, prečo sa plán nedal vykonať (status zlyhala)';
+
+
+--
+-- Name: oom_price_regulation_change; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oom_price_regulation_change (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    oom_id uuid NOT NULL,
+    valid_from date NOT NULL,
+    value boolean,
+    applied_at timestamp with time zone,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE oom_price_regulation_change; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oom_price_regulation_change IS 'história cenovej regulácie OOM s dátumom „platí od“ (časový rez cien zmlúv v 0027)';
+
+
+--
+-- Name: COLUMN oom_price_regulation_change.value; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom_price_regulation_change.value IS 'true = ANO, false = NIE, NULL = nevyplnené';
 
 
 --
@@ -6045,6 +7322,91 @@ COMMENT ON COLUMN public.pipeline_stage_required_field.core_field IS 'pole jadra
 
 
 --
+-- Name: price_exception; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_exception (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    company_id uuid,
+    person_id uuid,
+    years smallint[] NOT NULL,
+    price_model public.price_model NOT NULL,
+    requested_value numeric(12,4) NOT NULL,
+    threshold_value numeric(12,4) NOT NULL,
+    volume_mwh numeric(12,3),
+    reason text NOT NULL,
+    requested_by uuid,
+    status public.price_exception_status DEFAULT 'caka'::public.price_exception_status NOT NULL,
+    decided_by uuid,
+    decided_at timestamp with time zone,
+    decision_note text,
+    valid_until date,
+    contract_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_exception_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT price_exception_decided_check CHECK (((status <> 'caka'::public.price_exception_status) = (decided_at IS NOT NULL))),
+    CONSTRAINT price_exception_price_model_check CHECK ((price_model = ANY (ARRAY['fix'::public.price_model, 'spot_plus_eur'::public.price_model, 'spot_minus_eur'::public.price_model]))),
+    CONSTRAINT price_exception_reason_check CHECK ((btrim(reason) <> ''::text)),
+    CONSTRAINT price_exception_used_check CHECK (((status = 'pouzita'::public.price_exception_status) = (contract_id IS NOT NULL))),
+    CONSTRAINT price_exception_years_check CHECK ((cardinality(years) >= 1))
+);
+
+
+--
+-- Name: TABLE price_exception; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_exception IS 'žiadosť obchodníka o cenu pod hranicou; schvaľuje „schvaľuje ceny“ (nie autor); platí 30 dní na podpis';
+
+
+--
+-- Name: price_exception_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.price_exception_v WITH (security_invoker='true') AS
+ SELECT e.id,
+    e.org_id,
+    e.company_id,
+    e.person_id,
+    e.years,
+    e.price_model,
+    e.requested_value,
+    e.threshold_value,
+    e.volume_mwh,
+    e.reason,
+    e.requested_by,
+    e.status,
+    e.decided_by,
+    e.decided_at,
+    e.decision_note,
+    e.valid_until,
+    e.contract_id,
+    e.created_at,
+    e.updated_at,
+        CASE
+            WHEN ((e.status = 'schvalena'::public.price_exception_status) AND (e.valid_until < public.crm_today())) THEN 'expirovana'::text
+            ELSE (e.status)::text
+        END AS state,
+    COALESCE(c.name, NULLIF(concat_ws(' '::text, p.first_name, p.last_name), ''::text)) AS customer_name,
+    ru.name AS requested_by_name,
+    du.name AS decided_by_name
+   FROM ((((public.price_exception e
+     LEFT JOIN public.company c ON ((c.id = e.company_id)))
+     LEFT JOIN public.contact p ON ((p.id = e.person_id)))
+     LEFT JOIN public.app_user ru ON ((ru.id = e.requested_by)))
+     LEFT JOIN public.app_user du ON ((du.id = e.decided_by)));
+
+
+--
+-- Name: VIEW price_exception_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.price_exception_v IS 'výnimky so stavom (aj Expirovaná po 30 dňoch), zákazník, autor, schvaľovateľ';
+
+
+--
 -- Name: price_list; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -6246,7 +7608,7 @@ COMMENT ON COLUMN public.price_list_item.fee_oom_eur_month IS 'mesačná platba 
 -- Name: COLUMN price_list_item.fee_program_eur_month; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.price_list_item.fee_program_eur_month IS 'mesačný poplatok programu (VBattery, VIWA za OOM) bez DPH';
+COMMENT ON COLUMN public.price_list_item.fee_program_eur_month IS 'mesačný poplatok programu bez DPH: VBattery za OOM; VIWA za účet (nie za OOM)';
 
 
 --
@@ -6338,10 +7700,12 @@ CREATE TABLE public.product (
     price_regulation boolean,
     status public.product_status DEFAULT 'predava_sa'::public.product_status NOT NULL,
     sort_order integer DEFAULT 0 NOT NULL,
+    tariff_variant text,
     CONSTRAINT product_cena_diela_check CHECK ((('cena_diela'::public.price_model = ANY (price_models)) = (category = 'instalacia_fve'::public.product_category))),
     CONSTRAINT product_code_check CHECK ((code ~ '^[a-z][a-z0-9_]{1,60}$'::text)),
     CONSTRAINT product_price_models_check CHECK (((cardinality(price_models) >= 1) AND (array_position(price_models, NULL::public.price_model) IS NULL))),
     CONSTRAINT product_segment_check CHECK ((segment = ANY (ARRAY['domacnost'::public.customer_segment, 'firma'::public.customer_segment]))),
+    CONSTRAINT product_tariff_variant_check CHECK (((tariff_variant IS NULL) OR ((tariff_variant = 'vykurovanie'::text) AND (tariff_type = 'dvojtarif'::public.tariff_type)) OR ((tariff_variant = 'verejne_osvetlenie'::text) AND (tariff_type = 'jednotarif'::public.tariff_type)))),
     CONSTRAINT product_vat_check CHECK (((vat_rate >= (0)::numeric) AND (vat_rate <= (100)::numeric))),
     CONSTRAINT product_vat_required CHECK (((vat_rate IS NOT NULL) OR (category = 'instalacia_fve'::public.product_category)))
 );
@@ -6394,6 +7758,13 @@ COMMENT ON COLUMN public.product.price_regulation IS 'NULL = nezáleží; true =
 --
 
 COMMENT ON COLUMN public.product.status IS 'predava_sa; dobieha = existujúce zmluvy bežia, nové nie; ukonceny';
+
+
+--
+-- Name: COLUMN product.tariff_variant; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product.tariff_variant IS 'variant typu tarifu: vykurovanie (Green 2T Vykurovanie), verejne_osvetlenie (Green 1T VO, DMP10)';
 
 
 --
@@ -6465,6 +7836,36 @@ CREATE VIEW public.price_list_version_v WITH (security_invoker='true') AS
    FROM ((public.price_list_version v
      JOIN public.price_list l ON ((l.id = v.price_list_id)))
      LEFT JOIN public.app_user u ON ((u.id = v.approved_by)));
+
+
+--
+-- Name: price_parameter; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_parameter (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    code text NOT NULL,
+    delivery_year smallint,
+    valid_from date NOT NULL,
+    value numeric(12,4) NOT NULL,
+    note text,
+    changed_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT price_parameter_code_check CHECK ((code = ANY (ARRAY['pomer_bl_pct'::text, 'rizikova_prirazka'::text, 'nasa_marza'::text, 'min_aditiv_obchodnik'::text, 'min_aditiv_manazer'::text, 'min_aditiv_vykup_lz'::text, 'nakup_energopomoc'::text, 'viwa_aditiv_basic'::text, 'viwa_aditiv_plus'::text, 'viwa_aditiv_pro'::text]))),
+    CONSTRAINT price_parameter_delivery_year_check CHECK (((delivery_year >= 2000) AND (delivery_year <= 2100))),
+    CONSTRAINT price_parameter_ratio_check CHECK (((code <> 'pomer_bl_pct'::text) OR (value <= (100)::numeric))),
+    CONSTRAINT price_parameter_value_check CHECK ((value >= (0)::numeric)),
+    CONSTRAINT price_parameter_year_check CHECK (((code = 'nakup_energopomoc'::text) = (delivery_year IS NOT NULL)))
+);
+
+
+--
+-- Name: TABLE price_parameter; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.price_parameter IS 'cenové parametre s históriou „platí od“ (zadanie modulu 4, časť 6); riadok sa nemení, zmena = nový riadok';
 
 
 --
@@ -6676,8 +8077,10 @@ CREATE TABLE public.team_permission (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     can_import boolean DEFAULT false NOT NULL,
     can_edit_active_oom boolean DEFAULT false NOT NULL,
+    can_see_company_margin boolean DEFAULT false NOT NULL,
     CONSTRAINT team_permission_edit_active_oom_check CHECK (((NOT can_edit_active_oom) OR (module = 'odberne_miesta'::public.crm_module))),
-    CONSTRAINT team_permission_edit_le_view_check CHECK ((edit_scope <= view_scope))
+    CONSTRAINT team_permission_edit_le_view_check CHECK ((edit_scope <= view_scope)),
+    CONSTRAINT team_permission_margin_check CHECK (((NOT can_see_company_margin) OR (module = 'zmluvy'::public.crm_module)))
 );
 
 
@@ -6700,6 +8103,45 @@ COMMENT ON COLUMN public.team_permission.can_import IS 'smie hromadne importova�
 --
 
 COMMENT ON COLUMN public.team_permission.can_edit_active_oom IS 'iba modul odberne_miesta: smie upravovať OOM v stave Aktívne, jeho zariadenia a kontaktné osoby';
+
+
+--
+-- Name: COLUMN team_permission.can_see_company_margin; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team_permission.can_see_company_margin IS 'vidieť maržu firmy, nákupnú cenu portfólia a rizikovú prirážku (iba modul zmluvy)';
+
+
+--
+-- Name: trader_price_today_v; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.trader_price_today_v WITH (security_invoker='true') AS
+ SELECT org_id,
+    delivery_year,
+    on_date,
+    bl_eur_mwh,
+    pl_eur_mwh,
+    public.price_param(org_id, 'pomer_bl_pct'::text, public.crm_today()) AS bl_ratio_pct,
+    round((((bl_eur_mwh * public.price_param(org_id, 'pomer_bl_pct'::text, public.crm_today())) + (pl_eur_mwh * ((100)::numeric - public.price_param(org_id, 'pomer_bl_pct'::text, public.crm_today())))) / (100)::numeric), 4) AS mix_eur_mwh,
+    public.price_param(org_id, 'rizikova_prirazka'::text, public.crm_today()) AS risk_eur_mwh,
+    public.price_param(org_id, 'nasa_marza'::text, public.crm_today()) AS margin_eur_mwh,
+    public.trader_price(org_id, delivery_year, public.crm_today()) AS trader_price_eur_mwh,
+    portfolio_eur_mwh,
+    spot_fve_eur_mwh,
+    source,
+    id
+   FROM public.market_price_daily m
+  WHERE ((corrected_at IS NULL) AND (on_date = ( SELECT max(x.on_date) AS max
+           FROM public.market_price_daily x
+          WHERE ((x.org_id = m.org_id) AND (x.delivery_year = m.delivery_year) AND (x.on_date <= public.crm_today()) AND (x.corrected_at IS NULL)))));
+
+
+--
+-- Name: VIEW trader_price_today_v; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.trader_price_today_v IS 'obrazovka 29: posledné ceny BL/PL po rokoch dodávky a cena pre obchodníka dnes';
 
 
 --
@@ -6938,6 +8380,14 @@ ALTER TABLE ONLY public.contract
 
 
 --
+-- Name: contract_flag contract_flag_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_flag
+    ADD CONSTRAINT contract_flag_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: contract contract_hubspot_deal_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6954,6 +8404,38 @@ ALTER TABLE ONLY public.contract
 
 
 --
+-- Name: contract_oom contract_oom_overlap; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_overlap EXCLUDE USING gist (oom_id WITH =, grp WITH =, daterange(valid_from, valid_to, '[]'::text) WITH &&) WHERE ((is_binding AND (valid_from IS NOT NULL) AND ((valid_to IS NULL) OR (valid_to >= valid_from))));
+
+
+--
+-- Name: contract_oom contract_oom_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contract_oom contract_oom_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_unique UNIQUE (contract_id, oom_id);
+
+
+--
+-- Name: contract contract_op_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract
+    ADD CONSTRAINT contract_op_id_key UNIQUE (op_id);
+
+
+--
 -- Name: contract contract_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6962,11 +8444,11 @@ ALTER TABLE ONLY public.contract
 
 
 --
--- Name: contract_price contract_price_hubspot_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: contract_price contract_price_overlap; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.contract_price
-    ADD CONSTRAINT contract_price_hubspot_id_key UNIQUE (hubspot_id);
+    ADD CONSTRAINT contract_price_overlap EXCLUDE USING gist (contract_id WITH =, COALESCE(oom_id, '00000000-0000-0000-0000-000000000000'::uuid) WITH =, slot WITH =, daterange(valid_from, valid_to, '[]'::text) WITH &&);
 
 
 --
@@ -7130,6 +8612,14 @@ ALTER TABLE ONLY public.fve_project
 
 
 --
+-- Name: import_alias import_alias_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.import_alias
+    ADD CONSTRAINT import_alias_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: lookup_list lookup_list_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7151,6 +8641,14 @@ ALTER TABLE ONLY public.lookup_value
 
 ALTER TABLE ONLY public.lookup_value
     ADD CONSTRAINT lookup_value_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: market_price_daily market_price_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_price_daily
+    ADD CONSTRAINT market_price_daily_pkey PRIMARY KEY (id);
 
 
 --
@@ -7263,6 +8761,22 @@ ALTER TABLE ONLY public.oom
 
 ALTER TABLE ONLY public.oom_planned_change
     ADD CONSTRAINT oom_planned_change_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oom_price_regulation_change oom_price_regulation_change_oom_id_valid_from_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_price_regulation_change
+    ADD CONSTRAINT oom_price_regulation_change_oom_id_valid_from_key UNIQUE (oom_id, valid_from);
+
+
+--
+-- Name: oom_price_regulation_change oom_price_regulation_change_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_price_regulation_change
+    ADD CONSTRAINT oom_price_regulation_change_pkey PRIMARY KEY (id);
 
 
 --
@@ -7402,6 +8916,14 @@ ALTER TABLE ONLY public.pipeline_stage_required_field
 
 
 --
+-- Name: price_exception price_exception_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: price_list price_list_code_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7471,6 +8993,14 @@ ALTER TABLE ONLY public.price_list_version
 
 ALTER TABLE ONLY public.price_list_version
     ADD CONSTRAINT price_list_version_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_parameter price_parameter_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_parameter
+    ADD CONSTRAINT price_parameter_pkey PRIMARY KEY (id);
 
 
 --
@@ -7940,10 +9470,38 @@ CREATE INDEX contract_custom_idx ON public.contract USING gin (custom jsonb_path
 
 
 --
+-- Name: contract_flag_open_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX contract_flag_open_key ON public.contract_flag USING btree (contract_id, code, COALESCE((year)::integer, 0)) WHERE (resolved_at IS NULL);
+
+
+--
+-- Name: contract_oom_oom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_oom_oom_idx ON public.contract_oom USING btree (oom_id);
+
+
+--
+-- Name: contract_oom_successor_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_oom_successor_idx ON public.contract_oom USING btree (successor_id);
+
+
+--
 -- Name: contract_org_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX contract_org_id_idx ON public.contract USING btree (org_id);
+
+
+--
+-- Name: contract_owner_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_owner_id_idx ON public.contract USING btree (owner_id);
 
 
 --
@@ -7954,31 +9512,38 @@ CREATE INDEX contract_person_id_idx ON public.contract USING btree (person_id);
 
 
 --
--- Name: contract_price_contract_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: contract_previous_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX contract_price_contract_id_idx ON public.contract_price USING btree (contract_id);
-
-
---
--- Name: contract_price_one_valid_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX contract_price_one_valid_key ON public.contract_price USING btree (contract_id, oom_id) WHERE (status = 'platna'::public.contract_price_status);
+CREATE INDEX contract_previous_idx ON public.contract USING btree (previous_contract_id);
 
 
 --
--- Name: contract_price_oom_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: contract_price_contract_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX contract_price_oom_id_idx ON public.contract_price USING btree (oom_id);
+CREATE INDEX contract_price_contract_idx ON public.contract_price USING btree (contract_id);
 
 
 --
--- Name: contract_price_product_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: contract_price_item_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX contract_price_product_id_idx ON public.contract_price USING btree (product_id);
+CREATE INDEX contract_price_item_idx ON public.contract_price USING btree (price_list_item_id);
+
+
+--
+-- Name: contract_price_oom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_price_oom_idx ON public.contract_price USING btree (oom_id);
+
+
+--
+-- Name: contract_price_product_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX contract_price_product_idx ON public.contract_price USING btree (product_id);
 
 
 --
@@ -8115,10 +9680,31 @@ CREATE INDEX fve_project_deal_id_idx ON public.fve_project USING btree (deal_id)
 
 
 --
+-- Name: import_alias_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX import_alias_key ON public.import_alias USING btree (org_id, source, kind, name_norm);
+
+
+--
 -- Name: lookup_value_label_key; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX lookup_value_label_key ON public.lookup_value USING btree (list_code, org_id, parent_code, lower(label)) NULLS NOT DISTINCT;
+
+
+--
+-- Name: market_price_daily_current_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX market_price_daily_current_key ON public.market_price_daily USING btree (org_id, on_date, delivery_year) WHERE (corrected_at IS NULL);
+
+
+--
+-- Name: market_price_daily_day_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX market_price_daily_day_idx ON public.market_price_daily USING btree (org_id, delivery_year, on_date);
 
 
 --
@@ -8248,6 +9834,13 @@ CREATE UNIQUE INDEX oom_planned_change_one_active_key ON public.oom_planned_chan
 
 
 --
+-- Name: oom_price_regulation_change_oom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oom_price_regulation_change_oom_idx ON public.oom_price_regulation_change USING btree (oom_id);
+
+
+--
 -- Name: oom_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8276,6 +9869,20 @@ CREATE UNIQUE INDEX pipeline_org_name_key ON public.pipeline USING btree (org_id
 
 
 --
+-- Name: price_exception_company_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX price_exception_company_idx ON public.price_exception USING btree (company_id);
+
+
+--
+-- Name: price_exception_person_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX price_exception_person_idx ON public.price_exception USING btree (person_id);
+
+
+--
 -- Name: price_list_item_product_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8294,6 +9901,13 @@ CREATE INDEX price_list_org_id_idx ON public.price_list USING btree (org_id);
 --
 
 CREATE UNIQUE INDEX price_list_version_one_draft ON public.price_list_version USING btree (price_list_id) WHERE (status = 'navrh'::public.price_list_version_status);
+
+
+--
+-- Name: price_parameter_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX price_parameter_key ON public.price_parameter USING btree (org_id, code, COALESCE((delivery_year)::integer, 0), valid_from);
 
 
 --
@@ -8514,6 +10128,20 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract FOR
 
 
 --
+-- Name: contract_flag trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract_flag FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: contract_oom trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.contract_oom FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: contract_price trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8591,10 +10219,24 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.fve_project 
 
 
 --
+-- Name: import_alias trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.import_alias FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: lookup_value trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: market_price_daily trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -8654,6 +10296,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_planned_
 
 
 --
+-- Name: oom_price_regulation_change trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.oom_price_regulation_change FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: org trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8703,6 +10352,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.pipeline_sta
 
 
 --
+-- Name: price_exception trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_exception FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: price_list trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8728,6 +10384,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list_i
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: price_parameter trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.price_parameter FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -8941,6 +10604,48 @@ CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.contact FOR
 
 
 --
+-- Name: oom trg_feed_in_plan; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_feed_in_plan BEFORE INSERT OR UPDATE OF planned_feed_in_mwh, planned_feed_in_manual, source_power_kw, source_category ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_feed_in_plan();
+
+
+--
+-- Name: contract_oom trg_fill; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fill BEFORE INSERT OR UPDATE ON public.contract_oom FOR EACH ROW EXECUTE FUNCTION public.contract_oom_fill();
+
+
+--
+-- Name: contract_price trg_fill; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fill BEFORE INSERT OR UPDATE ON public.contract_price FOR EACH ROW EXECUTE FUNCTION public.contract_price_fill();
+
+
+--
+-- Name: contract trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.contract FOR EACH ROW EXECUTE FUNCTION public.contract_guard();
+
+
+--
+-- Name: contract_oom trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.contract_oom FOR EACH ROW EXECUTE FUNCTION public.contract_child_guard();
+
+
+--
+-- Name: contract_price trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.contract_price FOR EACH ROW EXECUTE FUNCTION public.contract_child_guard();
+
+
+--
 -- Name: custom_field trg_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8955,10 +10660,31 @@ CREATE TRIGGER trg_guard BEFORE DELETE ON public.custom_field_option FOR EACH RO
 
 
 --
+-- Name: import_alias trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.import_alias FOR EACH ROW EXECUTE FUNCTION public.import_alias_guard();
+
+
+--
 -- Name: lookup_value trg_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.lookup_value_guard();
+
+
+--
+-- Name: market_price_daily trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.market_price_guard();
+
+
+--
+-- Name: price_exception trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_exception FOR EACH ROW EXECUTE FUNCTION public.price_exception_guard();
 
 
 --
@@ -8987,6 +10713,13 @@ CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_list_
 --
 
 CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.price_list_version_guard();
+
+
+--
+-- Name: price_parameter trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.price_parameter FOR EACH ROW EXECUTE FUNCTION public.price_parameter_guard();
 
 
 --
@@ -9284,6 +11017,20 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.contract FOR EACH ROW 
 
 
 --
+-- Name: contract_flag trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.contract_flag FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: contract_oom trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.contract_oom FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: contract_price trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -9361,6 +11108,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.fve_project FOR EACH R
 
 
 --
+-- Name: import_alias trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.import_alias FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: lookup_list trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -9372,6 +11126,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.lookup_list FOR EACH R
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.lookup_value FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: market_price_daily trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -9421,6 +11182,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_device FOR EACH RO
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_planned_change FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: oom_price_regulation_change trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.oom_price_regulation_change FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -9480,6 +11248,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.pipeline_stage_require
 
 
 --
+-- Name: price_exception trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_exception FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: price_list trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -9505,6 +11280,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list_item_progra
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_list_version FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: price_parameter trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.price_parameter FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -9589,6 +11371,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.web_event FOR EACH ROW
 --
 
 CREATE TRIGGER trg_source_check BEFORE INSERT OR UPDATE OF source, org_id ON public.contact FOR EACH ROW EXECUTE FUNCTION public.contact_source_check();
+
+
+--
+-- Name: contract trg_sync; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_sync AFTER UPDATE OF phase, type, valid_from, valid_to, crm_valid_to ON public.contract FOR EACH ROW EXECUTE FUNCTION public.contract_sync();
 
 
 --
@@ -9821,11 +11610,75 @@ ALTER TABLE ONLY public.contract
 
 
 --
+-- Name: contract_flag contract_flag_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_flag
+    ADD CONSTRAINT contract_flag_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contract_flag contract_flag_resolved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_flag
+    ADD CONSTRAINT contract_flag_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: contract_oom contract_oom_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contract_oom contract_oom_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id);
+
+
+--
+-- Name: contract_oom contract_oom_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: contract_oom contract_oom_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+
+
+--
+-- Name: contract_oom contract_oom_successor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_oom
+    ADD CONSTRAINT contract_oom_successor_id_fkey FOREIGN KEY (successor_id) REFERENCES public.contract(id);
+
+
+--
 -- Name: contract contract_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.contract
     ADD CONSTRAINT contract_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: contract contract_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract
+    ADD CONSTRAINT contract_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.app_user(id);
 
 
 --
@@ -9837,11 +11690,19 @@ ALTER TABLE ONLY public.contract
 
 
 --
+-- Name: contract contract_previous_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract
+    ADD CONSTRAINT contract_previous_contract_id_fkey FOREIGN KEY (previous_contract_id) REFERENCES public.contract(id);
+
+
+--
 -- Name: contract_price contract_price_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.contract_price
-    ADD CONSTRAINT contract_price_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id);
+    ADD CONSTRAINT contract_price_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id) ON DELETE CASCADE;
 
 
 --
@@ -9850,6 +11711,22 @@ ALTER TABLE ONLY public.contract_price
 
 ALTER TABLE ONLY public.contract_price
     ADD CONSTRAINT contract_price_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id);
+
+
+--
+-- Name: contract_price contract_price_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_price
+    ADD CONSTRAINT contract_price_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: contract_price contract_price_price_list_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract_price
+    ADD CONSTRAINT contract_price_price_list_item_id_fkey FOREIGN KEY (price_list_item_id) REFERENCES public.price_list_item(id);
 
 
 --
@@ -9866,6 +11743,14 @@ ALTER TABLE ONLY public.contract_price
 
 ALTER TABLE ONLY public.contract_purchase
     ADD CONSTRAINT contract_purchase_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id);
+
+
+--
+-- Name: contract contract_related_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contract
+    ADD CONSTRAINT contract_related_contract_id_fkey FOREIGN KEY (related_contract_id) REFERENCES public.contract(id);
 
 
 --
@@ -10037,6 +11922,22 @@ ALTER TABLE ONLY public.fve_project
 
 
 --
+-- Name: import_alias import_alias_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.import_alias
+    ADD CONSTRAINT import_alias_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: import_alias import_alias_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.import_alias
+    ADD CONSTRAINT import_alias_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: lookup_list lookup_list_parent_list_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -10058,6 +11959,30 @@ ALTER TABLE ONLY public.lookup_value
 
 ALTER TABLE ONLY public.lookup_value
     ADD CONSTRAINT lookup_value_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: market_price_daily market_price_daily_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_price_daily
+    ADD CONSTRAINT market_price_daily_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: market_price_daily market_price_daily_corrected_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_price_daily
+    ADD CONSTRAINT market_price_daily_corrected_by_fkey FOREIGN KEY (corrected_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: market_price_daily market_price_daily_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_price_daily
+    ADD CONSTRAINT market_price_daily_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -10245,6 +12170,22 @@ ALTER TABLE ONLY public.oom_planned_change
 
 
 --
+-- Name: oom_price_regulation_change oom_price_regulation_change_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_price_regulation_change
+    ADD CONSTRAINT oom_price_regulation_change_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: oom_price_regulation_change oom_price_regulation_change_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom_price_regulation_change
+    ADD CONSTRAINT oom_price_regulation_change_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id) ON DELETE CASCADE;
+
+
+--
 -- Name: org_bank_account org_bank_account_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -10309,6 +12250,54 @@ ALTER TABLE ONLY public.pipeline_stage_required_field
 
 
 --
+-- Name: price_exception price_exception_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+
+--
+-- Name: price_exception price_exception_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id);
+
+
+--
+-- Name: price_exception price_exception_decided_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: price_exception price_exception_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: price_exception price_exception_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.contact(id);
+
+
+--
+-- Name: price_exception price_exception_requested_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_exception
+    ADD CONSTRAINT price_exception_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.app_user(id);
+
+
+--
 -- Name: price_list_item price_list_item_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -10362,6 +12351,22 @@ ALTER TABLE ONLY public.price_list_version
 
 ALTER TABLE ONLY public.price_list_version
     ADD CONSTRAINT price_list_version_price_list_id_fkey FOREIGN KEY (price_list_id) REFERENCES public.price_list(id) ON DELETE CASCADE;
+
+
+--
+-- Name: price_parameter price_parameter_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_parameter
+    ADD CONSTRAINT price_parameter_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: price_parameter price_parameter_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_parameter
+    ADD CONSTRAINT price_parameter_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -10497,6 +12502,80 @@ ALTER TABLE public.company_contact ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contact ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: contract; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contract ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: contract_flag; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contract_flag ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: contract_flag contract_flag_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_flag_select ON public.contract_flag FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.contract k
+  WHERE (k.id = contract_flag.contract_id))));
+
+
+--
+-- Name: contract_flag contract_flag_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_flag_update ON public.contract_flag FOR UPDATE USING ((EXISTS ( SELECT 1
+   FROM public.contract k
+  WHERE ((k.id = contract_flag.contract_id) AND public.crm_contract_editable(k.company_id, k.person_id, k.owner_id)))));
+
+
+--
+-- Name: contract_oom; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contract_oom ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: contract_oom contract_oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_oom_select ON public.contract_oom FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.contract k
+  WHERE (k.id = contract_oom.contract_id))));
+
+
+--
+-- Name: contract_price; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.contract_price ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: contract_price contract_price_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_price_select ON public.contract_price FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.contract k
+  WHERE (k.id = contract_price.contract_id))));
+
+
+--
+-- Name: contract contract_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_select ON public.contract FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_contract_visible(company_id, person_id, owner_id)));
+
+
+--
+-- Name: contract contract_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contract_update ON public.contract FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_contract_editable(company_id, person_id, owner_id))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_contract_editable(company_id, person_id, owner_id)));
+
+
+--
 -- Name: custom_field; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -10591,6 +12670,26 @@ CREATE POLICY customer_update ON public.contact FOR UPDATE USING (((org_id = ANY
 
 
 --
+-- Name: import_alias; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.import_alias ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: import_alias import_alias_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY import_alias_read ON public.import_alias FOR SELECT USING ((( SELECT public.crm_session_ok() AS crm_session_ok) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: import_alias import_alias_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY import_alias_write ON public.import_alias USING ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])))) WITH CHECK ((( SELECT public.crm_settings_writer() AS crm_settings_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
 -- Name: lookup_list; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -10601,6 +12700,26 @@ ALTER TABLE public.lookup_list ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.lookup_value ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: market_price_daily; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.market_price_daily ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: market_price_daily market_price_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY market_price_read ON public.market_price_daily FOR SELECT USING ((( SELECT public.crm_session_ok() AS crm_session_ok) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_can_see_margin() AS crm_can_see_margin))));
+
+
+--
+-- Name: market_price_daily market_price_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY market_price_write ON public.market_price_daily USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_approves_prices() AS crm_approves_prices)))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_approves_prices() AS crm_approves_prices))));
+
 
 --
 -- Name: oom; Type: ROW SECURITY; Schema: public; Owner: -
@@ -10700,6 +12819,50 @@ CREATE POLICY oom_insert ON public.oom_planned_change FOR INSERT WITH CHECK (pub
 --
 
 ALTER TABLE public.oom_planned_change ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_price_regulation_change; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oom_price_regulation_change ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: oom_price_regulation_change oom_regulation_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_regulation_delete ON public.oom_price_regulation_change FOR DELETE USING (((applied_at IS NULL) AND (EXISTS ( SELECT 1
+   FROM public.oom o
+  WHERE (o.id = oom_price_regulation_change.oom_id)))));
+
+
+--
+-- Name: oom_price_regulation_change oom_regulation_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_regulation_read ON public.oom_price_regulation_change FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.oom o
+  WHERE (o.id = oom_price_regulation_change.oom_id))));
+
+
+--
+-- Name: oom_price_regulation_change oom_regulation_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_regulation_update ON public.oom_price_regulation_change FOR UPDATE USING ((EXISTS ( SELECT 1
+   FROM public.oom o
+  WHERE (o.id = oom_price_regulation_change.oom_id)))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.oom o
+  WHERE (o.id = oom_price_regulation_change.oom_id))));
+
+
+--
+-- Name: oom_price_regulation_change oom_regulation_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY oom_regulation_write ON public.oom_price_regulation_change FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.oom o
+  WHERE (o.id = oom_price_regulation_change.oom_id))));
+
 
 --
 -- Name: oom oom_select; Type: POLICY; Schema: public; Owner: -
@@ -10827,6 +12990,40 @@ ALTER TABLE public.pipeline_stage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pipeline_stage_required_field ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: price_exception; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_exception ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_exception price_exception_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_exception_delete ON public.price_exception FOR DELETE USING (((requested_by = public.crm_active_user_id()) OR public.crm_is_service()));
+
+
+--
+-- Name: price_exception price_exception_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_exception_insert ON public.price_exception FOR INSERT WITH CHECK ((public.crm_customer_owned(company_id, person_id) OR public.crm_sees_all_contracts() OR public.crm_is_service()));
+
+
+--
+-- Name: price_exception price_exception_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_exception_select ON public.price_exception FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((requested_by = public.crm_active_user_id()) OR public.crm_sees_all_contracts() OR public.crm_is_admin() OR public.crm_is_service())));
+
+
+--
+-- Name: price_exception price_exception_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_exception_update ON public.price_exception FOR UPDATE USING (((requested_by = public.crm_active_user_id()) OR public.crm_approves_prices() OR public.crm_is_service()));
+
+
+--
 -- Name: price_list; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -10922,6 +13119,26 @@ CREATE POLICY price_list_version_write ON public.price_list_version USING ((( SE
 --
 
 CREATE POLICY price_list_write ON public.price_list USING ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])))) WITH CHECK ((( SELECT public.crm_price_list_writer() AS crm_price_list_writer) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[]))));
+
+
+--
+-- Name: price_parameter; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.price_parameter ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: price_parameter price_parameter_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_parameter_read ON public.price_parameter FOR SELECT USING ((( SELECT public.crm_session_ok() AS crm_session_ok) AND (org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_can_see_margin() AS crm_can_see_margin))));
+
+
+--
+-- Name: price_parameter price_parameter_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY price_parameter_write ON public.price_parameter USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_approves_prices() AS crm_approves_prices)))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (( SELECT public.crm_is_admin() AS crm_is_admin) OR ( SELECT public.crm_approves_prices() AS crm_approves_prices))));
 
 
 --
@@ -11524,4 +13741,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0019'),
     ('0020'),
     ('0021'),
-    ('0022');
+    ('0022'),
+    ('0023'),
+    ('0024'),
+    ('0025');

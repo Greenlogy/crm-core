@@ -128,3 +128,28 @@ Stav: 13. 10. 2026 · kolá 1 a 2 zodpovedané; zadanie v `04-zmluvy.md`.
     - Vzory oboch exportov sú priložené.
 12. Do Cockpitu dnes tečie objem a celkový výnos dealov zo všetkých pipeline. Claude Code nech toky zmapuje.
 13.–15. Súhlas (tranža automaticky, plán výkupu lokálneho zdroja, súvisiaca zmluva VIWA).
+
+## Kolo 3 – otázky pred plánom 0025 (13. 10. 2026)
+
+Z návrhu DB `04-zmluvy-navrh-db.md` časť 16, každá s odporúčaním Clauda. Odpovede sa zapíšu sem a do návrhu.
+
+1. **(3b) „Iba svoje“ pri zmluvách:** zákazník patrí mne alebo zmluvu som uzatvoril ja? Odporúčanie: obe.
+2. **(4) Dva cenové riadky toho istého produktu a obdobia s rôznou cenou:** Odporúčanie: chyba riadku.
+3. **(8) Upozornenia:** Odporúčanie: najprv iba v CRM, e-mail neskôr.
+4. **(10) API pre Cockpit:** pri domácnostiach iba ID, bez mena a adresy. Odporúčanie: áno.
+5. **(11) Prepnutie Cockpitu:** a) `new_hruba_marza` podľa HubSpotu + natívne pridaná hodnota a marža firmy; b) EFET a GreenSolar do svojich modulov z HubSpotu. Odporúčanie: áno, áno.
+6. **(12) VBattery:** a) pri nesúlade regulácie veriť produktu XM Trade + upozornenie; b) VBattery AKU – položka s pôvodnou cenou. Odporúčanie: a) áno; b) áno, ak dodáš cenu a dátum.
+7. **(13) Office portal:** doplniť do zostavy balík VIWA, dôvod uzatvorenia, kontaktné osoby. Odporúčanie: áno.
+8. **(14) Polia XM Trade, ktoré OOM nemá:** Odporúčanie: ignorovať, okrem Triedy TDO, ak ju servis používa.
+9. **(19) Cenová regulácia v importe OOM zo šablóny:** Odporúčanie: zmena pri existujúcom OOM ako zmena s „platí od“ = dnes.
+
+### Odpovede z kola 3 (Peter, 13. 10. 2026)
+1. Áno – „iba svoje“ = vlastník zákazníka aj obchodník, ktorý zmluvu uzavrel.
+2. Áno – dva cenové riadky toho istého produktu a obdobia s rôznou cenou = chyba riadku.
+3. Áno – upozornenia zatiaľ iba v CRM.
+4. Áno – pri domácnostiach iba ID zmluvy a zákazníka.
+5. a) áno, b) áno.
+6. a) Áno – rozhoduje produkt XM Trade, v náhľade upozornenie. b) VBattery AKU 1,00 € mesačne bez DPH od 1. 1. 2026.
+7. Áno – stĺpce v Office portáli doplníme, import začne bez nich.
+8. Áno – ponechať triedu TDO (aj ako podklad pre Cockpit), ostatné polia ignorovať.
+9. Áno – zmena regulácie importom = zmena s „platí od“ dnes.

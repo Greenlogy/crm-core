@@ -12,8 +12,10 @@ import { SettingsHead } from './SettingsLayout';
 
 const RANK: Record<Scope, number> = { nic: 0, iba_svoje: 1, vsetko: 2 };
 const NONE: Permission = { view: 'nic', edit: 'nic', archive: false, export: false, import: false, edit_active: false };
-/** Moduly s importom a s právom upravovať Aktívne záznamy (zatiaľ iba OOM). */
+/** Právo upravovať Aktívne záznamy má zatiaľ iba OOM; import OOM a Zmluvy; maržu firmy iba Zmluvy (0023). */
 const OOM_ONLY: ModuleCode = 'odberne_miesta';
+const WITH_IMPORT: ModuleCode[] = ['odberne_miesta', 'zmluvy'];
+const MARGIN_ONLY: ModuleCode = 'zmluvy';
 
 export function TeamsPage() {
   const teams = useApi<{ items: SettingsTeam[] }>('/api/settings/teams');
@@ -169,6 +171,7 @@ function TeamDetail(props: { team: SettingsTeam; onSaved: () => void }) {
               <th>Exportovať</th>
               <th>Importovať</th>
               <th>Upravovať Aktívne</th>
+              <th>Marža firmy</th>
             </tr>
           </thead>
           <tbody>
@@ -191,24 +194,36 @@ function TeamDetail(props: { team: SettingsTeam; onSaved: () => void }) {
                     <span className="sr-only">{m.label} – exportovať</span>
                   </Check>
                 </td>
-                {m.code === OOM_ONLY ? (
-                  <>
-                    <td>
-                      <Check checked={perms[m.code].import} onChange={(v) => set(m.code, { import: v })}>
-                        <span className="sr-only">{m.label} – importovať z Excelu</span>
-                      </Check>
-                    </td>
-                    <td>
-                      <Check checked={perms[m.code].edit_active} onChange={(v) => set(m.code, { edit_active: v })}>
-                        <span className="sr-only">{m.label} – upravovať Aktívne odberné miesta</span>
-                      </Check>
-                    </td>
-                  </>
+                {WITH_IMPORT.includes(m.code) ? (
+                  <td>
+                    <Check checked={perms[m.code].import} onChange={(v) => set(m.code, { import: v })}>
+                      <span className="sr-only">{m.label} – importovať</span>
+                    </Check>
+                  </td>
                 ) : (
-                  <>
-                    <td className="muted" aria-label="nepoužíva sa">–</td>
-                    <td className="muted" aria-label="nepoužíva sa">–</td>
-                  </>
+                  <td className="muted" aria-label="nepoužíva sa">–</td>
+                )}
+                {m.code === OOM_ONLY ? (
+                  <td>
+                    <Check checked={perms[m.code].edit_active} onChange={(v) => set(m.code, { edit_active: v })}>
+                      <span className="sr-only">{m.label} – upravovať Aktívne odberné miesta</span>
+                    </Check>
+                  </td>
+                ) : (
+                  <td className="muted" aria-label="nepoužíva sa">–</td>
+                )}
+                {m.code === MARGIN_ONLY ? (
+                  <td>
+                    <Check
+                      checked={!!perms[m.code].margin && !t.is_external}
+                      disabled={t.is_external}
+                      onChange={(v) => set(m.code, { margin: v })}
+                    >
+                      <span className="sr-only">{m.label} – vidieť maržu firmy</span>
+                    </Check>
+                  </td>
+                ) : (
+                  <td className="muted" aria-label="nepoužíva sa">–</td>
                 )}
               </tr>
             ))}
@@ -218,7 +233,9 @@ function TeamDetail(props: { team: SettingsTeam; onSaved: () => void }) {
       <div className="card-foot team-foot">
         <span className="caption">
           „Iba svoje“ = záznamy, kde je používateľ vlastníkom. „Upravovať Aktívne“ = smie meniť Aktívne odberné miesto,
-          jeho zariadenia a kontaktné osoby (bez neho iba Pripravované). Zmena platí pre všetkých členov tímu naraz.
+          jeho zariadenia a kontaktné osoby (bez neho iba Pripravované). „Marža firmy“ = vidí maržu firmy, nákupnú cenu
+          portfólia a rizikovú prirážku; obchodný riaditeľ ju má cez „schvaľuje ceny“ pri používateľovi. Zmena platí pre
+          všetkých členov tímu naraz.
         </span>
         {t.archived_at ? (
           <button type="button" className="btn" onClick={() => archive(false)} disabled={save.busy}>

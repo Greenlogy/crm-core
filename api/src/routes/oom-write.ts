@@ -127,7 +127,8 @@ const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cas
   reserved_capacity_kw: { kind: 'num', label: 'Rezervovaná kapacita' },
   max_reserved_capacity_kw: { kind: 'num', label: 'Max. rezervovaná kapacita' },
   capacity_reservation_method: { kind: 'text', label: 'Spôsob rezervácie kapacity', max: 80 },
-  price_regulation: { kind: 'bool', label: 'Cenová regulácia' },   // ANO / NIE / null = nevyplnené (0019)
+  price_regulation: { kind: 'bool', label: 'Cenová regulácia' },   // ANO / NIE / null = nevyplnené (0019); úprava iba s dátumom (0024)
+  public_lighting: { kind: 'bool', label: 'Verejné osvetlenie' },  // 0023
   excise_tax: { kind: 'text', label: 'Spotrebná daň', max: 80 },
   billing_period: { kind: 'code', label: 'Fakturačné obdobie' },
   advance_payment_method: { kind: 'code', label: 'Zálohy' },
@@ -136,6 +137,7 @@ const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cas
   planned_consumption_vt_mwh: { kind: 'num', label: 'Plánovaná spotreba VT' },
   planned_consumption_nt_mwh: { kind: 'num', label: 'Plánovaná spotreba NT' },
   planned_feed_in_mwh: { kind: 'num', label: 'Plánovaný výkup' },
+  planned_feed_in_manual: { kind: 'bool', label: 'Plán výkupu zadaný ručne' },   // false = „Vrátiť výpočet“ (0023)
   source_kind: {
     kind: 'enum',
     label: 'Druh zdroja',
@@ -256,6 +258,10 @@ oomWrite.post('/oom', async (c) => {
 oomWrite.patch('/oom/:id', async (c) => {
   const oomId = id(c.req.param('id'));
   const v = oomValues(await readBody(c.req));
+  // Cenová regulácia existujúceho OOM sa mení s dátumom „platí od“ (POST /oom/:id/price-regulation, 0024)
+  if ('price_regulation' in v) {
+    throw new BadRequest('Cenová regulácia sa mení s dátumom „platí od“ – tlačidlo „Zmeniť reguláciu“ na karte OOM.');
+  }
   const cols = Object.keys(v);
   if (cols.length === 0) return c.json({ ok: true });
   const sql = c.var.sql;
@@ -402,4 +408,24 @@ oomWrite.delete('/oom/:id', async (c) => {
   const oomId = id(c.req.param('id'));
   const [r] = await c.var.sql<{ eic: string }[]>`SELECT oom_delete(${oomId}) AS eic`;
   return c.json({ ok: true, eic: r.eic });
+});
+
+// Zmena cenovej regulácie s dátumom „platí od“ (minulý, dnešný aj budúci; budúcu uplatní nočný beh – 0024).
+// value: true = ANO, false = NIE, null = nevyplnené. Práva ako úprava OOM (RLS a Aktívne OOM v databáze).
+oomWrite.post('/oom/:id/price-regulation', async (c) => {
+  const oomId = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  if (!('value' in b) || (b.value !== null && typeof b.value !== 'boolean')) {
+    throw new BadRequest('Cenová regulácia: ANO, NIE alebo nevyplnené.');
+  }
+  const validFrom = day(b, 'valid_from', 'Platí od');
+  await c.var.sql`SELECT oom_price_regulation_set(${oomId}, ${b.value as boolean | null}, ${validFrom}::date)`;
+  return c.json({ ok: true });
+});
+
+// Zrušenie naplánovanej (ešte neuplatnenej) zmeny cenovej regulácie
+oomWrite.delete('/oom-regulation/:id', async (c) => {
+  const changeId = id(c.req.param('id'));
+  await c.var.sql`SELECT oom_price_regulation_cancel(${changeId})`;
+  return c.json({ ok: true });
 });

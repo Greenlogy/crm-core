@@ -19,8 +19,10 @@ import { MeProvider } from './lib/me';
 import { AuditPage } from './pages/settings/AuditPage';
 import { CompanyPage } from './pages/settings/CompanyPage';
 import { CustomFieldsPage } from './pages/settings/CustomFieldsPage';
+import { ImportAliasesPage } from './pages/settings/ImportAliasesPage';
 import { LookupsPage } from './pages/settings/LookupsPage';
 import { PipelinesPage } from './pages/settings/PipelinesPage';
+import { PricingPage } from './pages/settings/PricingPage';
 import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
 import { UsersPage } from './pages/settings/UsersPage';
@@ -63,6 +65,8 @@ const router = createBrowserRouter([
           { path: 'timy', element: <TeamsPage /> },
           { path: 'ciselniky', element: <LookupsPage /> },
           { path: 'parovanie-sadzieb', element: <TariffMappingPage /> },
+          { path: 'cenove-parametre', element: <PricingPage /> },
+          { path: 'preklady-importov', element: <ImportAliasesPage /> },
           { path: 'vlastne-polia', element: <CustomFieldsPage /> },
           { path: 'pipelines', element: <PipelinesPage /> },
           { path: 'audit', element: <AuditPage /> },

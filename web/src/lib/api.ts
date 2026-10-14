@@ -104,8 +104,9 @@ export type DealRow = {
 export type ContractRow = {
   id: string;
   number: string | null;
+  /** vypočítaný stav (CONTRACT_STATUS) */
   status: string;
-  confirmed: boolean;
+  type: string;
   valid_from: string | null;
   valid_to: string | null;
   deal_name: string | null;
@@ -120,19 +121,18 @@ export type PriceRow = {
   oom_id?: string;
   eic?: string;
   product: string | null;
-  direction: string;
+  /** zložka ceny (PRICE_SLOT) a cenový model (0025) */
+  slot: string;
+  price_model: string;
   price_vt_eur_mwh: Num;
   price_nt_eur_mwh: Num;
   additive_eur_mwh: Num;
-  imbalance_price_eur_mwh: Num;
-  additive_coefficient_pct: Num;
-  fee_oom_eur_month: Num;
-  fee_zem_eur_month: Num;
-  fee_vbattery_eur_month: Num;
-  fee_rk_eur_kw_month: Num;
-  vbattery_program: string | null;
+  additive_pct: Num;
+  fee_eur_month: Num;
+  fee_kw_eur_month: Num;
   valid_from: string | null;
   valid_to: string | null;
+  /** platna = obdobie obsahuje dnešok */
   status: string;
 };
 
@@ -293,6 +293,16 @@ export type OomPlan = {
 };
 
 /** Karta OOM (api/src/queries/oom.ts): riadok oom + údaje z oom_v + popisy číselníkov + práva. */
+export type OomRegulationChange = {
+  id: string;
+  valid_from: string;
+  value: boolean | null;
+  applied_at: string | null;
+  created_at: string;
+  created_by_name: string | null;
+  is_planned: boolean;
+};
+
 export type OomCard = {
   id: string;
   eic: string;
@@ -338,6 +348,10 @@ export type OomCard = {
   planned_consumption_vt_mwh: Num;
   planned_consumption_nt_mwh: Num;
   planned_feed_in_mwh: Num;
+  /** plán výkupu lokálneho zdroja zadaný ručne (0023); computed = počíta sa z výkonu */
+  planned_feed_in_manual: boolean;
+  planned_feed_in_computed: boolean;
+  public_lighting: boolean;
   planned_mwh: Num;
   source_kind: string | null;
   source_category: string | null;
@@ -370,6 +384,8 @@ export type OomCard = {
   plan_id: string | null;
   plan_failed: boolean;
   plans: OomPlan[];
+  /** zmeny cenovej regulácie s dátumom (0023, 0024); is_planned = budúca, ešte neuplatnená */
+  regulation: OomRegulationChange[];
   custom_refs: { id: string; label: string | null; entity: string | null }[];
   links: OomLink[];
   devices: OomDevice[];
@@ -440,12 +456,17 @@ export type OomFilters = { pds: { code: string; label: string }[]; owners: { id:
 export type ContractCard = {
   id: string;
   number: string | null;
+  /** vypočítaný stav (CONTRACT_STATUS) */
   status: string;
-  confirmed: boolean;
+  type: string;
+  phase: string;
   auto_prolong: boolean;
   valid_from: string | null;
   valid_to: string | null;
-  signed_at: string | null;
+  effective_to: string | null;
+  signed_on: string | null;
+  qty_mwh: Num;
+  flags: string[];
   payment_terms_days: number | null;
   consumption_tolerance: Num;
   advance_payment_pct: Num;
@@ -527,7 +548,17 @@ export function useApi<T>(path: string): Loadable<T> {
 export type Scope = 'nic' | 'iba_svoje' | 'vsetko';
 export type ModuleCode = 'zakaznici' | 'odberne_miesta' | 'obchod' | 'zmluvy' | 'provizie' | 'servis' | 'marketing';
 /** import a edit_active (upravovať Aktívne OOM) majú zmysel iba pri module odberne_miesta (0015). */
-export type Permission = { view: Scope; edit: Scope; archive: boolean; export: boolean; import: boolean; edit_active: boolean };
+export type Permission = {
+  view: Scope;
+  edit: Scope;
+  archive: boolean;
+  export: boolean;
+  import: boolean;
+  edit_active: boolean;
+  /** vidieť maržu firmy (iba modul zmluvy, 0023) */
+  margin?: boolean;
+};
+export type SellerType = 'obchodnik' | 'manazer';
 export type OrgRef = { id: string; name: string; country: string; currency: string; status: string; default: boolean };
 
 export type Me = {
@@ -538,6 +569,11 @@ export type Me = {
   team_code: string;
   team_name: string;
   can_change_owner: boolean;
+  /** typ predajcu (0023): obchodník / manažér, null = nepredáva */
+  seller_type: SellerType | null;
+  /** „schvaľuje ceny“ – cenové parametre, výnimky; vidí všetky zmluvy a maržu firmy */
+  approves_prices: boolean;
+  can_see_margin: boolean;
   environment: string;
   orgs: OrgRef[];
   permissions: Partial<Record<ModuleCode, Permission>>;
@@ -643,6 +679,8 @@ export type ProductRow = {
   segment: string;
   vat_rate: Num;
   tariff_type: string;
+  /** variant tarifu (0023): vykurovanie, verejne_osvetlenie */
+  tariff_variant: 'vykurovanie' | 'verejne_osvetlenie' | null;
   price_models: string[];
   price_regulation: boolean | null;
   status: string;

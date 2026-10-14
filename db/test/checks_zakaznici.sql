@@ -188,9 +188,9 @@ BEGIN
   UPDATE offer SET status = 'odoslana', sent_at = '2026-10-10 10:00+02' WHERE id = '00000000-0000-4000-8000-000000001412';
   ASSERT customer_status_calc(NULL, n, t) = 'ponuka', 'odoslaná ponuka';
 
-  INSERT INTO contract (id, deal_id, person_id, number, status, valid_from) VALUES
+  INSERT INTO contract (id, deal_id, person_id, number, type, phase, valid_from) VALUES
     ('00000000-0000-4000-8000-000000001413', '00000000-0000-4000-8000-000000001411', n,
-     'TEST-NOVAKOVA', 'podpisana', '2027-01-01');
+     'TEST-NOVAKOVA', 'dodavka_domacnost', 'podpisana', '2027-01-01');
   ASSERT customer_status_calc(NULL, n, t) = 'cakajuci_zakaznik', 'podpísaná zmluva od 1. 1. 2027';
   ASSERT customer_status_calc(NULL, n, '2027-01-01') <> 'cakajuci_zakaznik', 'od účinnosti už nie čakajúci';
 
@@ -231,8 +231,8 @@ BEGIN
   ASSERT customer_status_calc(NULL, h, t) = 'ponuka', 'bývalý s ponukou';
 
   -- vracajúci sa: nová zmluva do budúcna → Čakajúci s príznakom bývalý (čl. 13)
-  INSERT INTO contract (deal_id, person_id, number, status, valid_from) VALUES
-    ('00000000-0000-4000-8000-000000001511', h, 'TEST-HORVATH', 'caka_na_zaradenie', '2027-03-01');
+  INSERT INTO contract (deal_id, person_id, number, type, phase, valid_from) VALUES
+    ('00000000-0000-4000-8000-000000001511', h, 'TEST-HORVATH', 'dodavka_domacnost', 'podpisana', '2027-03-01');
   ASSERT customer_status_calc(NULL, h, t) = 'cakajuci_zakaznik', 'vracajúci sa zákazník';
   ASSERT customer_is_former_calc(NULL, h), 'vracajúci sa ostáva bývalý';
 

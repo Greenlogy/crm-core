@@ -101,8 +101,8 @@ export function Layout() {
         </NavLink>
 
         <div className="sidebar-foot">
-          {me.is_admin && (
-            <NavLink to="/nastavenia" className={navClass}>
+          {(me.is_admin || me.approves_prices) && (
+            <NavLink to={me.is_admin ? '/nastavenia' : '/nastavenia/cenove-parametre'} className={navClass}>
               <Icon d={ICONS.settings} />
               Nastavenia
             </NavLink>

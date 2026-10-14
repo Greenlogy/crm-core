@@ -368,7 +368,7 @@ export function EditItems(props: { detail: PriceListDetail; version: PriceListVe
               </th>
               {cols.map((f) => (
                 <th key={f} scope="colgroup" colSpan={2} className="num">
-                  {f === 'program' && rows.some((r) => r.category === 'viwa') ? 'Mesačne za OOM [€]' : FIELDS[f].title}
+                  {f === 'program' && rows.some((r) => r.category === 'viwa') ? 'Mesačne za účet [€]' : FIELDS[f].title}
                 </th>
               ))}
               <th scope="col" rowSpan={2}>

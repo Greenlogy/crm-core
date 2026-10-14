@@ -10,14 +10,13 @@ import {
   Item,
   Kpi,
   PageSkeleton,
-  Pill,
   Rows,
   Source,
   StatusPill,
 } from '../components/ui';
 import { useApi, type ContractCard } from '../lib/api';
 import { date, eurMonth, eurMwh, mwh, num, pct, period, sumNum, text } from '../lib/format';
-import { CONTRACT_STATUS, DIRECTION, label, OOM_STATUS, OOM_TYPE, PRICE_STATUS, SEGMENT } from '../lib/labels';
+import { CONTRACT_STATUS, label, OOM_STATUS, OOM_TYPE, PRICE_SLOT, PRICE_STATUS, SEGMENT } from '../lib/labels';
 
 export function ContractPage() {
   const { id = '' } = useParams();
@@ -39,7 +38,6 @@ export function ContractPage() {
           <h1 className="t-page-title">Zmluva {k.number ?? '(bez čísla)'}</h1>
           <div className="page-sub">
             <StatusPill map={CONTRACT_STATUS} value={k.status} />
-            {k.confirmed ? <Pill tone="positive">Potvrdená</Pill> : <Pill tone="warning">Nepotvrdená</Pill>}
             <span>
               Zákazník: <Link to={customerPath}>{k.customer_name || '(bez mena)'}</Link>
             </span>
@@ -49,7 +47,7 @@ export function ContractPage() {
       </header>
 
       <section className="kpis" aria-label="Ukazovatele">
-        <Kpi label="Platnosť" value={k.valid_to ? date(k.valid_to) : 'neurčito'} sub={`od ${date(k.valid_from)}`} />
+        <Kpi label="Účinnosť" value={k.effective_to ? date(k.effective_to) : 'neurčito'} sub={`od ${date(k.valid_from)}`} />
         <Kpi label="Odberné miesta" value={num(k.ooms.length, 0)} sub={`platných cien ${validPrices}`} />
         <Kpi label="Plánovaná spotreba" value={mwh(consumption)} sub="ročne, VT + NT z OOM zmluvy" />
         <Kpi label="Plánovaný výkup" value={mwh(feedIn)} sub="ročne z OOM zmluvy" />
@@ -63,8 +61,8 @@ export function ContractPage() {
               rows={[
                 ['Číslo zmluvy', text(k.number)],
                 ['Stav', <StatusPill map={CONTRACT_STATUS} value={k.status} />],
-                ['Potvrdená', k.confirmed ? 'áno' : 'nie'],
-                ['Platnosť', period(k.valid_from, k.valid_to)],
+                ['Účinnosť', period(k.valid_from, k.effective_to)],
+                ['Podpísaná', date(k.signed_on)],
                 ['Segment', text(label(SEGMENT, k.segment))],
                 ['Splatnosť faktúr', k.payment_terms_days === null ? text(null) : `${k.payment_terms_days} dní`],
                 ['Tolerancia odberu', k.consumption_tolerance === null ? text(null) : `± ${num(k.consumption_tolerance, 2)} %`],
@@ -98,13 +96,11 @@ export function ContractPage() {
                     <tr>
                       <th>EIC</th>
                       <th>Produkt</th>
-                      <th>Smer</th>
+                      <th>Zložka</th>
                       <th className="num">VT / 1T</th>
                       <th className="num">NT</th>
-                      <th className="num">Odchýlka</th>
-                      <th className="num">Poplatok OM</th>
-                      <th className="num">ZEM</th>
-                      <th className="num">VBattery</th>
+                      <th className="num">Aditív</th>
+                      <th className="num">Mesačne</th>
                       <th>Účinnosť</th>
                       <th>Stav</th>
                     </tr>
@@ -118,13 +114,11 @@ export function ContractPage() {
                           </Link>
                         </td>
                         <td title={p.product ?? undefined}>{text(p.product)}</td>
-                        <td>{text(label(DIRECTION, p.direction))}</td>
+                        <td>{text(PRICE_SLOT[p.slot] ?? p.slot)}</td>
                         <td className="num">{eurMwh(p.price_vt_eur_mwh)}</td>
                         <td className="num">{eurMwh(p.price_nt_eur_mwh)}</td>
-                        <td className="num">{eurMwh(p.imbalance_price_eur_mwh)}</td>
-                        <td className="num">{eurMonth(p.fee_oom_eur_month)}</td>
-                        <td className="num">{eurMonth(p.fee_zem_eur_month)}</td>
-                        <td className="num">{eurMonth(p.fee_vbattery_eur_month)}</td>
+                        <td className="num">{p.additive_pct !== null && p.additive_pct !== undefined ? pct(p.additive_pct) : eurMwh(p.additive_eur_mwh)}</td>
+                        <td className="num">{eurMonth(p.fee_eur_month)}</td>
                         <td>{period(p.valid_from, p.valid_to)}</td>
                         <td>
                           <StatusPill map={PRICE_STATUS} value={p.status} />

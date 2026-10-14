@@ -106,14 +106,15 @@ export async function oomCard(sql: Sql, id: string) {
            ${sql.unsafe(LABEL('typ_vykupnej_zmluvy', 'feed_in_contract_type'))} AS feed_in_contract_type_label,
            ${sql.unsafe(LABEL('predchadzajuci_dodavatel', 'previous_supplier'))} AS previous_supplier_label,
            crm_oom_access(o.id, 'edit') AS can_edit,
-           crm_can_edit_active_oom() AS can_edit_active
+           crm_can_edit_active_oom() AS can_edit_active,
+           o.source_category = 'lokalny_zdroj' AND NOT o.planned_feed_in_manual AS planned_feed_in_computed
       FROM oom o
       JOIN oom_v v ON v.id = o.id
       JOIN org g ON g.id = o.org_id
      WHERE o.id = ${id}`;
   if (!oom) return null;
 
-  const [links, devices, contacts, deals, prices, timeline, plans] = await Promise.all([
+  const [links, devices, contacts, deals, prices, timeline, plans, regulation] = await Promise.all([
     // História väzieb: iba riadky, ktoré používateľ vidí (RLS); meno zákazníka iba ak ho smie vidieť.
     sql`
       SELECT l.id, l.company_id, l.person_id, l.valid_from, l.valid_to, l.status, l.end_reason,
@@ -152,15 +153,16 @@ export async function oomCard(sql: Sql, id: string) {
        WHERE x.oom_id = ${id}
        ORDER BY d.closed_at DESC NULLS LAST, d.created_at DESC`,
     sql`
-      SELECT cp.id, cp.contract_id, k.number AS contract_number, pr.code AS product, cp.direction,
-             cp.price_vt_eur_mwh, cp.price_nt_eur_mwh, cp.additive_eur_mwh, cp.imbalance_price_eur_mwh,
-             cp.additive_coefficient_pct, cp.fee_oom_eur_month, cp.fee_zem_eur_month, cp.fee_vbattery_eur_month,
-             cp.fee_rk_eur_kw_month, cp.vbattery_program, cp.valid_from, cp.valid_to, cp.status
+      SELECT cp.id, cp.contract_id, k.number AS contract_number, pr.code AS product, cp.slot, cp.price_model,
+             cp.price_vt_eur_mwh, cp.price_nt_eur_mwh, cp.additive_eur_mwh, cp.additive_pct,
+             cp.fee_eur_month, cp.fee_kw_eur_month, cp.valid_from, cp.valid_to,
+             CASE WHEN cp.valid_from <= crm_today() AND (cp.valid_to IS NULL OR cp.valid_to >= crm_today())
+                  THEN 'platna' ELSE 'neplatna' END AS status
         FROM contract_price cp
         JOIN contract k ON k.id = cp.contract_id
         LEFT JOIN product pr ON pr.id = cp.product_id
        WHERE cp.oom_id = ${id}
-       ORDER BY cp.status, cp.valid_from DESC NULLS LAST`,
+       ORDER BY 15 DESC, cp.valid_from DESC`,   // platné hore
     // Časová os z auditu: OOM, väzby, zariadenia a kontaktné osoby tohto OOM (aj zmazané).
     // Obrazovka udalosti pomenuje sama; tu iba surové zmeny, kto, kedy, zdroj a súbor importu.
     sql`
@@ -194,6 +196,15 @@ export async function oomCard(sql: Sql, id: string) {
        WHERE pl.oom_id = ${id}
        ORDER BY pl.status = 'planovana' DESC, pl.status = 'zlyhala' DESC, pl.created_at DESC
        LIMIT 10`,
+    // Cenová regulácia s dátumom (0023, 0024): naplánované (budúce, neuplatnené) a história
+    sql`
+      SELECT r.id, r.valid_from, r.value, r.applied_at, r.created_at, u.name AS created_by_name,
+             r.applied_at IS NULL AND r.valid_from > crm_today() AS is_planned
+        FROM oom_price_regulation_change r
+        LEFT JOIN app_user u ON u.id = r.created_by
+       WHERE r.oom_id = ${id}
+       ORDER BY r.valid_from DESC
+       LIMIT 20`,
   ]);
 
   // Mená osôb a zákazníkov v časovej osi (iba tie, ktoré používateľ vidí)
@@ -226,7 +237,7 @@ export async function oomCard(sql: Sql, id: string) {
       LEFT JOIN oom o2 ON o2.id = r.id`;
 
   return {
-    ...oom, links, devices, contacts, deals, prices, timeline, plans, custom_refs: refs,
+    ...oom, links, devices, contacts, deals, prices, timeline, plans, regulation, custom_refs: refs,
     names: Object.fromEntries(names.map((n) => [n.id, n.name])),
   };
 }

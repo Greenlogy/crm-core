@@ -77,7 +77,7 @@ export function ProgramsPage() {
 
       <Card flush title="Green VIWA – virtuálna peňaženka" label="Green VIWA">
         <div className="price-note">
-          samostatná zmluva namiesto výkupu · poplatky za každé výrobné OOM · {source(data.viwa)}
+          samostatná zmluva namiesto výkupu · mesačná platba za účet + odchýlka za kW každého výrobného OOM · {source(data.viwa)}
         </div>
         <div className="table-wrap">
           <table className="tbl">
@@ -85,7 +85,7 @@ export function ProgramsPage() {
               <tr>
                 <th scope="col">Balík</th>
                 <th scope="col" className="num">
-                  Za OOM bez DPH [€]
+                  Za účet bez DPH [€]
                 </th>
                 <th scope="col" className="num">
                   s DPH [€]
@@ -121,8 +121,9 @@ export function ProgramsPage() {
         </div>
         <div className="price-note">
           Všetky parametre sú pevné pre balík, nič nie je individuálne. Inštalovaný výkon sa berie z OOM (výkon zdroja). CRM parametre
-          eviduje, kredity, vouchery a poplatky v kWh počíta fakturácia. Príklad: VIWA Plus, 2 výrobné OOM 50 + 30 kW → 2 × 6,90 € +
-          80 kW × 0,20 € = 29,80 € mesačne bez DPH.
+          eviduje, kredity, vouchery a poplatky v kWh počíta fakturácia. Mesačná platba je za jeden VIWA účet bez ohľadu na počet
+          odovzdávacích miest. Príklad: VIWA Plus, 1 účet, 2 výrobné OOM 50 + 30 kW → 6,90 € + 80 kW × 0,20 € = 22,90 € mesačne
+          bez DPH.
         </div>
       </Card>
     </>

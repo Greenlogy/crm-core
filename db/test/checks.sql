@@ -21,7 +21,7 @@ BEGIN
     RAISE NOTICE 'OK: deal bez zákazníka odmietnutý';
   END;
   BEGIN
-    INSERT INTO contract (number) VALUES ('TEST-BEZ-ZAKAZNIKA');
+    INSERT INTO contract (number, type, phase) VALUES ('TEST-BEZ-ZAKAZNIKA', 'dodavka_firma_nn', 'rozpracovana');
     RAISE EXCEPTION 'CHYBA: zmluva bez zákazníka prešla';
   EXCEPTION WHEN check_violation THEN
     RAISE NOTICE 'OK: zmluva bez zákazníka odmietnutá';
@@ -94,16 +94,17 @@ EXCEPTION WHEN foreign_key_violation THEN
 END;
 $$;
 
--- 6. Najviac jedna platná zmluvná cena na OOM a zmluvu; nákupné ceny
+-- 6. Najviac jedna cena komodity na OOM, zmluvu a obdobie (0025); nákupné ceny
 DO $$
 BEGIN
   ASSERT (SELECT count(*) FROM contract_purchase
            WHERE contract_id = '00000000-0000-4000-8000-000000000701') = 2,
          'zmluva má mať 2 nákupné ceny';
-  INSERT INTO contract_price (contract_id, oom_id, direction, price_vt_eur_mwh)
-  VALUES ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000301', 'odber', 130);
+  INSERT INTO contract_price (contract_id, oom_id, slot, product_id, price_model, price_vt_eur_mwh, valid_from)
+  VALUES ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000301', 'komodita',
+          '00000000-0000-4000-8000-000000000401', 'fix', 130, '2028-01-01');
   RAISE EXCEPTION 'CHYBA: druhá platná cena prešla';
-EXCEPTION WHEN unique_violation THEN
+EXCEPTION WHEN exclusion_violation THEN
   RAISE NOTICE 'OK: zmluva má 2 nákupné ceny, druhá platná cena pre OOM odmietnutá';
 END;
 $$;

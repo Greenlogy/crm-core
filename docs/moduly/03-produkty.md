@@ -143,9 +143,9 @@ Všetky parametre sú pevné pre balík, nič nie je individuálne. Parametre CR
 
 Ceny sa uložia bez DPH na 4 desatinné miesta: STANDARD 1,4634 €, PREMIUM 3,9024 €, MAX 7,7480 € (sadzba DPH 23 %).
 
-**Green VIWA** – samostatná zmluva, poplatky sa počítajú za každé výrobné OOM zmluvy.
+**Green VIWA** – samostatná zmluva. Mesačná platba je **za jeden VIWA účet** bez ohľadu na počet odovzdávacích miest (zmluva čl. 5.2; oprava podľa modulu 4, 13. 10. 2026); poplatok za odchýlku sa počíta za kW každého výrobného OOM.
 
-| Balík | Mesačne za OOM | Konverzný kurz (hodnota uloženia) | Poplatok za odchýlku – mesačne za kW inštalovaného výkonu | Aktivačný bonus | Expirácia kreditu | GreenCar |
+| Balík | Mesačne za účet | Konverzný kurz (hodnota uloženia) | Poplatok za odchýlku – mesačne za kW inštalovaného výkonu | Aktivačný bonus | Expirácia kreditu | GreenCar |
 | --- | --- | --- | --- | --- | --- | --- |
 | Basic | 3,90 € | SPOT × 0,75 | 0,25 € | 25 GreenCredit | 12 mesiacov | nie |
 | Plus | 6,90 € | SPOT × 0,80 | 0,20 € | 50 GreenCredit | 24 mesiacov | áno |
@@ -179,7 +179,7 @@ Distribúcia, TPS, odvod do NJF a spotrebnú daň Greenlogy iba refakturuje. CRM
 3. **Domácnosť stratí nárok na energopomoc.** Servis zmení cenovú reguláciu na OOM na NIE od 1. 3. a zmluva dostane od 1. 3. produkt a cenu „– NIE Energopomoc“.
 4. **Malý podnik s 3 OOM na SSD** (sadzby C2, C10, C11, cenová regulácia ANO) s plánovanou spotrebou spolu 24 MWh. CRM ponúkne DMP2, DMP10 a DMP11 a mesačnú platbu 1,50 € za každé OM. Keby bol súčet 34 MWh, CRM upozorní na individuálnu ponuku.
 5. **Domácnosť s FVE** si objedná VBattery PREMIUM. Program sa pridá na výrobné OOM zmluvy o dodávke. Na zmluve je 4,80 € mesačne s DPH a parametre GreenCar a GreenShare z cenníka.
-6. **Firma s FVE si zvolí VIWA Plus.** Vznikne samostatná zmluva s 2 výrobnými OOM (50 kW a 30 kW). Mesačne platí 2 × 6,90 € + 80 kW × 0,20 € = 29,80 € bez DPH.
+6. **Firma s FVE si zvolí VIWA Plus.** Vznikne samostatná zmluva (1 účet) s 2 výrobnými OOM (50 kW a 30 kW). Mesačne platí 6,90 € + 80 kW × 0,20 € = 22,90 € bez DPH.
 7. **Pokus o úpravu schváleného cenníka:** CRM ho nedovolí a ponúkne novú verziu.
 8. **Malý podnik na ZSD so sadzbou C2-X3** a plánovanou spotrebou NT 4 MWh. CRM ponúkne DMP1–DMP8 a DMP10, navrchu dvojtarifné DMP4–DMP8. Obchodník vyberie DMP4.
 9. **Firma s individuálnou cenou FIX, 12 OOM.** Na zmluve je FIX VT/NT podľa ponuky a mesačná platba 12 × 5 € = 60 € bez DPH. ZEM sa neúčtuje.
@@ -220,7 +220,7 @@ Databáza: `0019_produkty`, `0020_cenniky` a naplnenie cenníkov 2026 (`db/seed/
 - **F1 – iba čítanie** (plán schválený 13. 10.): obrazovky 20 Cenníky, 21 Detail cenníka, 22 Produkty, 23 Programy;
   položka menu Cenníky pre všetkých (aj externých). Adresy `/cenniky`, `/cenniky/produkty`, `/cenniky/programy`,
   `/cenniky/:id` (iba platné ID; `?verzia=`). Ceny s DPH iba z databázy, čísla v sk-SK. Detail podľa obsahu verzie:
-  VBattery, VIWA a Poplatky B2B bez VT/NT; VIWA poplatok za OOM a €/kW, VBattery mesačný poplatok.
+  VBattery, VIWA a Poplatky B2B bez VT/NT; VIWA poplatok za účet (oprava 13. 10., modul 4) a €/kW, VBattery mesačný poplatok.
   Stĺpce „Zmluvy“ a „prejde X zmlúv“ skryté do modulu 4. Návrh vidí iba admin; obchodník s `?verzia=` návrhu dostane 404.
 - **F2 – úpravy adminom** (plán schválený 13. 10.): nový cenník (kód z názvu bez roka, skrytý), prvá verzia, nová verzia
   kópiou (predvolene od 1. 1. nasledujúceho roka; ukončené produkty sa neskopírujú), údaje návrhu, úprava cien a parametrov

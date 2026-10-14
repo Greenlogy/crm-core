@@ -49,6 +49,19 @@ GRANT DELETE ON product_tariff, tariff_scope TO crm_app;
 GRANT DELETE ON price_list, price_list_version, price_list_item, price_list_item_program TO crm_app;
 REVOKE UPDATE ON price_list_version FROM crm_app;
 GRANT UPDATE (name, valid_from, note) ON price_list_version TO crm_app;
+-- Zmluvy F1 (0023): budúci cenový parameter smie autor zrušiť; vlastný preklad importu zmazať (systémový iba skryť) –
+-- pravidlá strážia spúšťače price_parameter_guard a import_alias_guard. Trhové ceny sa nemažú (market_price_guard).
+GRANT DELETE ON price_parameter, import_alias TO crm_app;
+-- 0024: naplánovanú (neuplatnenú) zmenu cenovej regulácie OOM smie zrušiť, kto smie OOM upraviť (RLS)
+GRANT DELETE ON oom_price_regulation_change TO crm_app;
+-- 0024: trhová cena sa nemení – oprava je nový záznam a „opravené“ označí databázová funkcia (vlastník);
+-- aplikácia riadok trhovej ceny nemení vôbec (zatvára obídenie cez nastavenie relácie).
+REVOKE UPDATE ON market_price_daily FROM crm_app;
+-- 0025: zmluvy zakladá a údaje z Office portálu mení iba import (funkcia vlastníka); aplikácia mení iba údaje CRM.
+-- OOM v zmluve a ceny aplikácia nemení (aj spúšťač); výnimky a príznaky podľa RLS.
+REVOKE INSERT, UPDATE ON contract, contract_oom, contract_price FROM crm_app;
+GRANT UPDATE (previous_contract_id, related_contract_id, close_reason, note, custom) ON contract TO crm_app;
+GRANT DELETE ON price_exception TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

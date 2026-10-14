@@ -117,7 +117,12 @@ export function ProductsPage() {
                     )}
                   </td>
                   <td>{label(PRODUCT_CATEGORY, p.category)}</td>
-                  <td>{tariffText(p.tariffs, p.tariff_type, p.category)}</td>
+                  <td>
+                    {tariffText(p.tariffs, p.tariff_type, p.category)}
+                    {p.tariff_variant && (
+                      <span className="caption"> · {p.tariff_variant === 'vykurovanie' ? 'vykurovanie' : 'verejné osvetlenie'}</span>
+                    )}
+                  </td>
                   <td className="num">{p.vat_rate === null ? 'podľa diela' : vatText(p.vat_rate as string | number)}</td>
                   <td>{p.price_models.map((m) => label(PRICE_MODEL, m)).join(' · ') || EMPTY}</td>
                   <td>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Testy databázy jadra na vetve dev: seed.sql + checks.sql + checks_zakaznici.sql + checks_nastavenia.sql
 # + checks_zakaznici_zapis.sql + checks_oom.sql + checks_produkty.sql
-# + checks_cenniky.sql
+# + checks_cenniky.sql + checks_zmluvy_priprava.sql + checks_zmluvy.sql
 # v jednej transakcii, ktorá sa na konci vráti (na dev neostanú testovacie dáta).
 # Testy počítajú iba vlastné záznamy (pevné id 00000000-0000-4000-8000-…, východiskové tímy) – prejdú aj na databáze
 # s inými dátami (testovacie OOM, cenníky 2026, zmeny admina v Nastaveniach).
@@ -54,6 +54,8 @@ BEGIN;
 \i $ROOT/db/test/checks_oom.sql
 \i $ROOT/db/test/checks_produkty.sql
 \i $ROOT/db/test/checks_cenniky.sql
+\i $ROOT/db/test/checks_zmluvy_priprava.sql
+\i $ROOT/db/test/checks_zmluvy.sql
 ROLLBACK;
 \echo 'Všetky kontroly prešli. Transakcia vrátená, neostali testovacie dáta.'
 SQL

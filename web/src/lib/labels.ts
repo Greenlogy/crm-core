@@ -19,15 +19,24 @@ export const OOM_STATUS: Record<string, { label: string; tone: Tone; live?: bool
   prepisane: { label: 'Prepísané', tone: 'neutral' },
 };
 
+/** Stav zmluvy vypočítaný z fázy v Office portáli a dátumov (0025, contract_state). */
 export const CONTRACT_STATUS: Record<string, { label: string; tone: Tone; live?: boolean }> = {
-  rozpracovana: { label: 'Rozpracovaná', tone: 'neutral' },
-  caka_na_podpis: { label: 'Čaká na podpis', tone: 'info' },
+  v_priprave: { label: 'V príprave', tone: 'neutral' },
   podpisana: { label: 'Podpísaná', tone: 'info' },
-  caka_na_zaradenie: { label: 'Čaká na zaradenie', tone: 'info' },
-  aktivna: { label: 'Aktívna', tone: 'positive', live: true },
-  ukoncena: { label: 'Ukončená', tone: 'neutral' },
-  vypoved_neakceptovana: { label: 'Výpoveď neakceptovaná', tone: 'negative' },
-  zmena_neuspesna: { label: 'Zmena neúspešná', tone: 'negative' },
+  ucinna: { label: 'Účinná', tone: 'positive', live: true },
+  skoncena: { label: 'Skončená', tone: 'neutral' },
+  odmietnuta: { label: 'Odmietnutá', tone: 'negative' },
+  neuspesna: { label: 'Neúspešná', tone: 'negative' },
+};
+
+/** Zložka ceny zmluvy (0025). */
+export const PRICE_SLOT: Record<string, string> = {
+  komodita: 'Komodita',
+  poplatok_om: 'Mesačná platba za OM',
+  zem: 'ZEM',
+  program: 'Program (VBattery)',
+  viwa_ucet: 'VIWA – za účet',
+  viwa_kw: 'VIWA – za kW',
 };
 
 export const PRICE_STATUS: Record<string, { label: string; tone: Tone }> = {

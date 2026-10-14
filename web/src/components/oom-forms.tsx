@@ -41,6 +41,7 @@ function initialValues(o?: OomCard): Values {
   for (const k of TEXT_FIELDS) v[k] = o ? String((o as unknown as Record<string, unknown>)[k] ?? '') : '';
   for (const k of NUM_FIELDS) v[k] = o ? numText((o as unknown as Record<string, unknown>)[k]) : '';
   if (!o) v.type = 'spotreba';
+  v.public_lighting = o ? !!o.public_lighting : false;
   return v;
 }
 
@@ -107,7 +108,15 @@ function EicField(props: { value: string; onChange: (v: string) => void; selfId?
 }
 
 /** Všetky skupiny údajov OOM (rovnaké pri založení aj úprave). */
-function OomFields(props: { v: Values; set: (k: string, val: string | boolean) => void; options?: Options; selfId?: string; withSwitch: boolean }) {
+function OomFields(props: {
+  v: Values;
+  set: (k: string, val: string | boolean) => void;
+  options?: Options;
+  selfId?: string;
+  withSwitch: boolean;
+  /** úprava existujúceho OOM: plán výkupu lokálneho zdroja zadaný ručne (0023) */
+  feedInManual?: boolean;
+}) {
   const { v, set, options } = props;
   const text = (k: string, label: string, opts2: { wide?: boolean; type?: string; hint?: string; max?: number } = {}) => (
     <Field label={label} wide={opts2.wide} hint={opts2.hint}>
@@ -130,6 +139,11 @@ function OomFields(props: { v: Values; set: (k: string, val: string | boolean) =
           { value: 'sharing', label: 'Sharing' },
         ])}
         {text('name', 'Názov', { hint: 'napr. Hala A, Rodinný dom', max: 120 })}
+        <Field label="Verejné osvetlenie">
+          <Check checked={!!v.public_lighting} onChange={(x) => set('public_lighting', x)}>
+            áno (prolongácia navrhne Green 1T VO)
+          </Check>
+        </Field>
       </Section>
       <Section title="Adresa">
         {text('address_street', 'Ulica', { max: 120 })}
@@ -173,7 +187,15 @@ function OomFields(props: { v: Values; set: (k: string, val: string | boolean) =
       <Section title="Objemy">
         {v.type !== 'vyroba' && text('planned_consumption_vt_mwh', 'Plánovaná spotreba VT [MWh]')}
         {v.type !== 'vyroba' && text('planned_consumption_nt_mwh', 'Plánovaná spotreba NT [MWh]')}
-        {(v.type !== 'spotreba' || v.planned_feed_in_mwh !== '') && text('planned_feed_in_mwh', 'Plánovaný výkup [MWh]')}
+        {(v.type !== 'spotreba' || v.planned_feed_in_mwh !== '') &&
+          text('planned_feed_in_mwh', 'Plánovaný výkup [MWh]', {
+            hint:
+              v.source_category === 'lokalny_zdroj'
+                ? props.feedInManual
+                  ? 'Zadané ručne. Výpočet z výkonu sa dá vrátiť na karte OOM.'
+                  : 'Lokálny zdroj: počíta sa sám (výkon × 4 × 365 × 0,1 / 1000). Iná hodnota sa uloží ako ručná.'
+                : undefined,
+          })}
       </Section>
       {producer && (
         <Section title="Výroba">
@@ -186,11 +208,21 @@ function OomFields(props: { v: Values; set: (k: string, val: string | boolean) =
         </Section>
       )}
       <Section title="Fakturácia">
-        {select('price_regulation', 'Cenová regulácia', [
-          { value: '', label: '– nevyplnené' },
-          { value: 'true', label: 'ANO' },
-          { value: 'false', label: 'NIE' },
-        ], 'domácnosť: nárok na energopomoc; firma: cenník pre malé podniky')}
+        {props.selfId ? (
+          <Field label="Cenová regulácia" hint="mení sa s dátumom „platí od“ – tlačidlo Zmeniť reguláciu na karte OOM">
+            <TextInput
+              value={v.price_regulation === 'true' ? 'ANO' : v.price_regulation === 'false' ? 'NIE' : 'nevyplnené'}
+              onChange={() => undefined}
+              disabled
+            />
+          </Field>
+        ) : (
+          select('price_regulation', 'Cenová regulácia', [
+            { value: '', label: '– nevyplnené' },
+            { value: 'true', label: 'ANO' },
+            { value: 'false', label: 'NIE' },
+          ], 'domácnosť: nárok na energopomoc; firma: cenník pre malé podniky')
+        )}
         {text('excise_tax', 'Spotrebná daň', { max: 80 })}
         {select('billing_period', 'Fakturačné obdobie', opts(options?.fakturacne_obdobie, String(v.billing_period)))}
         {select('advance_payment_method', 'Zálohy', opts(options?.sposob_zaloh, String(v.advance_payment_method)))}
@@ -319,7 +351,7 @@ export function OomEditPanel(props: { o: OomCard; onClose: () => void; onSaved: 
         </>
       }
     >
-      <OomFields v={v} set={set} options={options} selfId={props.o.id} withSwitch />
+      <OomFields v={v} set={set} options={options} selfId={props.o.id} withSwitch feedInManual={props.o.planned_feed_in_manual} />
       {save.error && <Notice tone="error">{save.error}</Notice>}
     </SidePanel>
   );

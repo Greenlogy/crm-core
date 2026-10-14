@@ -37,7 +37,7 @@ export function PersonPage() {
 
   const k = p.kpi;
   const owner = p.owner_name ? [p.owner_name, p.owner_team].filter(Boolean).join(' · ') : text(null);
-  const contract = p.contracts.find((z) => z.status === 'aktivna') ?? p.contracts[0];
+  const contract = p.contracts.find((z) => z.status === 'ucinna') ?? p.contracts[0];
   const fullName = [p.title, p.name].filter(Boolean).join(' ');
 
   return (

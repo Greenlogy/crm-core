@@ -1,6 +1,6 @@
 // Detail cenníka (obrazovka 21, modul 3 F1 – iba čítanie): položky zvolenej verzie bez DPH a s DPH, zoznam verzií.
 // Ceny s DPH počíta databáza (price_list_item_v); web ich iba zobrazí. Stĺpce podľa obsahu verzie:
-// VBattery, VIWA a Poplatky B2B nemajú VT/NT; VIWA ukáže poplatok za OOM a €/kW, VBattery mesačný poplatok.
+// VBattery, VIWA a Poplatky B2B nemajú VT/NT; VIWA ukáže poplatok za účet a €/kW, VBattery mesačný poplatok.
 // F2 (iba admin): nová verzia (kópia), údaje a ceny návrhu, schválenie s náhľadom, ukončenie, zmazanie návrhu.
 // Export: schválenú verziu každý, kto ju vidí; návrh iba admin. „Prejde X zmlúv“ príde v module 4.
 
@@ -26,7 +26,7 @@ function columns(items: PriceListItem[]): Col[] {
   if (any((i) => i.fee_program_eur_month))
     cols.push({
       key: 'program',
-      title: viwa ? 'Mesačne za OOM [€]' : 'Mesačný poplatok [€]',
+      title: viwa ? 'Mesačne za účet [€]' : 'Mesačný poplatok [€]',
       net: (i) => i.fee_program_eur_month,
       gross: (i) => i.fee_program_with_vat,
       decimals: [2, 4],
