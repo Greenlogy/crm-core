@@ -8,6 +8,7 @@ import { NewDealPanel, RiskPills } from '../components/deal-forms';
 import { Select, TextInput } from '../components/form';
 import { Card, ErrorState, Kpi, Pill, Skeleton } from '../components/ui';
 import { useApi, type Owner } from '../lib/api';
+import { useMe } from '../lib/me';
 import { type DealOptions, type DealRow, OUTCOME_TONE, STEP_STATE } from '../lib/deals';
 import { date, eur, num, text } from '../lib/format';
 
@@ -24,11 +25,13 @@ const money = (v: string | number | null | undefined) => (v === null || v === un
 
 export function DealsPage() {
   const navigate = useNavigate();
+  const me = useMe();
   const [params, setParams] = useSearchParams();
   const { data: opts } = useApi<DealOptions>('/api/deals/options');
   const { data: owners } = useApi<Owner[]>('/api/deals/owners');
   const pipeline = params.get('pipeline') ?? '';
-  const owner = params.get('owner') ?? '';
+  // obchodník predvolene vidí svoje obchody (dizajn 32 „Vlastník: ja“); vedenie všetky
+  const owner = params.get('owner') ?? (me.deal_manager ? '' : 'ja');
   const step = params.get('step') ?? '';
   const view = (params.get('view') as View) || 'kanban';
   const [q, setQ] = useState('');
@@ -36,7 +39,7 @@ export function DealsPage() {
   const activePipeline = opts?.pipelines.find((p) => p.id === pipeline) ?? opts?.pipelines[0];
   const query = new URLSearchParams({
     ...(activePipeline ? { pipeline: activePipeline.id } : {}),
-    ...(owner ? { owner } : {}),
+    ...(owner && owner !== 'vsetci' ? { owner } : {}),
     ...(step ? { step } : {}),
     ...(q.trim().length >= 2 ? { q: q.trim() } : {}),
     closed: 'mesiac',
@@ -45,6 +48,7 @@ export function DealsPage() {
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params);
     if (v) p.set(k, v);
+    else if (k === 'owner') p.set(k, '');
     else p.delete(k);
     setParams(p, { replace: true });
   };
@@ -94,10 +98,14 @@ export function DealsPage() {
       </div>
 
       <div className="kpis" style={{ marginBottom: 16 }}>
-        <Kpi label="Otvorené obchody" value={data ? num(kpi.count, 0) : ''} />
-        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="do ponúk odhad na obchode" />
-        <Kpi label="Vážená PH" value={data ? `${eur(kpi.weighted)} €` : ''} sub="PH × pravdepodobnosť štádia" />
-        <Kpi label="Bez kroku / po termíne" value={data ? num(kpi.attention, 0) : ''} />
+        <Kpi
+          label="Otvorené obchody"
+          value={data ? num(kpi.count, 0) : ''}
+          sub={`${activePipeline?.name ?? ''}${owner === 'ja' ? ` · vlastník ${me.name}` : ''}`}
+        />
+        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="súčet aktuálnych variantov" />
+        <Kpi label="Vážená pridaná hodnota" value={data ? `${eur(kpi.weighted)} €` : ''} sub="podľa pravdepodobnosti štádia" />
+        <Kpi label="Bez kroku / po termíne" value={data ? num(kpi.attention, 0) : ''} sub="zvýraznené" />
       </div>
 
       <Card flush label="Obchody">
@@ -113,9 +121,8 @@ export function DealsPage() {
           <div style={{ minWidth: 180 }}>
             <Select
               value={owner}
-              onChange={(v) => set('owner', v === 'vsetci' ? '' : v)}
-              placeholder="Vlastník: všetci"
-              options={[{ value: 'vsetci', label: 'Všetci' }, { value: 'ja', label: 'Ja' }, ...(owners ?? []).map((o) => ({ value: o.id, label: o.name }))]}
+              onChange={(v) => set('owner', v)}
+              options={[{ value: '', label: 'Vlastník: všetci' }, { value: 'ja', label: 'Vlastník: ja' }, ...(owners ?? []).map((o) => ({ value: o.id, label: `Vlastník: ${o.name}` }))]}
             />
           </div>
           <div style={{ minWidth: 200 }}>
@@ -130,7 +137,10 @@ export function DealsPage() {
             <Skeleton lines={6} />
           </div>
         ) : view === 'kanban' ? (
-          <Kanban items={items} stages={activePipeline.stages} />
+          <>
+            <Kanban items={items} stages={activePipeline.stages.filter((s) => s.outcome === 'otvoreny')} />
+            <ClosedThisMonth items={items} />
+          </>
         ) : (
           <DealTable items={items} />
         )}
@@ -153,13 +163,13 @@ function Kanban(props: { items: DealRow[]; stages: DealOptions['pipelines'][numb
                 {num(col.length, 0)} · {eur(sum)} €{s.probability !== null ? ` · ${Math.round(Number(s.probability) * 100)} %` : ''}
               </span>
             </div>
-            {s.outcome !== 'otvoreny' && <div className="caption" style={{ padding: '0 8px 6px' }}>uzavreté tento mesiac</div>}
             {col.map((d) => (
-              <Link key={d.id} to={`/obchody/${d.id}`} className="kanban-card">
+              <Link key={d.id} to={`/obchody/${d.id}`} className={`kanban-card${d.step_state === 'po_termine' || d.step_state === 'bez_kroku' ? ' kanban-attention' : ''}`}>
+                <RiskPills risk={d.risk} compact />
                 <div className="kanban-title">{d.name}</div>
                 <div className="caption">{text(d.customer_name)}</div>
                 <div className="kanban-meta">
-                  <span>{d.value_eur === null ? '–' : `≈ ${eur(d.value_eur)} €`}</span>
+                  <span>PH {d.value_eur === null ? '–' : `≈ ${eur(d.value_eur)} €`}</span>
                   {d.step_state && d.step_state !== 'planovany' ? (
                     <Pill tone={STEP_STATE[d.step_state].tone}>{d.step_state === 'dnes' ? 'krok dnes' : STEP_STATE[d.step_state].label}</Pill>
                   ) : d.next_step_on ? (
@@ -171,7 +181,6 @@ function Kanban(props: { items: DealRow[]; stages: DealOptions['pipelines'][numb
                   {d.source_code === 'obnova' && <Pill tone="info">Obnova</Pill>}
                   {d.lost_reason_label && <Pill tone="negative">{d.lost_reason_label}</Pill>}
                 </div>
-                <RiskPills risk={d.risk} compact />
               </Link>
             ))}
           </section>
@@ -240,6 +249,27 @@ function DealTable(props: { items: DealRow[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ClosedThisMonth(props: { items: DealRow[] }) {
+  const won = props.items.filter((d) => d.stage_outcome === 'vyhrany');
+  const lost = props.items.filter((d) => d.stage_outcome === 'prehrany');
+  const month = new Intl.DateTimeFormat('sk-SK', { month: 'long', timeZone: 'Europe/Bratislava' }).format(new Date());
+  const reasons = new Map<string, number>();
+  for (const d of lost) reasons.set(d.lost_reason_label ?? 'iné', (reasons.get(d.lost_reason_label ?? 'iné') ?? 0) + 1);
+  return (
+    <div className="closed-month">
+      <span className="kl">Uzavreté v {month.replace(/^\p{L}/u, (c) => c.toLowerCase())}</span>
+      <span>
+        <Pill tone="positive">Vyhraté {won.length}</Pill>{' '}
+        <span className="caption">PH {eur(won.reduce((s, d) => s + Number(d.value_eur ?? 0), 0))} €</span>
+      </span>
+      <span>
+        <Pill tone="negative">Prehraté {lost.length}</Pill>{' '}
+        <span className="caption">{[...reasons].map(([r, n]) => `${r} ${n}`).join(' · ') || '–'}</span>
+      </span>
     </div>
   );
 }

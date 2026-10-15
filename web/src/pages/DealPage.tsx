@@ -24,6 +24,7 @@ export function DealPage() {
   const timeline = useApi<{ items: TimelineItem[] }>(`/api/deals/${id}/timeline`);
   const [panel, setPanel] = useState<null | 'edit' | 'lost' | 'reopen' | 'step' | 'oom-add' | 'oom-new' | 'contact-add'>(null);
   const [editOom, setEditOom] = useState<DealOom | null>(null);
+  const [tlFilter, setTlFilter] = useState<'vsetko' | 'poznamka' | 'udalost'>('vsetko');
   const save = useSave();
   const refresh = () => {
     reload();
@@ -36,6 +37,7 @@ export function DealPage() {
   const closed = d.closed_at !== null;
   const editable = d.can_edit && !closed;
   const lostStage = d.stages.find((s) => s.code === 'prehrane');
+  const primary = d.contacts.find((c) => c.is_primary) ?? null;
 
   const totals = d.ooms.reduce(
     (t, o) => {
@@ -98,14 +100,16 @@ export function DealPage() {
       )}
 
       <nav className="stepper" aria-label="Štádiá obchodu">
-        {d.stages.map((s) => {
+        {d.stages.map((s, i) => {
           const current = s.id === d.stage_id;
+          const currentIdx = d.stages.findIndex((x) => x.id === d.stage_id);
+          const done = s.outcome === 'otvoreny' && (i < currentIdx || d.stage_outcome === 'vyhrany');
           const locked = !editable || current || s.code === 'akceptacia' || s.code === 'vyhrane' || (s.code === 'prehrane' && !lostStage);
           return (
             <button
               key={s.id}
               type="button"
-              className={`step${current ? ' step-current' : ''} step-${s.outcome}`}
+              className={`step${current ? ' step-current' : ''}${done ? ' step-done' : ''} step-${s.outcome}`}
               disabled={locked || save.busy}
               title={stageTitle(s)}
               aria-current={current ? 'step' : undefined}
@@ -169,13 +173,24 @@ export function DealPage() {
             </div>
           </Card>
 
-          <Card title="Časová os" aside={<span className="caption">poznámky, štádiá, OOM, kontakty</span>}>
+          <Card
+            title="Časová os"
+            aside={
+              <div className="chips" role="group" aria-label="Filter časovej osi">
+                {(['vsetko', 'poznamka', 'udalost'] as const).map((f) => (
+                  <button key={f} type="button" className="chip" aria-pressed={tlFilter === f} onClick={() => setTlFilter(f)}>
+                    {f === 'vsetko' ? 'Všetko' : f === 'poznamka' ? 'Poznámky' : 'Udalosti'}
+                  </button>
+                ))}
+              </div>
+            }
+          >
             {editable || d.can_edit ? <NoteBox dealId={d.id} onSaved={timeline.reload} /> : null}
             {!timeline.data ? null : timeline.data.items.length === 0 ? (
               <Empty>Zatiaľ bez udalostí.</Empty>
             ) : (
               <ul className="timeline">
-                {timeline.data.items.map((t) => (
+                {timeline.data.items.filter((t) => tlFilter === 'vsetko' || t.type === tlFilter).map((t) => (
                   <li key={t.id} className="timeline-item">
                     <div className="timeline-head">
                       <span className="caption">
@@ -203,6 +218,8 @@ export function DealPage() {
                 ['Začiatok dodávky', date(d.supply_start)],
                 ['Odhad PH', d.estimated_value_eur === null ? '–' : `${eur(d.estimated_value_eur)} €`],
                 ['Predošlá zmluva', d.previous_contract_id ? <Link to={`/zmluvy/${d.previous_contract_id}`}>{d.previous_contract_number}</Link> : '–'],
+                ['Kontaktná osoba', primary ? `${text(primary.name)}${primary.position ? ` · ${primary.position}` : ''}` : '–'],
+                ['Finstat', d.company_id ? (d.risk && d.risk.warnings.length ? <RiskPills risk={d.risk} /> : d.risk?.finstat_updated_at ? 'bez výstrah' : 'nenačítané') : '–'],
                 ['Vlastník zákazníka', text(d.customer_owner_name)],
                 ['Založený', date(d.created_at)],
               ]}

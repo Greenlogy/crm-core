@@ -1838,3 +1838,105 @@ a.tab {
   gap: 6px;
   flex-wrap: wrap;
 }
+.company-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.tile-value {
+  margin-top: 4px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tone-negative {
+  color: var(--negative);
+}
+.tone-positive {
+  color: var(--positive);
+}
+.zscale {
+  margin-top: 4px;
+}
+.zscale-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.zscale-bar {
+  position: relative;
+  display: flex;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  overflow: visible;
+}
+.zscale-band:first-child {
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+}
+.zscale-band:nth-child(3) {
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+}
+.zscale-red {
+  background: var(--negative-tint);
+}
+.zscale-amber {
+  background: var(--warning-tint);
+}
+.zscale-green {
+  background: var(--positive-tint);
+}
+.zscale-mark {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 14px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.zscale-ticks {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  height: 16px;
+}
+.zscale-ticks span[style] {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.ban {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.ban-warn {
+  background: var(--warning-tint);
+}
+.kanban-attention {
+  box-shadow: inset 3px 0 0 var(--negative);
+}
+.closed-month {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+.step-done::before {
+  content: '✓ ';
+}

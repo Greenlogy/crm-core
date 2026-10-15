@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { NewDealPanel, RiskPills } from '../components/deal-forms';
-import { Field, Notice, SidePanel, TextInput, useSave } from '../components/form';
+import { Field, Notice, Segmented, TextInput, useSave } from '../components/form';
 import { Card, Empty, Pill, Rows } from '../components/ui';
 import { get, send } from '../lib/api';
 import { type Risk, Z_BAND } from '../lib/deals';
@@ -62,10 +62,11 @@ const stamp = (v: string) =>
 export function CompanyCheckPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const [mode, setMode] = useState<'ico' | 'nazov'>(params.get('ico') ? 'ico' : 'ico');
   const [q, setQ] = useState(params.get('ico') ?? '');
   const [suggest, setSuggest] = useState<SearchResult | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
-  const [panel, setPanel] = useState<null | 'deal' | 'assign'>(null);
+  const [dealPanel, setDealPanel] = useState(false);
   const save = useSave();
 
   const check = (ico: string) =>
@@ -80,10 +81,10 @@ export function CompanyCheckPage() {
     if (ico && /^\d{6,8}$/.test(ico)) void check(ico);
   }, []);
 
-  // Našepkávanie podľa názvu (od 3 znakov); číslo = IČO, overí sa tlačidlom
+  // Názov: našepkávanie od 3 znakov (Finstat + CRM); IČO: overí sa tlačidlom
   useEffect(() => {
     const v = q.trim();
-    if (v.length < 3 || /^\d+$/.test(v.replace(/\s/g, ''))) {
+    if (mode !== 'nazov' || v.length < 3) {
       setSuggest(null);
       return;
     }
@@ -95,17 +96,15 @@ export function CompanyCheckPage() {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [q]);
+  }, [q, mode]);
 
   const isIco = /^\d{6,8}$/.test(q.replace(/\s/g, ''));
   const crm = result?.crm;
   const f = result?.finstat;
   const createCompany = () =>
     save.run(async () => {
-      const r = await send<{ id: string }>('POST', '/api/companies/from-finstat', { ico: f?.ico ?? crm?.ico });
-      const again = await get<CheckResult>(`/api/company-check?ico=${encodeURIComponent(f?.ico ?? crm?.ico ?? '')}`);
-      setResult(again);
-      return r;
+      await send<{ id: string }>('POST', '/api/companies/from-finstat', { ico: f?.ico ?? crm?.ico });
+      setResult(await get<CheckResult>(`/api/company-check?ico=${encodeURIComponent(f?.ico ?? crm?.ico ?? '')}`));
     });
 
   return (
@@ -114,24 +113,44 @@ export function CompanyCheckPage() {
         <div>
           <h1 className="t-page-title">Overenie firmy</h1>
           <div className="page-sub">
-            <span>pred založením obchodu: je v CRM, komu patrí, údaje a výstrahy z Finstatu</span>
+            <span>pred založením obchodu</span>
           </div>
         </div>
       </header>
 
       <Card>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <Segmented
+            label="Hľadať podľa"
+            value={mode}
+            onChange={(m) => {
+              setMode(m);
+              setSuggest(null);
+            }}
+            options={[
+              { value: 'ico', label: 'IČO' },
+              { value: 'nazov', label: 'Názov' },
+            ]}
+          />
           <div style={{ flex: '1 1 320px' }}>
-            <Field label="IČO alebo názov firmy">
-              <TextInput value={q} onChange={setQ} placeholder="napr. 53223713 alebo Greenlogy" autoFocus />
-            </Field>
+            <TextInput
+              value={q}
+              onChange={setQ}
+              placeholder={mode === 'ico' ? 'IČO, napr. 53223713' : 'Názov firmy (od 3 znakov)'}
+              autoFocus
+            />
           </div>
-          <button type="button" className="btn primary" disabled={!isIco || save.busy} onClick={() => check(q.replace(/\s/g, ''))}>
-            {save.busy ? 'Overujem…' : 'Overiť'}
+          <button
+            type="button"
+            className="btn primary"
+            disabled={(mode === 'ico' && !isIco) || (mode === 'nazov' && !suggest) || save.busy}
+            onClick={() => (mode === 'ico' ? check(q.replace(/\s/g, '')) : undefined)}
+          >
+            {save.busy ? 'Overujem…' : 'Overiť firmu'}
           </button>
         </div>
         {save.error && <Notice tone="error">{save.error}</Notice>}
-        {suggest && (
+        {suggest && mode === 'nazov' && (
           <div className="suggest">
             {suggest.crm.map((c) => (
               <button key={c.id} type="button" className="btn btn-ghost suggest-row" onClick={() => check(c.ico)}>
@@ -139,12 +158,12 @@ export function CompanyCheckPage() {
               </button>
             ))}
             {suggest.finstat
-              .filter((s) => !suggest.crm.some((c) => c.ico === s.ico))
-              .map((s) => (
-                <button key={s.ico} type="button" className="btn btn-ghost suggest-row" onClick={() => check(s.ico)}>
-                  <strong>{s.name}</strong> · {s.ico} {s.city ? `· ${s.city}` : ''}
-                  {s.cancelled && <Pill tone="negative">zrušená</Pill>}
-                  {s.in_crm && <Pill tone="info">v CRM{s.owner_name ? ` · ${s.owner_name}` : ''}</Pill>}
+              .filter((x) => !suggest.crm.some((c) => c.ico === x.ico))
+              .map((x) => (
+                <button key={x.ico} type="button" className="btn btn-ghost suggest-row" onClick={() => check(x.ico)}>
+                  <strong>{x.name}</strong> · {x.ico} {x.city ? `· ${x.city}` : ''}
+                  {x.cancelled && <Pill tone="negative">zrušená</Pill>}
+                  {x.in_crm && <Pill tone="info">v CRM{x.owner_name ? ` · ${x.owner_name}` : ''}</Pill>}
                 </button>
               ))}
             {suggest.finstat_error && <div className="caption">Finstat: {suggest.finstat_error}</div>}
@@ -156,188 +175,204 @@ export function CompanyCheckPage() {
       {result && crm && (
         <div className="columns" style={{ marginTop: 16 }}>
           <div className="col-wide">
-            <Card title="V CRM">
-              {!crm.exists ? (
-                <>
-                  <p>
-                    Firma s IČO {crm.ico} v CRM nie je. {f ? 'Založte ju z Finstatu – vlastníkom budete vy.' : ''}
-                  </p>
-                  {f && (
-                    <button type="button" className="btn primary" disabled={save.busy} onClick={createCompany}>
-                      Založiť firmu z Finstatu
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Rows
-                    rows={[
-                      ['Firma', crm.visible && crm.company_id ? <Link to={`/firmy/${crm.company_id}`}>{crm.name}</Link> : text(crm.name)],
-                      ['Stav', crm.status ? CUSTOMER_STATUS[crm.status]?.label ?? crm.status : '–'],
-                      ['Vlastník', crm.owner_name ? `${crm.owner_name}${crm.owner_is_me ? ' (vy)' : ''}` : 'bez vlastníka'],
-                      ...(crm.visible ? ([['Kontakty', String(crm.contacts ?? 0)]] as [string, string][]) : []),
-                    ]}
-                  />
-                  {crm.visible && (crm.contracts?.length ?? 0) > 0 && (
-                    <>
-                      <div className="kl" style={{ marginTop: 12 }}>
-                        Zmluvy
-                      </div>
-                      {crm.contracts!.map((k) => (
-                        <div key={k.number} className="caption">
-                          {k.number} · {k.state}
-                          {k.effective_to ? ` · do ${date(k.effective_to)}` : ''}
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  <div className="kl" style={{ marginTop: 12 }}>
-                    Otvorené obchody
-                  </div>
-                  {(crm.open_deals ?? []).length === 0 ? (
-                    <div className="caption">žiadne</div>
-                  ) : (
-                    crm.open_deals!.map((d, i) => (
-                      <div key={d.deal_id ?? i} className="caption">
-                        {d.deal_id ? <Link to={`/obchody/${d.deal_id}`}>{d.name}</Link> : 'obchod'} · {text(d.owner_name)}
-                      </div>
-                    ))
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-                    {crm.owner_is_me || !crm.owner_id ? (
-                      crm.visible || !crm.owner_id ? (
-                        <button type="button" className="btn primary" onClick={() => setPanel('deal')}>
-                          Založiť obchod
-                        </button>
-                      ) : null
-                    ) : (
-                      <>
-                        <Notice tone="error">
-                          Firmu vlastní {crm.owner_name}. Nový obchod nejde založiť – môžete požiadať o pridelenie (schvaľuje manažér alebo
-                          obchodný riaditeľ, pôvodný vlastník dostane upozornenie).
-                        </Notice>
-                        <button type="button" className="btn" onClick={() => setPanel('assign')}>
-                          Požiadať o pridelenie
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </Card>
+            <FinstatCard f={f ?? null} error={result.finstat_error} risk={crm.risk ?? null} crmName={crm.name} ico={crm.ico} />
           </div>
           <div className="col-right">
-            <FinstatCard f={f ?? null} error={result.finstat_error} risk={crm.risk ?? null} />
+            <CrmCard
+              crm={crm}
+              hasFinstat={!!f}
+              busy={save.busy}
+              onCreateCompany={createCompany}
+              onNewDeal={() => setDealPanel(true)}
+            />
           </div>
         </div>
       )}
 
-      {panel === 'deal' && crm?.company_id && (
+      {dealPanel && crm?.company_id && (
         <NewDealPanel
           customer={{ id: crm.company_id, kind: 'company', name: crm.name ?? '' }}
-          onClose={() => setPanel(null)}
+          onClose={() => setDealPanel(false)}
           onSaved={(id) => navigate(`/obchody/${id}`)}
         />
       )}
-      {panel === 'deal' && crm && !crm.company_id && <Notice tone="error">Firmu nevidíte – založte obchod cez vedenie.</Notice>}
-      {panel === 'assign' && crm && <AssignPanel crm={crm} onClose={() => setPanel(null)} />}
     </>
   );
 }
 
-function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Risk }) {
-  const { f } = props;
-  if (!f)
-    return (
-      <Card title="Finstat">
-        <Empty>{props.error ?? 'Finstat firmu s týmto IČO nepozná.'}</Empty>
-      </Card>
-    );
-  const z = f.z_score === null ? null : f.z_score < 1.23 ? 'riziko' : f.z_score <= 2.9 ? 'seda_zona' : 'stabilna';
+/** Stupnica Altmanovho Z-skóre 0 – 1,23 – 2,90 – 5+ s pásmami a značkou hodnoty. */
+function ZScoreScale(props: { value: number }) {
+  const pos = Math.max(0, Math.min(5, props.value)) / 5 * 100;
+  const band = props.value < 1.23 ? 'riziko' : props.value <= 2.9 ? 'seda_zona' : 'stabilna';
   return (
-    <Card title="Finstat" aside={<span className="caption">údaje k {stamp(f.fetched_at)}</span>}>
-      {props.risk && <RiskPills risk={props.risk} />}
-      <Rows
-        rows={[
-          ['Názov', text(f.name)],
-          ['IČO / DIČ / IČ DPH', [f.ico, f.dic, f.ic_dph].map((x) => x ?? '–').join(' / ')],
-          ['Sídlo', text(f.address)],
-          ['Vznik', date(f.founded_on)],
-          ['Stav', f.cancelled ? <Pill tone="negative">zrušená</Pill> : 'aktívna'],
-          [`Tržby${f.finance_year ? ` ${f.finance_year}` : ''}`, f.revenue_eur === null ? '–' : `${eur(f.revenue_eur)} €`],
-          [`Zisk${f.finance_year ? ` ${f.finance_year}` : ''}`, f.profit_eur === null ? '–' : `${eur(f.profit_eur)} €`],
-          ['Zamestnanci', text(f.employees_range)],
-          ['Platobný rating', f.payment_rating ?? '–'],
-          [
-            'Altmanovo Z-skóre',
-            f.z_score === null ? '–' : (
-              <>
-                {String(f.z_score).replace('.', ',')} {z && <Pill tone={Z_BAND[z].tone}>{Z_BAND[z].label}</Pill>}
-              </>
-            ),
-          ],
-          [
-            'Konkurz / reštrukturalizácia',
-            f.insolvency_kind ? `${f.insolvency_kind === 'konkurz' ? 'konkurz' : 'reštrukturalizácia'}${f.insolvency_since ? ` od ${date(f.insolvency_since)}` : ''}` : 'nie',
-          ],
-          ['Dlhy a nedoplatky', f.debts.length ? f.debts.map((d) => `${d.veritel}${d.suma_eur !== null ? ` ${eur(d.suma_eur)} €` : ''}`).join(', ') : f.has_debts ? 'áno' : 'bez dlhov'],
-        ]}
-      />
-      {f.finstat_url && (
-        <a className="caption" href={f.finstat_url} target="_blank" rel="noreferrer noopener">
-          Otvoriť vo Finstate
-        </a>
+    <div className="zscale">
+      <div className="zscale-head">
+        <span className="kl">Altmanovo Z-skóre · kreditné riziko</span>
+        <span>
+          <strong>{String(props.value).replace('.', ',')}</strong> <Pill tone={Z_BAND[band].tone}>{Z_BAND[band].label.split(' (')[0]}</Pill>
+        </span>
+      </div>
+      <div className="zscale-bar" aria-hidden="true">
+        <span className="zscale-band zscale-red" style={{ width: `${(1.23 / 5) * 100}%` }} />
+        <span className="zscale-band zscale-amber" style={{ width: `${((2.9 - 1.23) / 5) * 100}%` }} />
+        <span className="zscale-band zscale-green" style={{ width: `${((5 - 2.9) / 5) * 100}%` }} />
+        <span className="zscale-mark" style={{ left: `${pos}%` }} />
+      </div>
+      <div className="zscale-ticks caption">
+        <span>0 · riziko úpadku</span>
+        <span style={{ left: `${(1.23 / 5) * 100}%` }}>1,23</span>
+        <span style={{ left: `${(2.9 / 5) * 100}%` }}>2,90</span>
+        <span>5+ · stabilná</span>
+      </div>
+    </div>
+  );
+}
+
+function CrmCard(props: { crm: CrmCheck; hasFinstat: boolean; busy: boolean; onCreateCompany: () => void; onNewDeal: () => void }) {
+  const { crm } = props;
+  const [reason, setReason] = useState('');
+  const [sent, setSent] = useState(false);
+  const save = useSave();
+  const request = () =>
+    save.run(async () => {
+      await send('POST', '/api/approvals', {
+        kind: 'pridelenie_firmy',
+        ...(crm.company_id ? { company_id: crm.company_id } : { ico: crm.ico }),
+        reason,
+      });
+      setSent(true);
+    });
+  const otherOwner = crm.exists && crm.owner_id && !crm.owner_is_me;
+  return (
+    <Card title="V CRM" aside={crm.exists ? <Pill tone="info">{crm.status ? CUSTOMER_STATUS[crm.status]?.label ?? crm.status : 'v CRM'}</Pill> : <Pill>nie je v CRM</Pill>}>
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {!crm.exists ? (
+        <>
+          <p>Firma s IČO {crm.ico} v CRM nie je.{props.hasFinstat ? ' Založte ju z Finstatu – vlastníkom budete vy.' : ''}</p>
+          {props.hasFinstat && (
+            <button type="button" className="btn primary" disabled={props.busy} onClick={props.onCreateCompany}>
+              Založiť firmu z Finstatu
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <Rows
+            rows={[
+              ['Vlastník', crm.owner_name ? `${crm.owner_name}${crm.owner_is_me ? ' (vy)' : ''}` : 'bez vlastníka'],
+              ...(crm.visible
+                ? ([
+                    ['Zmluvy', (crm.contracts ?? []).length ? crm.contracts!.map((k) => `${k.number} · ${k.state}`).join(', ') : '–'],
+                  ] as [string, string][])
+                : []),
+              [
+                'Otvorené obchody',
+                (crm.open_deals ?? []).length === 0 ? (
+                  '–'
+                ) : (
+                  <span>
+                    {crm.open_deals!.map((d, i) => (
+                      <span key={d.deal_id ?? i}>
+                        {i > 0 && ', '}
+                        {d.deal_id ? <Link to={`/obchody/${d.deal_id}`}>{d.name}</Link> : 'obchod'} · {text(d.owner_name)}
+                      </span>
+                    ))}
+                  </span>
+                ),
+              ],
+              ...(crm.visible ? ([['Kontakty', String(crm.contacts ?? 0)]] as [string, string][]) : []),
+            ]}
+          />
+          {otherOwner ? (
+            sent ? (
+              <Notice tone="ok">Žiadosť odoslaná. Výsledok uvidíte v Schvaľovaní a v zvončeku.</Notice>
+            ) : (
+              <div style={{ marginTop: 12 }}>
+                <div className="ban ban-warn">
+                  Firmu vlastní iný obchodník. Nový obchod nemôžete založiť. Požiadajte o pridelenie – schvaľuje manažér alebo obchodný
+                  riaditeľ, vlastník dostane upozornenie.
+                </div>
+                <Field label="Dôvod žiadosti">
+                  <textarea className="inp" rows={3} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+                </Field>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button type="button" className="btn" disabled={save.busy || !reason.trim()} onClick={request}>
+                    Požiadať o pridelenie
+                  </button>
+                </div>
+              </div>
+            )
+          ) : crm.company_id ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button type="button" className="btn primary" onClick={props.onNewDeal}>
+                Založiť obchod
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
     </Card>
   );
 }
 
-function AssignPanel(props: { crm: CrmCheck; onClose: () => void }) {
-  const [reason, setReason] = useState('');
-  const [done, setDone] = useState(false);
-  const save = useSave();
-  // Firmu iného obchodníka používateľ nevidí – žiadosť ide podľa IČO (databáza ju nájde)
-  const submit = () =>
-    save.run(async () => {
-      await send('POST', '/api/approvals', {
-        kind: 'pridelenie_firmy',
-        ...(props.crm.company_id ? { company_id: props.crm.company_id } : { ico: props.crm.ico }),
-        reason,
-      });
-      setDone(true);
-    });
+function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Risk; crmName?: string; ico: string }) {
+  const { f } = props;
+  if (!f)
+    return (
+      <Card title={props.crmName ?? `IČO ${props.ico}`}>
+        <Empty>{props.error ?? 'Finstat firmu s týmto IČO nepozná.'}</Empty>
+      </Card>
+    );
+  const debts = f.debts.length
+    ? f.debts.map((d) => `${d.veritel}${d.suma_eur !== null ? ` ${eur(d.suma_eur)} €` : ''}`).join(', ')
+    : f.has_debts ? 'áno' : 'Bez dlhov';
   return (
-    <SidePanel
-      title={`Požiadať o pridelenie – ${props.crm.name ?? ''}`}
-      onClose={props.onClose}
-      footer={
-        done ? (
-          <button type="button" className="btn primary" onClick={props.onClose}>
-            Zavrieť
-          </button>
-        ) : (
-          <>
-            <button type="button" className="btn" onClick={props.onClose}>
-              Zrušiť
-            </button>
-            <button type="button" className="btn primary" disabled={save.busy || !reason.trim()} onClick={submit}>
-              Odoslať žiadosť
-            </button>
-          </>
-        )
-      }
-    >
-      {save.error && <Notice tone="error">{save.error}</Notice>}
-      {done ? (
-        <Notice tone="ok">Žiadosť odoslaná. Schvaľovatelia dostali upozornenie; výsledok uvidíte v Schvaľovaní a v zvončeku.</Notice>
-      ) : (
-        <>
-          <p className="caption">Firmu vlastní {props.crm.owner_name}. Po schválení sa vlastníkom stanete vy; jeho otvorené obchody ostanú jemu.</p>
-          <Field label="Dôvod">
-            <textarea className="inp" rows={4} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
-          </Field>
-        </>
+    <Card>
+      <div className="company-head">
+        <div>
+          <h2 className="t-section-title" style={{ margin: 0 }}>{text(f.name)}</h2>
+          <div className="caption">
+            IČO {f.ico} · DIČ {f.dic ?? '–'} · IČ DPH {f.ic_dph ?? '–'} · {text(f.address)}
+          </div>
+        </div>
+        {f.cancelled ? <Pill tone="negative">Zrušená</Pill> : <Pill tone="positive">Aktívna</Pill>}
+      </div>
+      {props.risk && props.risk.warnings.length > 0 && (
+        <div style={{ margin: '8px 0' }}>
+          <RiskPills risk={props.risk} />
+        </div>
       )}
-    </SidePanel>
+      <div className="tiles">
+        <Tile label={`Tržby${f.finance_year ? ` ${f.finance_year}` : ''}`} value={f.revenue_eur === null ? '–' : `${eur(f.revenue_eur)} €`} />
+        <Tile label={`Zisk${f.finance_year ? ` ${f.finance_year}` : ''}`} value={f.profit_eur === null ? '–' : `${eur(f.profit_eur)} €`} tone={f.profit_eur !== null && f.profit_eur < 0 ? 'negative' : undefined} />
+        <Tile label="Zamestnanci" value={text(f.employees_range)} />
+        <Tile label="Dlhy a nedoplatky" value={debts} tone={f.debts.length || f.has_debts ? 'negative' : 'positive'} />
+        <Tile label="Platobný rating" value={f.payment_rating ?? '–'} tone={f.payment_rating === 'E' || f.payment_rating === 'X' ? 'negative' : undefined} />
+        <Tile
+          label="Konkurz / reštrukturalizácia"
+          value={f.insolvency_kind ? `${f.insolvency_kind === 'konkurz' ? 'konkurz' : 'reštrukturalizácia'}${f.insolvency_since ? ` od ${date(f.insolvency_since)}` : ''}` : 'nie'}
+          tone={f.insolvency_kind ? 'negative' : undefined}
+        />
+      </div>
+      {f.z_score !== null && <ZScoreScale value={f.z_score} />}
+      <p className="caption" style={{ marginTop: 12 }}>
+        Údaje z Finstatu k {stamp(f.fetched_at)}. Pri dlhoch, nedoplatkoch, konkurze, ratingu E/X alebo Z-skóre pod 1,23 sa výstraha
+        ukáže na firme, obchode aj pri ponuke.{' '}
+        {f.finstat_url && (
+          <a href={f.finstat_url} target="_blank" rel="noreferrer noopener">
+            Otvoriť vo Finstate ↗
+          </a>
+        )}
+      </p>
+    </Card>
+  );
+}
+
+function Tile(props: { label: string; value: string; tone?: 'negative' | 'positive' }) {
+  return (
+    <div className="tile">
+      <div className="kl">{props.label}</div>
+      <div className={`tile-value${props.tone ? ` tone-${props.tone}` : ''}`}>{props.value}</div>
+    </div>
   );
 }
