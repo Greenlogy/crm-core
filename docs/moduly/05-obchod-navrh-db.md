@@ -1384,3 +1384,101 @@ Ako doteraz: nanečisto na dočasnej databáze (nové testy série C + všetky d
 **Overenie:** API celým tokom na dočasnej databáze s vymyslenými údajmi „TEST“ (ponuka, ceny, výnimka, schválenie inej hranice, odoslanie, nová verzia s prevzatou výnimkou, druhá výnimka), snímky obrazoviek porovnané s návrhmi 31, 33, 34, 39, 28; databázové testy 195 kontrol OK.
 
 **Mimo F2 (zámerne):** PDF, stránka ponuky a akceptácia (F3), e-mail z CRM (F4); ponuka VIWA sa dá založiť, ale ceny VIWA (účet, €/kW z cenníka) dopĺňa až F3 – variant VIWA zatiaľ hlási „chýba cena“; zoznam Ponuky v menu nie je v zadaní F2; PH v zozname obchodov ostáva odhad obchodníka (iba karta obchodu počíta z ponuky).
+
+## 23. Plán F3 – PDF, stránka ponuky, akceptácia (na schválenie, 15. 10. 2026)
+
+F2 je uzavretá (commit `d6ab0a9`). F3 podľa častí 1.7, 1.10, 4, 5 a zadania 7.1–7.3; obrazovky 35, 36, 42 a úpravy 33, 34.
+
+### 23.1 Cloudflare (zmena nastavení – iba s Petrovým súhlasom, príkazy spúšťa Peter)
+
+1. R2 bucket `crm-dokumenty-test` s jurisdikciou EÚ, súkromný (Ostré neskôr zvlášť).
+2. Browser Rendering (Browser Run) – binding `BROWSER` vo Workeri `crm-core` (Workers Paid už je).
+3. Nový Worker `crm-ponuka` (priečinok `ponuka/`) mimo Access, na Teste adresa `*.workers.dev`; vlastná konfigurácia Hyperdrive pre rolu `crm_public`; R2 iba na čítanie; Rate Limiting bindings (zobrazenie 30/min, neplatný token 10/10 min, akceptácia 5/h).
+4. Rola `crm_public` na `dev` (skript ako `create-app-role.sh`, heslo iba v `.dev.vars` a Hyperdrive): žiadna tabuľka, iba `EXECUTE` na tri verejné funkcie.
+
+### 23.2 Migrácia `0039_ponuky_pdf_akceptacia`
+
+- `offer_template_version` (druh × jazyk, verzie Návrh / Platná / Nahradená, sekcie a predvolené hodnoty, premenné «…» iba zo zoznamu), `offer_asset` (obrázky PDF, bytea do 1 MB; pri prázdnej tabuľke pribalené z `docs/dizajn/obrazovky/assets/`). Úvodné šablóny SK: dodávka, výkup, VIWA; EN ako návrh na Petrovu kontrolu.
+- `offer`: `template_version_id`, `pdf_key`, `pdf_sha256`, `pdf_generated_at`, `link_hash` (SHA-256 tokenu), `link_created_at`; `offer_page_stat` (prvé a posledné otvorenie, počet – bez IP). Prvé otvorenie: Odoslaná → Otvorená, udalosť v časovej osi.
+- `offer_acceptance` podľa 1.7 (klik / ručne / podpísané PDF; nemení sa, iba zrušenie adminom s dôvodom → obchod späť do Vyjednávania, verzia späť Odoslaná, zablokovaná verzia sa odblokuje).
+- `offer_terms_text(ponuka, variant, meno, funkcia)` – znenie záväznej objednávky (VIWA: prijatie ponuky) zo šablóny, zjednotené (NFC, `\n`); odtlačok počíta databáza, stránka posiela odtlačok, ktorý zákazník videl.
+- `offer_accept_apply` (0038) dostane zápis `offer_acceptance`; `offer_accept_manual(...)` pre obchodníka (variant, meno a funkcia podpisujúceho, čas, poznámka, voliteľne kľúč podpísaného PDF); `offer_acceptance_revoke(id, dôvod)` iba admin.
+- Verejné funkcie pre `crm_public` (`SECURITY DEFINER`): `offer_public_view(hash)`, `offer_public_pdf(hash)`, `offer_public_accept(hash, variant, meno, funkcia, ip, prehliadač, odtlačok)`. Platnosť odkazu: do `valid_until` akceptácia, potom 30 dní iba čítanie, potom „Odkaz už neplatí“.
+- RLS, audit, upozornenie `ponuka_otvorena` sa nezavádza (iba časová os); testy `checks_ponuky_f3.sql` (séria D): token a platnosť, čo verejná funkcia vráti a čo nie (žiadne EIC, hranica, PH, marža), odtlačok znenia, dvojklik, akceptácia po platnosti, ručná akceptácia, zrušenie adminom, rola `crm_public` bez prístupu k tabuľkám.
+
+### 23.3 API a Worker
+
+- `crm-core`: `GET /offers/:id/preview.pdf` (náhľad, neukladá sa); `POST /offers/:id/send-manual` = doterajšie „Označiť ako odoslanú“ + PDF do R2 + odkaz (token sa ukáže **iba raz**, v databáze je len jeho odtlačok; „Nový odkaz“ starý zneplatní); `GET /offers/:id/pdf`; `POST /offers/:id/accept-manual` (+ nahratie podpísaného PDF do 10 MB); `POST /offer-acceptances/:id/revoke`; `/settings/offer-templates` a `/settings/offer-assets`.
+- Jedna funkcia skladá HTML ponuky pre náhľad aj PDF (obrázky vložené ako `data:`, žiadne sťahovanie z internetu); produkty zlúčené podľa produktu, napätia a ceny, bez EIC; päta s číslom strany a ponuky.
+- `crm-ponuka`: `GET /p/:token`, `GET /p/:token/pdf`, `POST /p/:token/accept`; hlavičky `no-referrer`, `noindex`, prísna CSP, `no-store`; prepínač SK/EN mení iba popisky.
+
+### 23.4 Obrazovky
+
+35 PDF ponuky, 36 stránka pre zákazníka, 42 Nastavenia → Šablóny ponúk (texty po sekciách, verzie, predvolené hodnoty, obrázky); 34 editor: Náhľad PDF, odoslanie s odkazom na skopírovanie a PDF na stiahnutie, ručná akceptácia, údaje akceptácie; 33 časová os (otvorenie, akceptácia).
+
+### 23.5 Otázky k F3
+
+1. **PDF: Browser Run alebo `pdf-lib`?** Browser Run nemá voľbu regiónu (vykreslenie prebehne v sieti Cloudflare, uložené dáta ostávajú v EÚ). **Odporúčam Browser Run** – jedno HTML pre náhľad, PDF aj stránku.
+2. **Texty šablón:** máte dnešné vzory PDF (dodávka, výkup, VIWA)? Dajte ich do `exports/ponuky-vzory/`. Inak úvodné texty vezmem z návrhu 35 ako návrh a doplníte ich na obrazovke 42.
+3. **Cloudflare (23.1):** súhlasíte so zmenami 1–4? Nasadenie a zmeny Cloudflare môj nástroj blokuje – príkazy vám dám presne, alebo ich povolíte v nastaveniach Claude Code.
+4. **Odkaz na stránku** sa ukáže iba raz pri odoslaní (bezpečnejšie); „Nový odkaz“ starý zneplatní. Súhlas?
+5. **Ručná akceptácia:** povinný variant, meno a funkcia podpisujúceho a čas; podpísané PDF voliteľné. Súhlas?
+6. **Zrušenie akceptácie adminom:** obchod späť do Vyjednávania, ponuka späť Odoslaná. Súhlas?
+7. **Potvrdenie zákazníkovi e-mailom** pribudne s Gmailom (F4); v F3 stránka ukáže potvrdenie a PDF so záväznou objednávkou a obchodník dostane upozornenie. Súhlas?
+
+### 23.6 Odpovede (Peter, 15. 10. 2026) – plán F3 schválený
+
+1. PDF cez Browser Run – áno. 2. Texty: `docs/moduly/05-sablony-ponuk-texty.md`, prvé verzie šablón v `0039`. 3. Zmeny Cloudflare a nasadenie spúšťa Peter podľa presných príkazov. 4. Odkaz iba raz, v DB odtlačok; nový odkaz iba vlastník obchodu alebo admin, starý zneplatní, audit, platnosť sa nemení. 5. Ručná akceptácia: variant, meno, funkcia, čas, kanál (telefón, e-mail, osobne, podpísané PDF) povinné, PDF voliteľné, zapíše sa kto. 6. Zrušenie akceptácie: admin, dôvod, iba bez spárovanej zmluvy; po platnosti Vypršaná; zablokovaná verzia sa neodblokuje sama. 7. Potvrdenie e-mailom až v F4. Akceptácia klikom čaká na P4 – dovtedy musí fungovať ručná s podpísaným PDF. (Rozhodnutia 15. 10.)
+
+## 24. F3 – krok 1: `0039_ponuky_pdf_akceptacia` overená nanečisto (15. 10. 2026)
+
+**Obsah:**
+- `app_user.phone`, `job_title` (do „Cenovú ponuku spracoval“; do profilu v F4, zatiaľ zadá admin).
+- `offer_template_version` (druh × jazyk, Návrh / Platná / Nahradená, sekcie `{nadpis, text}`, kontrola povolených premenných a blokov, `offer_template_publish` iba admin) + prvé verzie z textov (SK platné, EN návrh); `offer_asset` (obrázky, bez auditu kvôli binárnym dátam, nemenia sa – iba vypnú).
+- `offer`: `penalty_eur_mwh`, `template_version_id`, `pdf_key`, `pdf_sha256`, `link_hash` (iba SHA-256), `blocked_by_offer_id`; `offer_page_stat` (otvorenia bez IP, prvé otvorenie → Otvorená + časová os).
+- Ceny VIWA z cenníka (`offer_fill_viwa`: mesačný poplatok účtu, €/kW, komodita podľa balíka) – doplnené aj do prepočtu a vytvorenia variantu. Koeficient v `0039` z odhadu aditívu – opravené v `0040` (časť 25).
+- Dokument ponuky na jednom mieste v databáze (`offer_document`, `offer_document_internal`): vyplnené sekcie šablóny, premenné (rovnaká hodnota raz, inak po variantoch), varianty s riadkami zlúčenými podľa produktu, napätia a cien (bez EIC), VIWA a pri domácnosti ceny s DPH, mesačné poplatky a odhad ročných nákladov; znenie objednávky po variantoch (`offer_terms_text`, zjednotené NFC) a jeho odtlačok.
+- `offer_attach_pdf` (raz, pri odoslaní; šablóna sa zafixuje – musí byť platná, EN návrh neodíde), `offer_link_set` (prvý odkaz pri odoslaní, nový iba vlastník obchodu alebo admin, časová os, audit).
+- `offer_acceptance` (klik / ručne s kanálom, znenie a odtlačok, odtlačok PDF, kto zaznačil; nemení sa, iba zrušenie), `offer_accept_manual`, `offer_acceptance_revoke` (admin, dôvod, nie pri Vyhraté; ponuka Odoslaná / Vypršaná, obchod Vyjednávanie), `offer_unblock` (vlastník obchodu alebo admin); zablokovanie verzie je trvalý príznak (nezruší ho zrušenie akceptácie).
+- Verejné funkcie (`offer_public_view / _pdf / _accept`) cez schému **`verejne`** (`ponuka_zobrazit`, `ponuka_pdf`, `ponuka_akceptovat`). **Izolácia:** schéma `public` už nie je prístupná všetkým (PUBLIC), výslovne ju má `crm_app` (a `crm_sync`, `neon_superuser`, ak existujú); `crm_public` má iba schému `verejne`; `crm_current_user_id()` pri prihlásení `crm_public` ignoruje `app.user_id`. Bez toho by zneužitý verejný Worker mohol volať funkcie s právami vlastníka (napr. odhad portfólia) aj s cudzou identitou.
+- RLS: šablóny a obrázky číta každý prihlásený, mení admin; akceptácie a otvorenia podľa ponuky, zapisuje iba databáza. Nové druhy časovej osi a upozornení (`ponuka_otvorena`, `ponuka_odkaz`, `akceptacia_zrusena`, `ponuka_odblokovana`).
+- `api/db/app-role.sql`: ponuku aplikácia mení iba v jazyku, kontakte, vlastných poliach a pokute; akceptácie a otvorenia iba číta. Nové `api/db/public-role.sql` a `api/db/create-public-role.sh` (rola `crm_public`, heslo iba do `.dev.vars`, overenie izolácie).
+
+**Overenie (dočasný Postgres):** **205 kontrol OK** (+ D0–D6 v `db/test/checks_ponuky_f3.sql`: šablóny a verzie, VIWA, dokument bez EIC a interných hodnôt, PDF a odkaz, verejná rola – izolácia, otvorenia, akceptácia s odtlačkom, dvojklik, po platnosti a po 30 dňoch, ručná akceptácia, zrušenie, zablokovanie a odblokovanie); mutačná skúška 6 zmien (odtlačok znenia, nový odkaz, zrušenie pri Vyhraté, zablokovanie, 30 dní, iba admin) – každú test zachytí; `0039` down = schéma `dev` pri `0038`, znova hore bez rozdielu; `app-role.sql` a `public-role.sql` prejdú, prihlásenie ako `crm_public` nevidí tabuľky ani funkcie v `public`. Existujúci test `checks_zakaznici.sql` dáva roli `crm_rls_test` schému `public` výslovne.
+
+**Ďalej:** po tvojom súhlase `0039` na `dev` → `app-role.sql` → rola `crm_public` → `run.sh`; potom API, Worker `crm-ponuka`, obrazovky 35, 36, 42 a úpravy 33, 34 a presné príkazy pre Cloudflare.
+
+## 25. F3 – krok 2: `0040_ponuky_f3_doplnky` (Peterove body 1–4, 15. 10. 2026)
+
+`0039` už bola na `dev` (Peter, vrátane `app-role.sql` a roly `crm_public`), preto doplnky idú do `0040`; súbor `0039` je presne v podobe z `dev` (overené porovnaním schémy s `db/schema.sql`).
+
+1. **Predvolené práva:** `ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` (aj tabuľky a sekvencie výslovne), v schéme `public` `GRANT EXECUTE ON FUNCTIONS TO crm_app`. Funkcie budúcich migrácií teda PUBLIC nespustí; interná funkcia v novej migrácii sa odoberie `FROM PUBLIC, crm_app`. Cockpit a iné služby: vlastná rola. Testy: `db/test/checks_predvolene_prava.sql` (prvý v `run.sh`) overí predvolené práva vlastníka a potom ich **iba v transakcii testov** vráti PUBLIC, aby pomocné funkcie testov v `pg_temp` spúšťala testovacia rola. D8: verejná rola (`crm_public_test` aj skutočná `crm_public`, ak existuje) nemá schému `public`, nečíta žiadnu tabuľku a spustí iba tri funkcie v `verejne`; novú funkciu má aplikácia.
+2. **Koeficient VIWA** zo schválenej položky cenníka (`price_list_item_program.viwa_conversion_factor` cez položku „účet“ variantu); odhad aditívu iba pre pridanú hodnotu. Test D1: nový odhad aditívu (40) koeficient 0,85 nezmení.
+3. **Zmluvná pokuta:** zvýšiť smie obchodník; nižšia ako v šablóne → v kontrole ponuky potreba schválenia (`type: pokuta`), žiadosť `vynimka_ceny` dostane `penalty_eur_mwh` (bez položiek ceny, ak iné výnimky nie sú), schvaľuje „schvaľuje ceny“, platí 3 dni na odoslanie, odoslaná si ju ponechá. Test D7.
+4. Úpravy textov šablón – súhlas; EN schváli Peter na obrazovke 42.
+
+**Overenie (dočasný Postgres, `0001`–`0040`):** **209 kontrol OK**; mutácia (pokuta bez kontroly) zlyhá v D7; bez `0040` zlyhajú predvolené práva; `0040` down = schéma `dev` (pri `0039`) a bez predvolených práv, znova hore bez rozdielu.
+
+## 26. F3 – krok 3: API, Worker `crm-ponuka`, obrazovky (lokálne overené 15. 10. 2026)
+
+**Cloudflare (Peter):** R2 `crm-dokumenty-test` (jurisdikcia EÚ, `-J eu`), Hyperdrive `crm-ponuka-dev` (rola `crm_public`, cache vypnutá, ID `6f5c43b3d47749f4b509a32043e75ef7`). Browser Run bez príkazu (Workers Paid). `0039`, `0040` na `dev`, `app-role.sql`, rola `crm_public`; lokálne API proti `dev` (rola `crm_app`, iba čítanie) – hlavné obrazovky 200.
+
+**`crm-core` (API):** `api/src/routes/offers-pdf.ts`
+- `GET /offers/:id/document`, `/preview.pdf` (vodotlač NÁHĽAD / NÁVRH ŠABLÓNY, neukladá sa), `POST /offers/:id/send` (v jednej transakcii: stav Odoslaná a platnosť, PDF cez Browser Run do R2 `ponuky/{org}/{rok}/{číslo}[-verzia].pdf`, šablóna sa zafixuje, odkaz – token 32 bajtov base64url, do DB iba SHA-256; odkaz sa vráti iba raz), `POST /offers/:id/link` (nový odkaz), `GET /offers/:id/pdf`.
+- Akceptácia: `GET /offers/:id/acceptance` (aj otvorenia stránky), `POST /offers/:id/accept-manual` (podpísané PDF base64 do 10 MB, kontrola `%PDF-`, R2 `podpisane/…`), `GET /offer-acceptances/:id/signed.pdf`, `/confirmation.pdf` (z uloženého znenia, s IP a odtlačkom), `POST /offer-acceptances/:id/revoke`, `POST /offers/:id/unblock`.
+- Šablóny (obrazovka 42): `GET/POST/PATCH/DELETE /offer-templates`, `/publish`, `/preview.pdf` (vzorové údaje, texty vyplní DB). Obrázky: `GET /offer-assets`, `GET /offer-assets/:code`, `POST /offer-assets` (admin, do 1 MB).
+- Zmluvná pokuta v `PATCH /offers/:id`; editor dostane PDF, odkaz, zablokovanie, šablónu a jej predvolenú pokutu. „Označiť ako odoslanú“ (F2) nahradilo odoslanie s PDF a odkazom. Nastavenia → Používatelia: telefón a funkcia.
+- `api/src/render/offer-html.ts` (HTML ponuky 35 a potvrdenia, zdieľa aj `crm-ponuka`), `render/pdf.ts` (`@cloudflare/puppeteer` 1.4.0), `render/assets.ts` (obrázky z Nastavení, inak pribalené `api/src/assets/*.png`). `wrangler.toml`: `[browser]`, R2 `DOCS` (jurisdikcia EÚ), pravidlo `Data` pre PNG, `PUBLIC_OFFER_URL`.
+
+**Worker `crm-ponuka` (`ponuka/`):** `GET /p/:token` (stránka 36 bez JavaScriptu, prepínač SK/EN mení iba popisky), `GET /p/:token/pdf`, `GET /p/:token/potvrdenie.pdf` (vykreslí sa na požiadanie, neukladá sa), `POST /p/:token/accept` (formulár; variant nesie odtlačok znenia, ktoré zákazník videl; IP z `CF-Connecting-IP`; presmerovanie s kódom hlášky). Volá iba `verejne.*`. Hlavičky: prísna CSP bez skriptov, `no-referrer`, `noindex`, `no-store`, `nosniff`. Obmedzenie pokusov podľa IP (Workers Rate Limiting – obdobie iba 10 alebo 60 s): zobrazenie 30/min, neplatný odkaz 10/min, akceptácia 5/min (návrh 5.2 mal 10/10 min a 5/h – bližšie po nasadení na Ostrom cez pravidlo WAF na doméne).
+
+**Obrazovky:** 34 editor (Odoslať zákazníkovi – PDF a odkaz zobrazený raz s kopírovaním, Náhľad PDF / PDF ponuky, Nový odkaz, Zaznačiť akceptáciu s podpísaným PDF, karta Akceptácia s otvoreniami, potvrdením, podpísaným PDF a zrušením, banner zablokovanej verzie s odblokovaním, banner EN šablóny v návrhu, zmluvná pokuta v podmienkach, potreba schválenia pokuty v kontrole); 33 časová os (otvorenie, nový odkaz, zrušenie akceptácie, odblokovanie); 39 pokuta v žiadosti; 42 Nastavenia → Šablóny ponúk (verzie, úprava návrhu po sekciách, náhľad PDF, zverejnenie, obrázky); 36 stránka ponuky; 35 PDF.
+
+**Overenie (dočasná DB, lokálny R2 a Browser Run):** náhľad PDF (5 strán: titulná, ponuka, referencie s príbehom a víziou, záväzná objednávka), odoslanie (PDF v R2, odkaz, šablóna zafixovaná), verejná stránka (hlavičky, PDF, neplatný odkaz 404), akceptácia formulárom (bez potvrdenia, so zmeneným znením, úspech, dvojklik), potvrdenie v PDF zo stránky aj z CRM, IP a otvorenia v CRM, zrušenie akceptácie (bez dôvodu odmietne), ručná akceptácia s podpísaným PDF, šablóny (zverejnenie, náhľad, neznáma premenná odmietnutá). Databázové testy 209 OK; typová kontrola `api`, `ponuka`, `web`.
+
+## 27. F3 – krok 4: `0041_potvrdenie_akceptacie` (Peterove body 1–3, 15. 10. 2026)
+
+1. **Potvrdenie akceptácie sa ukladá v momente akceptácie** (mení časť 26): `offer_acceptance.confirmation_pdf_key`, `confirmation_pdf_sha256`; kľúč určuje databáza (`potvrdenia/{org}/{rok}/{číslo}[-verzia]-{id8}.pdf`). Klik: Worker `crm-ponuka` v jednej transakcii zavolá `verejne.ponuka_akceptovat` (vráti uložené znenie, IP, odtlačok, dokument a kľúč), vykreslí potvrdenie, uloží ho do R2 a odtlačok cez `verejne.ponuka_potvrdenie_ulozit` (iba ku klik-akceptácii tejto ponuky, do 10 minút, raz). Ručne: `crm-core` po `offer_accept_manual` cez `offer_acceptance_for_confirmation` a `offer_acceptance_confirmation_set`. Stiahnutie (CRM aj stránka cez `verejne.ponuka_potvrdenie_pdf`) vracia uložený súbor – overené: zo stránky aj z CRM rovnaký súbor, odtlačok sa zhoduje s DB. Potvrdenie ručnej akceptácie uvádza aj kanál. Interná `offer_acceptance_confirmation_attach` nie je pre PUBLIC ani `crm_app` (odobratie podmienené existenciou roly – `main` ju ešte nemá). Testy D4 (uloženie raz, iba správny kľúč a odkaz), D6 (ručná), D8 (verejná rola iba funkcie v `verejne`).
+2. **WAF na Ostrom** – zapísané do úloh pred Ostrým (STAV). Na ochranu dôkazov odporúčam R2 **bucket lock** (súbory v `ponuky/`, `potvrdenia/`, `podpisane/` nemožno prepísať ani zmazať).
+3. **Doplnky z predošlej správy sú v `0040`, nie v `0039`** (0039 už bola na `dev`): predvolené práva (`ALTER DEFAULT PRIVILEGES` – test `checks_predvolene_prava.sql` a D8), koeficient VIWA z programu cenníka (D1, zmena odhadu aditívu ho nemení), schválenie nižšej zmluvnej pokuty (D7).
+4. **Hlásenie chýbajúcej hranice** (Peter, test na dev: ponuka manažéra založená pred doplnením odhadu portfólia): pri manažérovi „chýba odhad portfólia (hranica manažéra) – doplňte ho v cenách dňa a ponuku prepočítajte“, pri obchodníkovi „chýba cena pre obchodníka – doplňte ceny dňa a ponuku prepočítajte“ (`offer_variant_values` v `0041`, test D9). Ponuka si ceny fixuje k dátumu verzie – po doplnení cien dňa ju treba prepočítať.

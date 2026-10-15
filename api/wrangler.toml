@@ -18,6 +18,21 @@ run_worker_first = ["/api/*"]
 
 # Hyperdrive na Neon vetvu dev s rolou aplikácie crm_app (bez prihláseného používateľa nevidí nič).
 # Lokálne (wrangler dev) sa použije CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE z ./dev.sh.
+# Obrázky do PDF ponuky (src/assets/*.png) ako binárne dáta
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = true
+
+# PDF ponuky (F3): Browser Run a úložisko R2 s jurisdikciou EÚ
+[browser]
+binding = "BROWSER"
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "crm-dokumenty-test"
+jurisdiction = "eu"
+
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "c7a47fba727d45ec83565393f125c9d0"
@@ -26,6 +41,7 @@ id = "c7a47fba727d45ec83565393f125c9d0"
 [vars]
 ENVIRONMENT = "test"   # Test (Neon dev); Ostré dostane vlastné prostredie
 ACCESS_TEAM_DOMAIN = "https://greenlogy.cloudflareaccess.com"
+PUBLIC_OFFER_URL = "https://crm-ponuka.peter-700.workers.dev"   # stránka ponuky (Worker crm-ponuka, mimo Access); Ostré: ponuka.greenlogy.com
 ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 
 # Naplánované úlohy (api/src/jobs.ts): denná aktivácia Pripravovaných OOM o 0:05 Europe/Bratislava.

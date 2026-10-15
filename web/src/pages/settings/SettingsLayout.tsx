@@ -12,6 +12,7 @@ export const SETTINGS_SECTIONS = [
   { path: 'ciselniky', label: 'Číselníky' },
   { path: 'parovanie-sadzieb', label: 'Párovanie sadzieb' },
   { path: 'cenove-parametre', label: 'Cenové parametre', approver: true },
+  { path: 'sablony-ponuk', label: 'Šablóny ponúk' },
   { path: 'preklady-importov', label: 'Preklady importov' },
   { path: 'vlastne-polia', label: 'Vlastné polia' },
   { path: 'pipelines', label: 'Pipelines a stage' },

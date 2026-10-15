@@ -1,0 +1,46 @@
+# Verejná stránka ponuky (modul 5, F3; návrh DB časť 5). Mimo Cloudflare Access – prístup iba cez neuhádnuteľný odkaz.
+# Databáza: rola crm_public cez Hyperdrive crm-ponuka-dev (iba tri funkcie v schéme verejne, žiadna tabuľka).
+# R2: iba čítanie PDF ponúk (kód nič nezapisuje). Žiadne tajomstvá Gmailu ani Finstatu.
+name = "crm-ponuka"
+main = "src/index.ts"
+compatibility_date = "2026-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+preview_urls = false
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "6f5c43b3d47749f4b509a32043e75ef7"   # crm-ponuka-dev (rola crm_public)
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "crm-dokumenty-test"
+jurisdiction = "eu"
+
+# potvrdenie akceptácie v PDF (vykreslí sa na požiadanie)
+[browser]
+binding = "BROWSER"
+
+# Obmedzenie pokusov podľa IP (Workers Rate Limiting; obdobie je 10 alebo 60 s):
+# zobrazenie 30/min, neplatný odkaz 10/min, akceptácia 5/min
+[[ratelimits]]
+name = "RL_VIEW"
+namespace_id = "5101"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "RL_BAD"
+namespace_id = "5102"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RL_ACCEPT"
+namespace_id = "5103"
+simple = { limit = 5, period = 60 }
+
+[vars]
+ENVIRONMENT = "test"
+
+[observability]
+enabled = true

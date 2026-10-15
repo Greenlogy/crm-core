@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
     "hono": "4.13.8",
     "jose": "6.2.12",
     "postgres": "3.4.9",

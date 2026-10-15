@@ -32,6 +32,7 @@ import { ImportAliasesPage } from './pages/settings/ImportAliasesPage';
 import { JobRunsPage } from './pages/settings/JobRunsPage';
 import { LookupsPage } from './pages/settings/LookupsPage';
 import { PipelinesPage } from './pages/settings/PipelinesPage';
+import { OfferTemplatesPage } from './pages/settings/OfferTemplatesPage';
 import { PricingPage } from './pages/settings/PricingPage';
 import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
@@ -85,6 +86,7 @@ const router = createBrowserRouter([
           { path: 'ciselniky', element: <LookupsPage /> },
           { path: 'parovanie-sadzieb', element: <TariffMappingPage /> },
           { path: 'cenove-parametre', element: <PricingPage /> },
+          { path: 'sablony-ponuk', element: <OfferTemplatesPage /> },
           { path: 'preklady-importov', element: <ImportAliasesPage /> },
           { path: 'vlastne-polia', element: <CustomFieldsPage /> },
           { path: 'pipelines', element: <PipelinesPage /> },

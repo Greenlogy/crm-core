@@ -344,6 +344,10 @@ function eventText(t: TimelineItem): string {
     case 'ponuka_platnost': return `Platnosť ponuky ${offerNo(t)} ${t.detail?.extended ? 'predĺžená' : 'skrátená'} do ${dateTime(String(t.detail?.valid_until ?? ''))}`;
     case 'ponuka_akceptovana': return `Zákazník akceptoval ponuku ${offerNo(t)}`;
     case 'ponuka_zablokovana': return `Verzia ${offerNo(t)} zablokovaná – zákazník akceptoval inú verziu`;
+    case 'ponuka_otvorena': return `Zákazník otvoril ponuku ${offerNo(t)}`;
+    case 'ponuka_odkaz': return `Nový odkaz na stránku ponuky ${offerNo(t)} (starý neplatí)`;
+    case 'akceptacia_zrusena': return `Akceptácia ponuky ${offerNo(t)} zrušená${t.detail?.reason ? ` – ${String(t.detail.reason)}` : ''}`;
+    case 'ponuka_odblokovana': return `Verzia ${offerNo(t)} odblokovaná`;
     case 'schvalenie_ziadost': return `Žiadosť o schválenie (${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? ''}) – ponuka ${offerNo(t)}`;
     case 'schvalenie_rozhodnutie': return `${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? 'Žiadosť'} ${t.detail?.approved ? 'schválená' : 'zamietnutá'} – ponuka ${offerNo(t)}`;
     default: return t.kind ?? '';

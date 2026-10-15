@@ -40,7 +40,7 @@ settings.get('/', async (c) => {
 settings.get('/users', async (c) => {
   const rows = await c.var.sql`
     SELECT u.id, u.name, u.email, u.is_admin, u.status, u.last_login_at, u.invited_at, u.deactivated_at,
-           u.seller_type, u.approves_prices, u.approves_assignments,
+           u.seller_type, u.approves_prices, u.approves_assignments, u.phone, u.job_title,
            t.id AS team_id, t.code AS team_code, t.name AS team_name, t.all_orgs, t.is_external,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name)
                                      ORDER BY o.is_default DESC, o.legal_name)
@@ -106,6 +106,9 @@ settings.patch('/users/:id', async (c) => {
   const sellerType = sellerTypeOf(b);
   const approves = bool(b, 'approves_prices', 'Schvaľuje ceny');
   const assigns = bool(b, 'approves_assignments', 'Schvaľuje pridelenie firmy');
+  // telefón a funkcia obchodníka do ponuky („Cenovú ponuku spracoval“, 0039)
+  const phone = 'phone' in b ? (str(b, 'phone', 'Telefón', { max: 40, optional: true }) || null) : undefined;
+  const jobTitle = 'job_title' in b ? (str(b, 'job_title', 'Funkcia', { max: 80, optional: true }) || null) : undefined;
   const sql = c.var.sql;
   const [cur] = await sql<{ team_id: string }[]>`SELECT team_id FROM app_user WHERE id = ${id}`;
   if (!cur) return c.json({ error: 'Používateľ neexistuje.' }, 404);
@@ -117,7 +120,9 @@ settings.patch('/users/:id', async (c) => {
            is_admin = coalesce(${isAdmin ?? null}::boolean, is_admin),
            seller_type = CASE WHEN ${sellerType !== undefined} THEN ${sellerType ?? null}::seller_type ELSE seller_type END,
            approves_prices = coalesce(${approves ?? null}::boolean, approves_prices),
-           approves_assignments = coalesce(${assigns ?? null}::boolean, approves_assignments)
+           approves_assignments = coalesce(${assigns ?? null}::boolean, approves_assignments),
+           phone = CASE WHEN ${phone !== undefined} THEN ${phone ?? null}::text ELSE phone END,
+           job_title = CASE WHEN ${jobTitle !== undefined} THEN ${jobTitle ?? null}::text ELSE job_title END
      WHERE id = ${id}`;
   if (orgIds !== undefined) await setUserOrgs(sql, id, orgIds);
   await checkOrgs(sql, teamId ?? cur.team_id, undefined, id);

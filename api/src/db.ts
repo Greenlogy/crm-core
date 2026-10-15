@@ -7,6 +7,9 @@ import type { FinstatEnv } from './finstat';
 
 export type Env = AuthEnv & FinstatEnv & {
   HYPERDRIVE: Hyperdrive;
+  BROWSER: Fetcher;        // Browser Run – PDF ponuky (F3)
+  DOCS: R2Bucket;          // R2 crm-dokumenty-* (jurisdikcia EÚ): PDF ponúk, podpísané ponuky
+  PUBLIC_OFFER_URL: string; // adresa stránky ponuky (Worker crm-ponuka)
 };
 
 export type Sql = postgres.Sql;

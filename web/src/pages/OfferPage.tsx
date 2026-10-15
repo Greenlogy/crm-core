@@ -1,7 +1,9 @@
 // Editor ponuky (dizajn 34; návrh DB časti 1.5–1.8, 19–21): varianty A–E, ceny OOM × rok s hranicou a pridanou
 // hodnotou, podmienky, súhrn variantu s odhadom provízie (marža iba s právom), kontrola a schválenie, odoslanie,
 // verzie a platnosť. Výpočty, stav a pravidlá robí databáza; web iba zobrazuje a posiela zmeny.
-// PDF, stránka ponuky a akceptácia sú F3, e-mail z CRM F4.
+// F3: náhľad a PDF ponuky, odoslanie s odkazom na stránku ponuky (odkaz sa ukáže iba raz), akceptácia (klik zákazníka
+// na stránke, ručne s kanálom a podpísaným PDF), zrušenie akceptácie adminom, zmluvná pokuta, zablokovaná verzia.
+// E-mail z CRM je F4.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -10,8 +12,8 @@ import { Card, Empty, ErrorState, PageSkeleton, Pill, Rows, StatusPill } from '.
 import { send, useApi } from '../lib/api';
 import { date, dec, eur, text } from '../lib/format';
 import {
-  APPROVAL_KIND, dateTime, isDraft, type Offer, OFFER_STATE, PRICE_KIND, type PriceKind, type PriceModel, SEND_CHANNEL,
-  THRESHOLD_SOURCE, type Variant, type VariantSummary, type VariantValue, variantLetter,
+  ACCEPT_CHANNEL, type AcceptanceData, APPROVAL_KIND, dateTime, isDraft, needText, type Offer, OFFER_STATE, PRICE_KIND, type PriceKind,
+  type PriceModel, SEND_CHANNEL, THRESHOLD_SOURCE, type Variant, type VariantSummary, type VariantValue, variantLetter,
 } from '../lib/offers';
 
 const APPROVAL_STATUS = {
@@ -30,7 +32,7 @@ const nowLocal = () => {
   return d.toISOString().slice(0, 16);
 };
 
-type Panel = null | 'prepare' | 'sent' | 'reject' | 'shorten' | 'extend' | 'delete';
+type Panel = null | 'prepare' | 'sent' | 'reject' | 'shorten' | 'extend' | 'delete' | 'link' | 'accept' | 'unblock';
 
 export function OfferPage() {
   const { id = '' } = useParams();
@@ -101,8 +103,24 @@ export function OfferPage() {
         </div>
       </header>
       {save.error && <Notice tone="error">{save.error}</Notice>}
-      {blocked && (
-        <div className="ban ban-danger">Zákazník akceptoval inú verziu tejto ponuky – túto verziu nemožno pripraviť ani odoslať. Môžete ju zmazať.</div>
+      {(blocked || o.blocked_by_offer_id) && (
+        <div className="ban ban-danger offer-banner">
+          <span>
+            {blocked
+              ? 'Zákazník akceptoval inú verziu tejto ponuky – túto verziu nemožno pripraviť ani odoslať. Môžete ju zmazať.'
+              : 'Verzia je zablokovaná po akceptácii inej verzie (akceptácia bola zrušená). Odblokuje ju vlastník obchodu alebo admin.'}
+          </span>
+          {!blocked && o.blocked_by_offer_id && o.can_manage_link && isDraft(o.status) && (
+            <button type="button" className="btn btn-sm" disabled={save.busy} onClick={() => act(() => send('POST', `/api/offers/${o.id}/unblock`))}>
+              Odblokovať
+            </button>
+          )}
+        </div>
+      )}
+      {o.template?.status === 'navrh' && isDraft(o.status) && (
+        <div className="ban ban-warn">
+          Šablóna ponuky v jazyku {o.language.toUpperCase()} je zatiaľ návrh – ponuku nemožno odoslať, kým ju admin neschváli (Nastavenia → Šablóny ponúk).
+        </div>
       )}
 
       <div className="columns">
@@ -168,7 +186,9 @@ export function OfferPage() {
               predĺžiť iba schvaľovateľ cien.
             </p>
             <OfferActions offer={o} busy={save.busy} onPanel={setPanel} onReprice={() => act(() => send('POST', `/api/offers/${o.id}/reprice`))} />
+            <DocLinks offer={o} onPanel={setPanel} />
           </Card>
+          {!isDraft(o.status) && <AcceptanceCard offer={o} onChanged={reload} />}
           <CheckCard offer={o} />
           {o.approvals.length > 0 && (
             <Card title="Schvaľovanie">
@@ -194,7 +214,9 @@ export function OfferPage() {
       </div>
 
       {panel === 'prepare' && <PreparePanel offer={o} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />}
-      {panel === 'sent' && <SentPanel offer={o} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />}
+      {panel === 'sent' && <SendPanel offer={o} onClose={() => { setPanel(null); reload(); }} />}
+      {panel === 'link' && <LinkPanel offer={o} onClose={() => { setPanel(null); reload(); }} />}
+      {panel === 'accept' && <AcceptPanel offer={o} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />}
       {panel === 'reject' && (
         <SimplePanel
           title="Zákazník ponuku odmietol"
@@ -242,7 +264,7 @@ function OfferActions(props: { offer: Offer; busy: boolean; onPanel: (p: Panel) 
       {o.status === 'caka_na_schvalenie' && <div className="caption">Ponuka čaká na schválenie – odoslať sa dá po rozhodnutí.</div>}
       {o.status === 'pripravena' && (
         <button type="button" className="btn primary" disabled={props.busy} onClick={() => props.onPanel('sent')}>
-          Označiť ako odoslanú
+          Odoslať zákazníkovi
         </button>
       )}
       {isDraft(o.status) && (
@@ -252,6 +274,9 @@ function OfferActions(props: { offer: Offer; busy: boolean; onPanel: (p: Panel) 
       )}
       {sent && (
         <>
+          <button type="button" className="btn primary" onClick={() => props.onPanel('accept')}>
+            Zaznačiť akceptáciu
+          </button>
           <button type="button" className="btn" onClick={() => props.onPanel('reject')}>
             Zákazník odmietol
           </button>
@@ -263,9 +288,36 @@ function OfferActions(props: { offer: Offer; busy: boolean; onPanel: (p: Panel) 
           </button>
         </>
       )}
-      <button type="button" className="btn" disabled title="PDF a stránka ponuky pribudnú vo fáze F3">
-        Náhľad PDF
-      </button>
+    </div>
+  );
+}
+
+/** PDF a odkaz: náhľad (neukladá sa), uložené PDF odoslanej ponuky, nový odkaz (vlastník obchodu alebo admin). */
+function DocLinks(props: { offer: Offer; onPanel: (p: Panel) => void }) {
+  const o = props.offer;
+  const sentLike = ['odoslana', 'otvorena', 'akceptovana', 'zamietnuta'].includes(o.status);
+  return (
+    <div className="offer-actions">
+      {o.has_pdf ? (
+        <a className="btn" href={`/api/offers/${o.id}/pdf`} target="_blank" rel="noreferrer">
+          PDF ponuky
+        </a>
+      ) : (
+        <a className="btn" href={`/api/offers/${o.id}/preview.pdf`} target="_blank" rel="noreferrer">
+          Náhľad PDF
+        </a>
+      )}
+      {sentLike && o.can_manage_link && !o.closed_at && (
+        <button type="button" className="btn" onClick={() => props.onPanel('link')}>
+          Nový odkaz na stránku ponuky
+        </button>
+      )}
+      {o.link_created_at && (
+        <div className="caption">
+          Odkaz vytvorený {dateTime(o.link_created_at)}{o.link_created_by_name ? ` · ${o.link_created_by_name}` : ''}. Zobrazuje sa iba raz – v CRM je
+          uložený iba jeho odtlačok.
+        </div>
+      )}
     </div>
   );
 }
@@ -280,9 +332,7 @@ function CheckCard(props: { offer: Offer }) {
       {c.needs.length > 0 && (
         <p>
           <strong>Bez výnimky sa ponuka nedá odoslať.</strong>{' '}
-          {c.needs
-            .map((n) => `${n.variant} · ${n.voltage_group.toUpperCase()} ${n.year} ${dec(n.requested_value, 2, 4)}${n.threshold_value !== null ? ` < ${dec(n.threshold_value, 2, 4)}` : ' pod hranicou'}`)
-            .join('; ')}{' '}
+          {c.needs.map((n) => needText(n, dec)).join('; ')}{' '}
           → „Pripraviť na odoslanie“ pošle žiadosť na schválenie. Schválená výnimka platí 3 dni na odoslanie.
         </p>
       )}
@@ -648,8 +698,9 @@ function ConditionsCard(props: { offer: Offer; variant: Variant; editable: boole
       negative_price_compensation: v.negative_price_compensation,
       contact_id: o.contact_id ?? '',
       language: o.language,
+      penalty: toInput(o.penalty_eur_mwh),
     }),
-    [v, o.contact_id, o.language],
+    [v, o.contact_id, o.language, o.penalty_eur_mwh],
   );
   const [vals, setVals] = useState(init);
   const changed = JSON.stringify(vals) !== JSON.stringify(init);
@@ -665,8 +716,8 @@ function ConditionsCard(props: { offer: Offer; variant: Variant; editable: boole
         advance_due_day: vals.advance_due_day || null,
         negative_price_compensation: vals.negative_price_compensation,
       });
-      if (vals.contact_id !== (o.contact_id ?? '') || vals.language !== o.language) {
-        await send('PATCH', `/api/offers/${o.id}`, { contact_id: vals.contact_id || null, language: vals.language });
+      if (vals.contact_id !== (o.contact_id ?? '') || vals.language !== o.language || vals.penalty !== init.penalty) {
+        await send('PATCH', `/api/offers/${o.id}`, { contact_id: vals.contact_id || null, language: vals.language, penalty_eur_mwh: vals.penalty || null });
       }
       props.onChanged();
     });
@@ -711,6 +762,14 @@ function ConditionsCard(props: { offer: Offer; variant: Variant; editable: boole
         <Field label="Jazyk ponuky">
           <Select value={vals.language} disabled={!editable} onChange={(x) => set('language', x)} options={[{ value: 'sk', label: 'slovenčina' }, { value: 'en', label: 'angličtina' }]} />
         </Field>
+        {o.kind !== 'viwa' && (
+          <Field
+            label="Zmluvná pokuta [€/MWh]"
+            hint={`prázdne = ${o.template?.penalty ?? (o.kind === 'vykup' ? 30 : 50)} € zo šablóny; nižšiu schvaľuje schvaľovateľ cien`}
+          >
+            <TextInput value={vals.penalty} disabled={!editable} onChange={(x) => set('penalty', x)} placeholder={String(o.template?.penalty ?? '')} />
+          </Field>
+        )}
         {o.kind === 'vykup' && (
           <Field label=" ">
             <Check checked={vals.negative_price_compensation} disabled={!editable} onChange={(x) => set('negative_price_compensation', x)}>
@@ -797,10 +856,7 @@ function PreparePanel(props: { offer: Offer; onClose: () => void; onDone: () => 
             <p>Ponuka potrebuje schválenie:</p>
             <ul>
               {c?.needs.map((n) => (
-                <li key={`${n.variant_id}-${n.year}-${n.voltage_group}-${n.price_model}`}>
-                  Variant {n.variant} · {n.voltage_group.toUpperCase()} {n.year}: {dec(n.requested_value, 2, 4)}
-                  {n.threshold_value !== null ? ` < ${dec(n.threshold_value, 2, 4)}` : ' pod hranicou'} · {dec(n.volume_mwh, 1, 1)} MWh
-                </li>
+                <li key={`${n.type ?? ''}-${n.variant_id}-${n.year}-${n.voltage_group}-${n.price_model}`}>{needText(n, dec)}</li>
               ))}
               {c?.risk_needs_approval && <li>Rizikový zákazník (konkurz, reštrukturalizácia alebo rating E/X)</li>}
             </ul>
@@ -817,41 +873,237 @@ function PreparePanel(props: { offer: Offer; onClose: () => void; onDone: () => 
   );
 }
 
-function SentPanel(props: { offer: Offer; onClose: () => void; onDone: () => void }) {
+/** Odoslanie mimo CRM (e-mail z CRM pribudne v F4): stav Odoslaná, PDF do úložiska a odkaz na stránku ponuky (iba raz). */
+function SendPanel(props: { offer: Offer; onClose: () => void }) {
   const [at, setAt] = useState(nowLocal());
   const [channel, setChannel] = useState<'email_mimo_crm' | 'osobne' | 'ine' | ''>('');
   const [note, setNote] = useState('');
+  const [done, setDone] = useState<{ link: string; valid_until: string } | null>(null);
   const save = useSave();
   const fix = props.offer.variants.some((v) => v.price_kind === 'fix' || v.price_kind === 'kombinacia');
   return (
     <SidePanel
-      title="Označiť ako odoslanú"
+      title={done ? 'Ponuka odoslaná' : 'Odoslať zákazníkovi'}
       onClose={props.onClose}
       footer={
-        <button type="button" className="btn primary" disabled={save.busy || !channel} onClick={() => save.run(async () => {
-          await send('POST', `/api/offers/${props.offer.id}/mark-sent`, { sent_at: new Date(at).toISOString(), channel, note });
-          props.onDone();
-        })}>
-          Označiť ako odoslanú
+        done ? (
+          <button type="button" className="btn primary" onClick={props.onClose}>Hotovo</button>
+        ) : (
+          <button type="button" className="btn primary" disabled={save.busy || !channel} onClick={() => save.run(async () => {
+            setDone(await send<{ link: string; valid_until: string }>('POST', `/api/offers/${props.offer.id}/send`, { sent_at: new Date(at).toISOString(), channel, note }));
+          })}>
+            {save.busy ? 'Vytváram PDF…' : 'Odoslať (PDF a odkaz)'}
+          </button>
+        )
+      }
+    >
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {done ? (
+        <LinkResult link={done.link} offerId={props.offer.id} validUntil={done.valid_until} />
+      ) : (
+        <>
+          <p>CRM uloží PDF ponuky a vytvorí odkaz na stránku ponuky pre zákazníka. PDF a odkaz pošlite zákazníkovi z vlastného e-mailu (e-mail z CRM pribudne neskôr).</p>
+          <Field label="Kedy bola (bude) odoslaná">
+            <input className="inp" type="datetime-local" value={at} max={nowLocal()} onChange={(e) => setAt(e.target.value)} />
+          </Field>
+          <Field label="Ako">
+            <Select value={channel} placeholder="Vyberte" onChange={setChannel} options={(['email_mimo_crm', 'osobne', 'ine'] as const).map((x) => ({ value: x, label: SEND_CHANNEL[x] }))} />
+          </Field>
+          <Field label="Poznámka (nepovinné)">
+            <TextInput value={note} maxLength={1000} onChange={setNote} />
+          </Field>
+          <p className="caption">
+            Platnosť sa počíta od času odoslania: {fix ? 'FIX do 16:00 nasledujúceho pracovného dňa' : 'SPOT a VIWA 14 dní'}. Staršie odoslané verzie sa
+            označia ako Nahradené, obchod sa posunie z Príležitosti do Cenovej ponuky.{fix ? ' FIX ponuku s cenami zo staršieho dňa treba najprv prepočítať.' : ''}
+          </p>
+        </>
+      )}
+    </SidePanel>
+  );
+}
+
+/** Odkaz sa ukáže iba raz – CRM si uloží iba jeho odtlačok. */
+function LinkResult(props: { link: string; offerId: string; validUntil?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <>
+      <Notice tone="ok">
+        Odkaz na stránku ponuky{props.validUntil ? ` (platí do ${dateTime(props.validUntil)})` : ''}. Skopírujte si ho teraz – CRM ho už znova neukáže
+        (dá sa vytvoriť nový, starý potom prestane platiť).
+      </Notice>
+      <div className="link-box">
+        <input className="inp mono" readOnly value={props.link} onFocus={(e) => e.currentTarget.select()} aria-label="Odkaz na stránku ponuky" />
+        <button type="button" className="btn" onClick={() => void navigator.clipboard.writeText(props.link).then(() => setCopied(true))}>
+          {copied ? 'Skopírované' : 'Kopírovať'}
+        </button>
+      </div>
+      <p>
+        <a href={`/api/offers/${props.offerId}/pdf?download=1`}>Stiahnuť PDF ponuky</a> – priložte ho k e-mailu spolu s odkazom.
+      </p>
+    </>
+  );
+}
+
+function LinkPanel(props: { offer: Offer; onClose: () => void }) {
+  const [link, setLink] = useState<string | null>(null);
+  const save = useSave();
+  return (
+    <SidePanel
+      title="Nový odkaz na stránku ponuky"
+      onClose={props.onClose}
+      footer={
+        link ? (
+          <button type="button" className="btn primary" onClick={props.onClose}>Hotovo</button>
+        ) : (
+          <button type="button" className="btn primary" disabled={save.busy} onClick={() => save.run(async () => {
+            setLink((await send<{ link: string }>('POST', `/api/offers/${props.offer.id}/link`)).link);
+          })}>
+            Vytvoriť nový odkaz
+          </button>
+        )
+      }
+    >
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {link ? (
+        <LinkResult link={link} offerId={props.offer.id} />
+      ) : (
+        <p>Doterajší odkaz prestane platiť. Platnosť ponuky sa nemení. Zmena sa zapíše do časovej osi a auditu.</p>
+      )}
+    </SidePanel>
+  );
+}
+
+/** Ručná akceptácia (telefón, e-mail, osobne, podpísané PDF) – kým nie je právne overená akceptácia klikom, aj s podpísaným PDF. */
+function AcceptPanel(props: { offer: Offer; onClose: () => void; onDone: () => void }) {
+  const o = props.offer;
+  const [variant, setVariant] = useState(o.variants[0]?.id ?? '');
+  const [name, setName] = useState('');
+  const [func, setFunc] = useState('');
+  const [at, setAt] = useState(nowLocal());
+  const [channel, setChannel] = useState<'telefon' | 'email' | 'osobne' | 'podpisane_pdf' | ''>('');
+  const [note, setNote] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const save = useSave();
+  const submit = () =>
+    save.run(async () => {
+      let fileB64: string | undefined;
+      if (file) {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+        fileB64 = btoa(bin);
+      }
+      await send('POST', `/api/offers/${o.id}/accept-manual`, {
+        variant_id: variant, signer_name: name, signer_function: func, accepted_at: new Date(at).toISOString(), channel, note, file_base64: fileB64,
+      });
+      props.onDone();
+    });
+  return (
+    <SidePanel
+      title="Zaznačiť akceptáciu"
+      onClose={props.onClose}
+      footer={
+        <button type="button" className="btn primary" disabled={save.busy || !variant || !name.trim() || !func.trim() || !channel} onClick={submit}>
+          Zaznačiť akceptáciu
         </button>
       }
     >
       {save.error && <Notice tone="error">{save.error}</Notice>}
-      <Field label="Kedy bola odoslaná">
+      <Field label="Variant">
+        <Select value={variant} onChange={setVariant} options={o.variants.map((v) => ({ value: v.id, label: `${variantLetter(v.sort_order)} · ${v.name}` }))} />
+      </Field>
+      <Field label="Meno a priezvisko (kto prijal)">
+        <TextInput value={name} maxLength={200} onChange={setName} />
+      </Field>
+      <Field label="Funkcia">
+        <TextInput value={func} maxLength={200} onChange={setFunc} />
+      </Field>
+      <Field label="Kedy">
         <input className="inp" type="datetime-local" value={at} max={nowLocal()} onChange={(e) => setAt(e.target.value)} />
       </Field>
       <Field label="Ako">
-        <Select value={channel} placeholder="Vyberte" onChange={setChannel} options={(['email_mimo_crm', 'osobne', 'ine'] as const).map((x) => ({ value: x, label: SEND_CHANNEL[x] }))} />
+        <Select value={channel} placeholder="Vyberte" onChange={setChannel} options={(['telefon', 'email', 'osobne', 'podpisane_pdf'] as const).map((x) => ({ value: x, label: ACCEPT_CHANNEL[x] }))} />
+      </Field>
+      <Field label="Podpísaná ponuka (PDF, nepovinné, do 10 MB)">
+        <input className="inp" type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </Field>
       <Field label="Poznámka (nepovinné)">
-        <TextInput value={note} maxLength={1000} onChange={setNote} />
+        <TextInput value={note} maxLength={2000} onChange={setNote} />
       </Field>
-      <p className="caption">
-        Platnosť sa počíta od času odoslania: {fix ? 'FIX do 16:00 nasledujúceho pracovného dňa' : 'SPOT a VIWA 14 dní'}. Staršie odoslané verzie sa
-        označia ako Nahradené, obchod sa posunie z Príležitosti do Cenovej ponuky.
-        {fix ? ' FIX ponuku s cenami zo staršieho dňa treba najprv prepočítať.' : ''}
-      </p>
+      <p className="caption">Akceptovať sa dá iba v platnosti ponuky. Obchod sa posunie do Akceptácie, rozpracovaná nová verzia sa zablokuje. Zapíše sa, kto akceptáciu zaznačil.</p>
     </SidePanel>
+  );
+}
+
+/** Akceptácia a otvorenia stránky ponuky; potvrdenie a podpísané PDF; zrušenie akceptácie (admin, s dôvodom). */
+function AcceptanceCard(props: { offer: Offer; onChanged: () => void }) {
+  const { data, reload } = useApi<AcceptanceData>(`/api/offers/${props.offer.id}/acceptance`);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const save = useSave();
+  if (!data) return null;
+  if (data.items.length === 0 && !data.page) {
+    return (
+      <Card title="Akceptácia">
+        <Empty>Zákazník ponuku zatiaľ neotvoril ani neakceptoval.</Empty>
+      </Card>
+    );
+  }
+  return (
+    <Card title="Akceptácia">
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {data.page && (
+        <p className="caption" style={{ marginTop: 0 }}>
+          Stránku ponuky zákazník otvoril {data.page.open_count}× · prvýkrát {dateTime(data.page.first_opened_at)} · naposledy {dateTime(data.page.last_opened_at)}
+        </p>
+      )}
+      <ul className="plain-list">
+        {data.items.map((a) => (
+          <li key={a.id} className="approval-row">
+            <div>
+              <strong>{a.variant}</strong> {a.revoked_at ? <Pill tone="neutral">zrušená</Pill> : <Pill tone="positive" live>akceptovaná</Pill>}
+            </div>
+            <div className="caption">
+              {dateTime(a.accepted_at)} · {a.signer_name}, {a.signer_function} ·{' '}
+              {a.method === 'klik' ? `kliknutím na stránke${a.ip ? ` (IP ${a.ip})` : ''}` : `ručne – ${ACCEPT_CHANNEL[a.channel ?? ''] ?? ''}${a.recorded_by_name ? `, zaznačil ${a.recorded_by_name}` : ''}`}
+            </div>
+            {a.note && <div className="caption">Poznámka: {a.note}</div>}
+            {a.revoked_at && <div className="caption">Zrušil {a.revoked_by_name} {dateTime(a.revoked_at)}: {a.revoke_reason}</div>}
+            <div className="acc-links">
+              {a.has_confirmation && (
+                <a href={`/api/offer-acceptances/${a.id}/confirmation.pdf`} target="_blank" rel="noreferrer">Potvrdenie (PDF)</a>
+              )}
+              {a.has_signed && (
+                <a href={`/api/offer-acceptances/${a.id}/signed.pdf`} target="_blank" rel="noreferrer">Podpísaná ponuka</a>
+              )}
+              {a.can_revoke && revoking !== a.id && (
+                <button type="button" className="btn btn-sm" onClick={() => setRevoking(a.id)}>Zrušiť akceptáciu</button>
+              )}
+            </div>
+            {revoking === a.id && (
+              <div className="check-request">
+                <Field label="Dôvod zrušenia (povinný)">
+                  <textarea className="inp" rows={2} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+                </Field>
+                <div className="decide-actions">
+                  <button type="button" className="btn" onClick={() => setRevoking(null)}>Späť</button>
+                  <button type="button" className="btn btn-danger-solid" disabled={save.busy || !reason.trim()} onClick={() => save.run(async () => {
+                    await send('POST', `/api/offer-acceptances/${a.id}/revoke`, { reason });
+                    setRevoking(null);
+                    setReason('');
+                    reload();
+                    props.onChanged();
+                  })}>
+                    Zrušiť akceptáciu
+                  </button>
+                </div>
+                <p className="caption">Obchod sa vráti do Vyjednávania, ponuka do stavu Odoslaná (po platnosti Vypršaná). Zablokovaná verzia ostane zablokovaná.</p>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

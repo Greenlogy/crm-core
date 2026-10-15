@@ -189,6 +189,8 @@ function UserForm(props: {
   const [sellerType, setSellerType] = useState<SellerType | ''>(u?.seller_type ?? '');
   const [approves, setApproves] = useState(u?.approves_prices ?? false);
   const [assigns, setAssigns] = useState(u?.approves_assignments ?? false);
+  const [phone, setPhone] = useState(u?.phone ?? '');
+  const [jobTitle, setJobTitle] = useState(u?.job_title ?? '');
   const [deactivate, setDeactivate] = useState(false);
   const save = useSave();
   const team = props.teams.find((t) => t.id === teamId);
@@ -207,6 +209,8 @@ function UserForm(props: {
       seller_type: sellerType === '' ? null : sellerType,
       approves_prices: team?.is_external ? false : approves,
       approves_assignments: team?.is_external ? false : assigns,
+      phone: phone.trim() || null,
+      job_title: jobTitle.trim() || null,
     };
     const ok = await save.run(() =>
       u ? send('PATCH', `/api/settings/users/${u.id}`, body) : send('POST', '/api/settings/users', { ...body, email }),
@@ -283,6 +287,12 @@ function UserForm(props: {
             disabled={readOnly}
             options={SELLER_TYPES.map((s) => ({ value: s.value, label: s.label }))}
           />
+        </Field>
+        <Field label="Telefón" hint="Do ponuky („Cenovú ponuku spracoval“) a na stránku ponuky.">
+          <TextInput value={phone} onChange={setPhone} disabled={readOnly} maxLength={40} />
+        </Field>
+        <Field label="Funkcia" hint="Napr. obchodník, obchodný riaditeľ.">
+          <TextInput value={jobTitle} onChange={setJobTitle} disabled={readOnly} maxLength={80} />
         </Field>
         <div className="fl-wide">
           <Check checked={approves && !team?.is_external} disabled={readOnly || team?.is_external} onChange={setApproves}>

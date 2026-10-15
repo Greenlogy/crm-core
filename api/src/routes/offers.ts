@@ -13,7 +13,6 @@ export const offers = new Hono<AppEnv>();
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const PRICE_KINDS = ['fix', 'spot', 'kombinacia', 'cennik', 'viwa'] as const;
 const MODELS = ['fix', 'spot_plus_eur', 'spot_minus_eur', 'spot_minus_pct'] as const;
-const CHANNELS = ['email_mimo_crm', 'osobne', 'ine'] as const;
 
 function id(v: string | undefined): string {
   if (!v || !UUID.test(v)) throw new BadRequest('Neplatné ID.');
@@ -54,6 +53,13 @@ async function offerHead(sql: Sql, offerId: string) {
            st.code AS stage_code, st.name AS stage_name, d.closed_at,
            crm_deal_editable(d.company_id, d.person_id, d.owner_id) AS can_edit,
            crm_can_see_margin() AS see_margin, crm_sees_portfolio() AS see_portfolio,
+           o.penalty_eur_mwh, o.pdf_key IS NOT NULL AS has_pdf, o.link_created_at, lu.name AS link_created_by_name,
+           o.blocked_by_offer_id, (d.owner_id = crm_active_user_id() OR crm_is_admin()) AS can_manage_link, crm_is_admin() AS is_admin,
+           (SELECT jsonb_build_object('id', t.id, 'version', t.version, 'status', t.status, 'penalty', t.defaults->'zmluvna_pokuta')
+              FROM offer_template_version t
+             WHERE t.org_id = o.org_id AND t.kind = o.kind AND t.language = o.language
+               AND (t.id = o.template_version_id OR (o.template_version_id IS NULL AND t.status IN ('platna', 'navrh')))
+             ORDER BY (t.id = o.template_version_id) DESC, (t.status = 'platna') DESC LIMIT 1) AS template,
            user_commission_pct(d.owner_id) AS commission_pct
       FROM offer o
       JOIN deal d ON d.id = o.deal_id
@@ -63,6 +69,7 @@ async function offerHead(sql: Sql, offerId: string) {
       LEFT JOIN app_user ou ON ou.id = d.owner_id
       LEFT JOIN app_user su ON su.id = o.sent_by
       LEFT JOIN app_user cu ON cu.id = o.created_by
+      LEFT JOIN app_user lu ON lu.id = o.link_created_by
      WHERE o.id = ${offerId}`;
   return o;
 }
@@ -157,9 +164,12 @@ offers.patch('/offers/:id', async (c) => {
   const b = await readBody(c.req);
   const language = oneOf(b, 'language', 'Jazyk', ['sk', 'en'] as const);
   const contact = 'contact_id' in b ? (b.contact_id === null || b.contact_id === '' ? null : id(String(b.contact_id))) : undefined;
+  // zmluvná pokuta: prázdna = zo šablóny; nižšia ako v šablóne potrebuje schválenie (0040)
+  const penalty = 'penalty_eur_mwh' in b ? decimal(b.penalty_eur_mwh, 'Zmluvná pokuta', 2, 0) : undefined;
   const rows = await c.var.sql`
     UPDATE offer SET language = coalesce(${language ?? null}::offer_language, language),
-                     contact_id = CASE WHEN ${contact !== undefined} THEN ${contact ?? null}::uuid ELSE contact_id END
+                     contact_id = CASE WHEN ${contact !== undefined} THEN ${contact ?? null}::uuid ELSE contact_id END,
+                     penalty_eur_mwh = CASE WHEN ${penalty !== undefined} THEN ${penalty ?? null}::numeric ELSE penalty_eur_mwh END
      WHERE id = ${offerId} RETURNING id`;
   if (rows.length === 0) return c.json({ error: 'Ponuku nemôžete upravovať.' }, 403);
   return c.json({ ok: true });
@@ -288,16 +298,7 @@ offers.post('/offers/:id/prepare', async (c) => {
   return c.json({ status: r.status });
 });
 
-offers.post('/offers/:id/mark-sent', async (c) => {
-  const offerId = id(c.req.param('id'));
-  const b = await readBody(c.req);
-  const channel = oneOf(b, 'channel', 'Spôsob odoslania', CHANNELS);
-  if (!channel) throw new BadRequest('Vyberte, ako bola ponuka odoslaná.');
-  const at = instant(b, 'sent_at', 'Čas odoslania');
-  const note = str(b, 'note', 'Poznámka', { max: 1000, optional: true }) || null;
-  const [r] = await c.var.sql<{ until: string }[]>`SELECT offer_mark_sent(${offerId}, ${at}, ${channel}, ${note}) AS until`;
-  return c.json({ valid_until: r.until });
-});
+// Označenie ako odoslanej je od F3 súčasťou odoslania s PDF a odkazom (offers-pdf.ts: POST /offers/:id/send)
 
 offers.post('/offers/:id/reject', async (c) => {
   const offerId = id(c.req.param('id'));

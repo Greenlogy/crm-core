@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Testy databázy jadra na vetve dev: seed.sql + checks.sql + checks_zakaznici.sql + checks_nastavenia.sql
+# Testy databázy jadra na vetve dev: checks_predvolene_prava.sql + seed.sql + checks.sql + checks_zakaznici.sql + checks_nastavenia.sql
 # + checks_zakaznici_zapis.sql + checks_oom.sql + checks_produkty.sql
 # + checks_cenniky.sql + checks_zmluvy_priprava.sql + checks_zmluvy.sql + checks_zmluvy_import.sql
 # + checks_zmluvy_bilancia.sql + checks_zmluvy_nocny_beh.sql + checks_male_podniky.sql
-# + checks_objem_xm.sql + checks_obchod.sql + checks_audit_rls.sql + checks_ponuky.sql
+# + checks_objem_xm.sql + checks_obchod.sql + checks_audit_rls.sql + checks_ponuky.sql + checks_ponuky_f3.sql
 # v jednej transakcii, ktorá sa na konci vráti (na dev neostanú testovacie dáta).
 # Testy počítajú iba vlastné záznamy (pevné id 00000000-0000-4000-8000-…, východiskové tímy) – prejdú aj na databáze
 # s inými dátami (testovacie OOM, cenníky 2026, zmeny admina v Nastaveniach).
@@ -47,6 +47,7 @@ psql -X -q -v ON_ERROR_STOP=1 <<SQL
 \set QUIET on
 SET client_min_messages = notice;
 BEGIN;
+\i $ROOT/db/test/checks_predvolene_prava.sql
 \i $ROOT/db/test/seed.sql
 \echo 'Testovacie dáta nahrané.'
 \i $ROOT/db/test/checks.sql
@@ -66,6 +67,7 @@ BEGIN;
 \i $ROOT/db/test/checks_obchod.sql
 \i $ROOT/db/test/checks_audit_rls.sql
 \i $ROOT/db/test/checks_ponuky.sql
+\i $ROOT/db/test/checks_ponuky_f3.sql
 ROLLBACK;
 \echo 'Všetky kontroly prešli. Transakcia vrátená, neostali testovacie dáta.'
 SQL

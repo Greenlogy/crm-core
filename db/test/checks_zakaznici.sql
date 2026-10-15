@@ -389,6 +389,7 @@ END;
 $$;
 
 CREATE ROLE crm_rls_test NOLOGIN;
+GRANT USAGE ON SCHEMA public TO crm_rls_test;   -- od 0039 nemá schému public každý (PUBLIC)
 -- PostgreSQL 16+: tvorca roly do nej môže prepnúť, iba ak si ju pridelí s voľbou SET (Neon nie je superuser).
 GRANT crm_rls_test TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
 GRANT SELECT, INSERT, UPDATE ON company, contact, company_contact TO crm_rls_test;

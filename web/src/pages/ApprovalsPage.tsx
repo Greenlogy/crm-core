@@ -52,6 +52,7 @@ type Approval = {
   offer_valid_until: string | null;
   risk_snapshot: { insolvency_kind: string | null; payment_rating: string | null; debts_count: number; debts_sum: number } | null;
   items: PriceItem[] | null;
+  penalty_eur_mwh: string | null;
   can_decide: boolean;
   can_cancel: boolean;
 };
@@ -83,7 +84,7 @@ function summary(a: Approval): string {
     case 'pridelenie_firmy':
       return `od ${text(a.from_owner_name)} k ${text(a.requested_by_name)}`;
     case 'vynimka_ceny':
-      return (a.items ?? []).map(itemLine).join(' · ') || '–';
+      return [...(a.items ?? []).map(itemLine), ...(a.penalty_eur_mwh !== null ? [`zmluvná pokuta ${price(a.penalty_eur_mwh)} €/MWh`] : [])].join(' · ') || '–';
     case 'rizikovy_zakaznik': {
       const r = a.risk_snapshot;
       if (!r) return '–';
@@ -240,6 +241,7 @@ function Detail(props: { a: Approval; onChanged: () => void }) {
             ? ([['Platí do', dateTime(a.offer_valid_until)], ['Žiada predĺžiť do', dateTime(a.requested_valid_until)]] as [string, string][])
             : []),
           ...(a.kind === 'rizikovy_zakaznik' ? ([['Finstat pri žiadosti', summary(a)]] as [string, string][]) : []),
+          ...(a.penalty_eur_mwh !== null ? ([['Zmluvná pokuta', `${price(a.penalty_eur_mwh)} €/MWh (nižšia ako v šablóne)`]] as [string, string][]) : []),
           ['Žiada', `${text(a.requested_by_name)} · ${dateTime(a.created_at)}`],
           ...(a.decided_at ? ([['Rozhodol', `${text(a.decided_by_name)} · ${dateTime(a.decided_at)}`]] as [string, string][]) : []),
           ...(a.status === 'schvalena' && a.valid_until ? ([['Platí do', dateTime(a.valid_until)]] as [string, string][]) : []),

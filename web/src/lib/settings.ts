@@ -10,6 +10,8 @@ export type SettingsUser = {
   email: string;
   is_admin: boolean;
   seller_type: SellerType | null;
+  phone: string | null;
+  job_title: string | null;
   approves_prices: boolean;
   approves_assignments: boolean;
   status: UserStatus;

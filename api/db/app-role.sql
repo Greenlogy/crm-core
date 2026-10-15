@@ -85,6 +85,15 @@ GRANT DELETE ON offer, offer_variant, offer_item, user_commission_rate TO crm_ap
 REVOKE ALL ON offer_year_basis, doc_counter FROM crm_app;
 -- 0038: položky výnimky (hranica môže byť odhad portfólia) aplikácia nečíta ani nemení – iba funkcia approval_price_detail
 REVOKE ALL ON approval_price_item FROM crm_app;
+-- 0039: ponuku aplikácia mení iba v jazyku, kontaktnej osobe, vlastných poliach a zmluvnej pokute (PDF, odkaz,
+-- šablóna a zablokovanie iba funkcie); akceptácie a otvorenia iba číta; šablóny ponúk mení admin (RLS), návrh smie
+-- zmazať; obrázok sa nemení, iba vypne. Schéma verejne (verejná stránka ponuky) aplikácii nepatrí.
+REVOKE UPDATE ON offer FROM crm_app;
+GRANT UPDATE (language, contact_id, custom, penalty_eur_mwh) ON offer TO crm_app;
+REVOKE INSERT, UPDATE ON offer_acceptance, offer_page_stat FROM crm_app;
+GRANT DELETE ON offer_template_version TO crm_app;
+REVOKE UPDATE ON offer_asset FROM crm_app;
+GRANT UPDATE (active) ON offer_asset TO crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

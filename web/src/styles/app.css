@@ -2161,3 +2161,79 @@ a.tab {
 .decide-actions .btn {
   justify-content: center;
 }
+
+/* --- F3: odkaz, akceptácia --- */
+.offer-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.link-box {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.link-box .inp {
+  flex: 1;
+  font-size: 12px;
+}
+.acc-links {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+/* --- Šablóny ponúk (obrazovka 42) --- */
+.tpl-sections {
+  display: flex;
+  flex-direction: column;
+}
+.tpl-section {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tpl-head {
+  font-weight: 600;
+  font-size: 13px;
+}
+.tpl-title {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.tpl-preview {
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--ink-muted);
+  max-height: 7.5em;
+  overflow: hidden;
+}
+.tpl-text {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.tpl-assets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.tpl-asset {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tpl-asset img {
+  width: 100%;
+  height: 140px;
+  object-fit: contain;
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+}

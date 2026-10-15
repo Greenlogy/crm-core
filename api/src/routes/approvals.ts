@@ -24,7 +24,7 @@ approvals.get('/approvals', async (c) => {
            a.requested_by, ru.name AS requested_by_name,
            a.from_owner_id, fu.name AS from_owner_name, du.name AS decided_by_name,
            a.deal_id, d.name AS deal_name, a.offer_id, offer_display_number(o) AS offer_number,
-           a.valid_until, a.requested_valid_until, o.valid_until AS offer_valid_until, a.risk_snapshot,
+           a.valid_until, a.requested_valid_until, o.valid_until AS offer_valid_until, a.risk_snapshot, a.penalty_eur_mwh,
            CASE WHEN a.kind = 'vynimka_ceny' THEN
              (SELECT jsonb_agg(jsonb_build_object('year', x.year, 'price_model', x.price_model, 'voltage_group', x.voltage_group,
                                                   'requested_value', x.requested_value, 'threshold_value', x.threshold_value,

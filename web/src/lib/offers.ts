@@ -123,7 +123,9 @@ export type VariantSummary = {
 };
 export type OfferCheck = {
   errors: string[];
-  needs: { variant: string; variant_id: string; year: number; price_model: string; voltage_group: string; requested_value: number; threshold_value: number | null; threshold_source: string; volume_mwh: number }[];
+  // type 'pokuta' = zmluvná pokuta pod predvolenou hodnotou šablóny (0040) – bez variantu, roka a napätia
+  needs: { type?: 'pokuta'; variant: string | null; variant_id: string | null; year: number | null; price_model: string | null; voltage_group: string | null;
+           requested_value: number; threshold_value: number | null; threshold_source: string; volume_mwh: number | null }[];
   risk_needs_approval: boolean;
   fix_stale: boolean;
   risk: Risk;
@@ -176,6 +178,14 @@ export type Offer = {
   see_margin: boolean;
   see_portfolio: boolean;
   commission_pct: string | null;
+  penalty_eur_mwh: string | null;
+  has_pdf: boolean;
+  link_created_at: string | null;
+  link_created_by_name: string | null;
+  blocked_by_offer_id: string | null;
+  can_manage_link: boolean;
+  is_admin: boolean;
+  template: { id: string; version: number; status: 'navrh' | 'platna' | 'nahradena'; penalty: number | null } | null;
   variants: Variant[];
   items: OfferItem[];
   ooms: { id: string; eic: string; voltage_level: string | null; voltage_group: 'nn' | 'vn'; pds_tariff: string | null }[];
@@ -200,3 +210,35 @@ export const dateTime = (v: string | null | undefined) =>
   v
     ? new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(v))
     : '–';
+
+export type Acceptance = {
+  id: string;
+  variant_id: string;
+  variant: string;
+  method: 'klik' | 'rucne';
+  channel: 'telefon' | 'email' | 'osobne' | 'podpisane_pdf' | null;
+  accepted_at: string;
+  signer_name: string;
+  signer_function: string;
+  ip: string | null;
+  terms_sha256: string;
+  has_signed: boolean;
+  has_confirmation: boolean;
+  note: string | null;
+  recorded_by_name: string | null;
+  revoked_at: string | null;
+  revoked_by_name: string | null;
+  revoke_reason: string | null;
+  can_revoke: boolean;
+};
+export type AcceptanceData = { items: Acceptance[]; page: { first_opened_at: string; last_opened_at: string; open_count: number } | null };
+export const ACCEPT_CHANNEL: Record<string, string> = { telefon: 'Telefón', email: 'E-mail', osobne: 'Osobne', podpisane_pdf: 'Podpísané PDF' };
+
+/** Text potreby schválenia (výnimka z ceny alebo zmluvná pokuta). */
+export function needText(n: NonNullable<OfferCheck>['needs'][number], fmt: (v: number | string, min: number, max: number) => string): string {
+  if (n.type === 'pokuta') {
+    return `Zmluvná pokuta ${fmt(n.requested_value, 2, 2)} < ${fmt(n.threshold_value ?? 0, 2, 2)} €/MWh`;
+  }
+  return `${n.variant ?? ''} · ${(n.voltage_group ?? '').toUpperCase()} ${n.year ?? ''} ${fmt(n.requested_value, 2, 4)}${
+    n.threshold_value !== null ? ` < ${fmt(n.threshold_value, 2, 4)}` : ' pod hranicou'}${n.volume_mwh !== null ? ` · ${fmt(n.volume_mwh, 1, 1)} MWh` : ''}`;
+}

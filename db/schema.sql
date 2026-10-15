@@ -16,6 +16,20 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: verejne; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA verejne;
+
+
+--
+-- Name: SCHEMA verejne; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON SCHEMA verejne IS 'iba funkcie pre verejnú stránku ponuky (rola crm_public) – 0039';
+
+
+--
 -- Name: btree_gist; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -1209,6 +1223,10 @@ BEGIN
     VALUES (o.org_id, 'vynimka_ceny', o.deal_id, o.id, d.company_id, btrim(p_reason), v_user)
     RETURNING id INTO v_id;
     FOR n IN SELECT * FROM jsonb_array_elements(c->'needs') LOOP
+      IF n->>'type' = 'pokuta' THEN   -- zmluvná pokuta pod predvolenou hodnotou (0039)
+        UPDATE approval_request SET penalty_eur_mwh = (n->>'requested_value')::numeric WHERE id = v_id;
+        CONTINUE;
+      END IF;
       INSERT INTO approval_price_item (approval_id, variant_id, year, price_model, voltage_group, requested_value, threshold_value,
                                        volume_mwh, threshold_source, scope)
       VALUES (v_id, (n->>'variant_id')::uuid, (n->>'year')::smallint, (n->>'price_model')::price_model, n->>'voltage_group',
@@ -5526,7 +5544,8 @@ $$;
 CREATE FUNCTION public.crm_current_user_id() RETURNS uuid
     LANGUAGE sql STABLE
     AS $$
-  SELECT nullif(current_setting('app.user_id', true), '')::uuid
+  SELECT CASE WHEN session_user::text = 'crm_public' THEN NULL
+              ELSE nullif(current_setting('app.user_id', true), '')::uuid END
 $$;
 
 
@@ -6602,7 +6621,21 @@ CREATE TABLE public.offer (
     rejected_note text,
     replaced_by_id uuid,
     created_by uuid,
+    penalty_eur_mwh numeric(12,2),
+    template_version_id uuid,
+    pdf_key text,
+    pdf_sha256 text,
+    pdf_generated_at timestamp with time zone,
+    link_hash text,
+    link_created_at timestamp with time zone,
+    link_created_by uuid,
+    blocked_by_offer_id uuid,
+    CONSTRAINT offer_link_hash_check CHECK (((link_hash IS NULL) OR (link_hash ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT offer_number_check CHECK ((number ~ '^P[0-9]{2}-[0-9]{6}$'::text)),
+    CONSTRAINT offer_pdf_check CHECK (((pdf_key IS NULL) = (pdf_sha256 IS NULL))),
+    CONSTRAINT offer_pdf_key_check CHECK (((pdf_key IS NULL) OR (pdf_key ~ '^ponuky/[0-9a-f-]{36}/[0-9]{4}/P[0-9]{2}-[0-9]{6}(-[0-9]+)?\.pdf$'::text))),
+    CONSTRAINT offer_pdf_sha256_check CHECK (((pdf_sha256 IS NULL) OR (pdf_sha256 ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT offer_penalty_eur_mwh_check CHECK (((penalty_eur_mwh IS NULL) OR ((penalty_eur_mwh >= (0)::numeric) AND (penalty_eur_mwh <= (10000)::numeric)))),
     CONSTRAINT offer_sent_channel_check CHECK (((sent_at IS NULL) = (sent_channel IS NULL))),
     CONSTRAINT offer_sent_check CHECK (((status = ANY (ARRAY['koncept'::public.offer_status, 'caka_na_schvalenie'::public.offer_status, 'pripravena'::public.offer_status])) OR (sent_at IS NOT NULL))),
     CONSTRAINT offer_version_check CHECK ((version > 0))
@@ -6642,6 +6675,27 @@ COMMENT ON COLUMN public.offer.number IS 'P26-000123 – rovnaké pre všetky ve
 --
 
 COMMENT ON COLUMN public.offer.priced_on IS 'deň snímky cien pre obchodníka a parametrov (vytvorenie verzie alebo prepočet)';
+
+
+--
+-- Name: COLUMN offer.penalty_eur_mwh; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.penalty_eur_mwh IS 'zmluvná pokuta €/MWh v záväznej objednávke; NULL = zo šablóny (dodávka 50, výkup 30)';
+
+
+--
+-- Name: COLUMN offer.link_hash; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.link_hash IS 'SHA-256 tokenu odkazu na stránku ponuky – samotný odkaz sa v databáze neuchováva';
+
+
+--
+-- Name: COLUMN offer.blocked_by_offer_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.blocked_by_offer_id IS 'rozpracovaná verzia zablokovaná akceptáciou inej verzie; odblokuje iba vlastník obchodu alebo admin';
 
 
 --
@@ -7642,7 +7696,8 @@ BEGIN
   FOR x IN SELECT * FROM offer WHERE org_id = o.org_id AND number = o.number
                                  AND status IN ('koncept', 'caka_na_schvalenie', 'pripravena') LOOP
     UPDATE approval_request SET status = 'zrusena' WHERE status = 'caka' AND offer_id = x.id;
-    UPDATE offer SET status = 'koncept' WHERE id = x.id AND status <> 'koncept';
+    -- zablokovanie trvá aj po zrušení akceptácie – odblokuje vlastník obchodu alebo admin (0039, odpoveď F3 6)
+    UPDATE offer SET status = 'koncept', blocked_by_offer_id = o.id WHERE id = x.id;
     PERFORM notification_add_deal(ARRAY[d.owner_id, x.created_by], 'ponuka_zablokovana', d.id, NULL, NULL,
       format('Zákazník akceptoval ponuku %s – rozpracovanú verziu %s nemožno odoslať.', offer_display_number(o), offer_display_number(x)));
     PERFORM deal_event_offer(x, 'ponuka_zablokovana', jsonb_build_object('accepted_offer_id', o.id, 'accepted_version', o.version));
@@ -7656,6 +7711,281 @@ BEGIN
                                 'Zákazník akceptoval ponuku ' || offer_display_number(o));
   SELECT * INTO o FROM offer WHERE id = o.id;
   PERFORM deal_event_offer(o, 'ponuka_akceptovana', jsonb_build_object('variant_id', p_variant, 'accepted_at', p_accepted_at));
+END;
+$$;
+
+
+--
+-- Name: offer_accept_manual(uuid, uuid, text, text, timestamp with time zone, text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_accept_manual(p_offer uuid, p_variant uuid, p_name text, p_function text, p_at timestamp with time zone, p_channel text, p_note text, p_signed_key text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+BEGIN
+  IF p_channel IS NULL OR p_channel NOT IN ('telefon', 'email', 'osobne', 'podpisane_pdf') THEN
+    RAISE EXCEPTION 'Vyberte, ako zákazník ponuku prijal.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_at IS NULL OR p_at > now() + interval '5 minutes' THEN
+    RAISE EXCEPTION 'Zadajte čas akceptácie (nie v budúcnosti).' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_signed_key IS NOT NULL AND p_signed_key !~ ('^podpisane/' || o.org_id || '/[0-9]{4}/P[0-9]{2}-[0-9]{6}(-[0-9]+)?-[0-9a-f]{8}\.pdf$') THEN
+    RAISE EXCEPTION 'Neplatný súbor podpísanej ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN offer_accept_record(o.id, p_variant, 'rucne', p_channel, p_at, p_name, p_function, NULL, NULL, p_note, p_signed_key,
+                             crm_active_user_id());
+END;
+$_$;
+
+
+--
+-- Name: offer_accept_record(uuid, uuid, text, text, timestamp with time zone, text, text, inet, text, text, text, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_accept_record(p_offer uuid, p_variant uuid, p_method text, p_channel text, p_at timestamp with time zone, p_name text, p_function text, p_ip inet, p_ua text, p_note text, p_signed_key text, p_recorded_by uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o     offer;
+  terms text;
+  v_id  uuid;
+BEGIN
+  IF coalesce(btrim(p_name), '') = '' OR coalesce(btrim(p_function), '') = '' THEN
+    RAISE EXCEPTION 'Zadajte meno a funkciu osoby, ktorá ponuku prijala.' USING ERRCODE = 'check_violation';
+  END IF;
+  terms := offer_terms_text(p_offer, p_variant);
+  IF terms IS NULL THEN
+    RAISE EXCEPTION 'Variant nepatrí ponuke alebo chýba šablóna.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM offer_accept_apply(p_offer, p_variant, p_at);
+  SELECT * INTO o FROM offer WHERE id = p_offer;
+  INSERT INTO offer_acceptance (offer_id, variant_id, org_id, method, channel, accepted_at, signer_name, signer_function, ip,
+                                user_agent, terms_text, terms_sha256, offer_pdf_sha256, signed_file_key, note, recorded_by)
+  VALUES (o.id, p_variant, o.org_id, p_method, p_channel, p_at, btrim(p_name), btrim(p_function), p_ip,
+          left(p_ua, 500), terms, offer_terms_sha(terms), o.pdf_sha256, p_signed_key, nullif(btrim(p_note), ''), p_recorded_by)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: offer_acceptance_confirmation_attach(uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_confirmation_attach(p_id uuid, p_key text, p_sha256 text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+BEGIN
+  IF p_sha256 IS NULL OR p_sha256 !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Neplatný odtlačok potvrdenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_key IS DISTINCT FROM offer_acceptance_confirmation_key(p_id) THEN
+    RAISE EXCEPTION 'Neplatný súbor potvrdenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer_acceptance SET confirmation_pdf_key = p_key, confirmation_pdf_sha256 = p_sha256
+   WHERE id = p_id AND confirmation_pdf_key IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Potvrdenie už je uložené – nemení sa.' USING ERRCODE = 'check_violation';
+  END IF;
+END;
+$_$;
+
+
+--
+-- Name: offer_acceptance_confirmation_key(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_confirmation_key(p_id uuid) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT 'potvrdenia/' || o.org_id || '/20' || substr(o.number, 2, 2) || '/' || o.number
+         || CASE WHEN o.version > 1 THEN '-' || o.version ELSE '' END || '-' || left(a.id::text, 8) || '.pdf'
+    FROM offer_acceptance a JOIN offer o ON o.id = a.offer_id
+   WHERE a.id = p_id
+$$;
+
+
+--
+-- Name: offer_acceptance_confirmation_set(uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_confirmation_set(p_id uuid, p_key text, p_sha256 text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  a offer_acceptance;
+BEGIN
+  SELECT * INTO a FROM offer_acceptance WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Akceptácia neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  PERFORM offer_for_edit(a.offer_id);
+  IF a.method <> 'rucne' OR a.created_at < now() - interval '10 minutes' THEN
+    RAISE EXCEPTION 'Potvrdenie sa ukladá iba pri zápise akceptácie.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM offer_acceptance_confirmation_attach(p_id, p_key, p_sha256);
+END;
+$$;
+
+
+--
+-- Name: offer_acceptance_for_confirmation(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_for_confirmation(p_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  a offer_acceptance;
+BEGIN
+  SELECT * INTO a FROM offer_acceptance WHERE id = p_id;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  PERFORM offer_for_edit(a.offer_id);
+  RETURN offer_acceptance_result(p_id, false);
+END;
+$$;
+
+
+--
+-- Name: offer_acceptance_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF crm_internal_call() THEN
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  RAISE EXCEPTION 'Akceptáciu zapisuje a ruší iba CRM.' USING ERRCODE = 'insufficient_privilege';
+END;
+$$;
+
+
+--
+-- Name: offer_acceptance_result(uuid, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_result(p_id uuid, p_repeated boolean) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object(
+           'ok', true, 'repeated', p_repeated, 'acceptance_id', a.id, 'accepted_at', a.accepted_at,
+           'variant', chr(64 + v.sort_order) || ' · ' || v.name, 'method', a.method, 'channel', a.channel,
+           'signer_name', a.signer_name, 'signer_function', a.signer_function, 'ip', host(a.ip),
+           'terms_text', a.terms_text, 'terms_sha256', a.terms_sha256,
+           'confirmation_key', offer_acceptance_confirmation_key(a.id),
+           'confirmation_stored', a.confirmation_pdf_key IS NOT NULL,
+           'document', offer_document_internal(a.offer_id))
+    FROM offer_acceptance a JOIN offer_variant v ON v.id = a.variant_id
+   WHERE a.id = p_id
+$$;
+
+
+--
+-- Name: offer_acceptance_revoke(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_acceptance_revoke(p_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  a       offer_acceptance;
+  o       offer;
+  d       deal;
+  v_stage uuid;
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Akceptáciu ruší iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN
+    RAISE EXCEPTION 'Zadajte dôvod zrušenia akceptácie.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO a FROM offer_acceptance WHERE id = p_id AND org_id = ANY (crm_user_orgs()) FOR UPDATE;
+  IF NOT FOUND OR a.revoked_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Akceptácia neexistuje alebo už je zrušená.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO o FROM offer WHERE id = a.offer_id FOR UPDATE;
+  SELECT * INTO d FROM deal d2 WHERE d2.id = o.deal_id FOR UPDATE;
+  IF d.closed_at IS NOT NULL OR (SELECT code FROM pipeline_stage WHERE id = d.stage_id) = 'vyhrane' THEN
+    RAISE EXCEPTION 'K obchodu už je spárovaná zmluva (Vyhraté) – akceptáciu nemožno zrušiť.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer_acceptance SET revoked_at = now(), revoked_by = crm_active_user_id(), revoke_reason = btrim(p_reason) WHERE id = a.id;
+  UPDATE offer SET status = 'odoslana' WHERE id = o.id;
+  SELECT s2.id INTO v_stage
+    FROM pipeline_stage s JOIN pipeline_stage s2 ON s2.pipeline_id = d.pipeline_id AND s2.code = 'vyjednavanie'
+   WHERE s.id = d.stage_id AND s.code = 'akceptacia';
+  UPDATE deal SET accepted_variant_id = NULL, stage_id = coalesce(v_stage, stage_id) WHERE id = d.id;
+  SELECT * INTO o FROM offer WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'akceptacia_zrusena', jsonb_build_object('reason', btrim(p_reason)));
+  PERFORM notification_add_deal(ARRAY[d.owner_id], 'akceptacia_zrusena', d.id, NULL, NULL,
+                                'Akceptácia ponuky ' || offer_display_number(o) || ' bola zrušená');
+END;
+$$;
+
+
+--
+-- Name: offer_asset_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_asset_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF crm_owner_session() OR crm_internal_call() THEN
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Obrázok sa nemaže – nahrajte nový.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'UPDATE' AND ((NEW.data, NEW.code, NEW.mime, NEW.sha256, NEW.org_id) IS DISTINCT FROM (OLD.data, OLD.code, OLD.mime, OLD.sha256, OLD.org_id)
+                           OR (NEW.active AND NOT OLD.active)) THEN
+    RAISE EXCEPTION 'Obrázok sa nemení – nahrajte nový.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    NEW.sha256 := encode(sha256(NEW.data), 'hex');
+    NEW.created_by := crm_active_user_id();
+    UPDATE offer_asset SET active = false WHERE org_id = NEW.org_id AND code = NEW.code AND active;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: offer_attach_pdf(uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_attach_pdf(p_offer uuid, p_key text, p_sha256 text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+  t offer_template_version := offer_template_for(p_offer);
+BEGIN
+  IF o.status NOT IN ('odoslana', 'otvorena') OR o.pdf_key IS NOT NULL THEN
+    RAISE EXCEPTION 'PDF sa ukladá iba pri odoslaní ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF t.id IS NULL OR t.status = 'navrh' THEN
+    RAISE EXCEPTION 'Šablóna ponuky (%, %) ešte nie je schválená – admin ju zverejní v Nastaveniach → Šablóny ponúk.',
+      o.kind, upper(o.language::text) USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer SET pdf_key = p_key, pdf_sha256 = p_sha256, pdf_generated_at = now(), template_version_id = t.id
+   WHERE id = o.id;
 END;
 $$;
 
@@ -7775,6 +8105,7 @@ DECLARE
   v_risk  jsonb;
   v_risk_ok boolean;
   v_acc   offer;
+  v_pen   numeric;
 BEGIN
   SELECT * INTO o FROM offer WHERE id = p_offer;
   SELECT * INTO d FROM deal WHERE id = o.deal_id;
@@ -7785,6 +8116,8 @@ BEGIN
   SELECT * INTO v_acc FROM offer x WHERE x.org_id = o.org_id AND x.number = o.number AND x.id <> o.id AND x.status = 'akceptovana';
   IF FOUND THEN
     errors := errors || to_jsonb(format('Zákazník akceptoval ponuku %s – túto verziu nemožno odoslať.', offer_display_number(v_acc)));
+  ELSIF o.blocked_by_offer_id IS NOT NULL THEN
+    errors := errors || to_jsonb('Verzia je zablokovaná po akceptácii inej verzie – zákazník akceptoval inú verziu. Odblokuje ju vlastník obchodu alebo admin.'::text);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM offer_variant WHERE offer_id = o.id) THEN
     errors := errors || to_jsonb('Ponuka nemá variant.'::text);
@@ -7814,6 +8147,18 @@ BEGIN
                                            'threshold_source', coalesce(r.source, 'cena_pre_obchodnika'), 'volume_mwh', r.volume);
     END LOOP;
   END LOOP;
+  -- zmluvná pokuta pod predvolenou hodnotou šablóny (dodávka 50, výkup 30 €/MWh) → schválenie ako výnimka z ceny (0039)
+  v_pen := ((offer_template_for(o.id)).defaults->>'zmluvna_pokuta')::numeric;
+  IF o.penalty_eur_mwh IS NOT NULL AND v_pen IS NOT NULL AND o.penalty_eur_mwh < v_pen
+     AND NOT EXISTS (SELECT 1 FROM approval_request a
+                      WHERE a.offer_id = o.id AND a.kind = 'vynimka_ceny' AND a.status = 'schvalena'
+                        AND a.penalty_eur_mwh IS NOT NULL AND a.penalty_eur_mwh <= o.penalty_eur_mwh
+                        AND CASE WHEN o.sent_at IS NULL THEN a.valid_until IS NULL OR a.valid_until > now()
+                                 ELSE a.valid_until IS NULL OR o.sent_at <= a.valid_until END) THEN
+    needs := needs || jsonb_build_object('type', 'pokuta', 'variant_id', NULL, 'variant', NULL, 'year', NULL, 'price_model', NULL,
+                                         'voltage_group', NULL, 'requested_value', o.penalty_eur_mwh, 'threshold_value', v_pen,
+                                         'threshold_source', 'zmluvna_pokuta', 'volume_mwh', NULL);
+  END IF;
   v_risk := CASE WHEN d.company_id IS NOT NULL THEN company_risk(d.company_id) END;
   -- schválenie rizika platí pre celý obchod 30 dní, kým sa údaje Finstatu nezhoršia (odpoveď 9)
   v_risk_ok := EXISTS (SELECT 1 FROM approval_request a
@@ -7997,6 +8342,311 @@ $$;
 
 
 --
+-- Name: offer_doc_valid_until(public.offer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_doc_valid_until(o public.offer) RETURNS timestamp with time zone
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce(o.valid_until,
+                  offer_default_valid_until(o.org_id, now(),
+                    EXISTS (SELECT 1 FROM offer_variant x WHERE x.offer_id = o.id AND x.price_kind IN ('fix', 'kombinacia'))))
+$$;
+
+
+--
+-- Name: offer_doc_variants(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_doc_variants(p_offer uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o     offer;
+  v     offer_variant;
+  lang  offer_language;
+  res   jsonb := '[]';
+  rows  jsonb;
+  vol   numeric;
+  viwa  jsonb;
+  hh    jsonb;
+  coef  numeric;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer;
+  lang := o.language;
+  FOR v IN SELECT * FROM offer_variant WHERE offer_id = o.id ORDER BY sort_order LOOP
+    -- ročný objem: plánovaný, inak súčet OOM (spotreba alebo výroba)
+    SELECT coalesce(v.planned_volume_mwh,
+                    sum(CASE WHEN o.kind IN ('vykup', 'viwa')
+                             THEN coalesce(x.planned_feed_in_mwh, x.source_power_kw * 4 * 365 * 0.1 / 1000, 0)
+                             ELSE coalesce(x.planned_vt_mwh, 0) + coalesce(x.planned_nt_mwh, 0) END))
+      INTO vol FROM deal_oom x WHERE x.deal_id = o.deal_id;
+
+    -- riadky: OOM s rovnakým produktom, napätím a cenami po rokoch sa zlúčia (počet OOM, súčet objemu)
+    WITH it AS (
+      SELECT i.oom_id, i.product_id, i.price_model, i.year, i.price_vt_eur_mwh AS vt, i.price_nt_eur_mwh AS nt,
+             i.additive_eur_mwh AS ad, i.additive_pct AS pct,
+             coalesce(li.vat_rate, p.vat_rate) AS vat
+        FROM offer_item i JOIN product p ON p.id = i.product_id
+        LEFT JOIN price_list_item li ON li.id = i.price_list_item_id
+       WHERE i.variant_id = v.id AND i.slot = 'komodita' AND i.oom_id IS NOT NULL
+    ),
+    per_oom AS (
+      SELECT it.oom_id, it.product_id, it.price_model, max(it.vat) AS vat,
+             jsonb_agg(jsonb_build_object('year', it.year, 'vt', it.vt, 'nt', it.nt, 'ad', it.ad, 'pct', it.pct)
+                       ORDER BY it.year NULLS FIRST) AS prices
+        FROM it GROUP BY 1, 2, 3
+    ),
+    grp AS (
+      SELECT po.product_id, oom_voltage_group(m.voltage_level) AS vg, po.price_model, po.prices, max(po.vat) AS vat,
+             count(*)::int AS ooms,
+             sum(CASE WHEN o.kind IN ('vykup', 'viwa')
+                      THEN coalesce(x.planned_feed_in_mwh, x.source_power_kw * 4 * 365 * 0.1 / 1000, 0)
+                      ELSE coalesce(x.planned_vt_mwh, 0) + coalesce(x.planned_nt_mwh, 0) END) AS vol
+        FROM per_oom po
+        JOIN oom m ON m.id = po.oom_id
+        JOIN deal_oom x ON x.deal_id = o.deal_id AND x.oom_id = po.oom_id
+       GROUP BY 1, 2, 3, 4
+    )
+    SELECT coalesce(jsonb_agg(jsonb_build_object(
+             'product', p.name, 'voltage_group', g.vg, 'oom_count', g.ooms, 'volume_mwh', round(g.vol, 3),
+             'price_model', g.price_model, 'vat_rate', g.vat,
+             'prices', (SELECT jsonb_agg(jsonb_build_object(
+                           'year', (e->>'year')::int,
+                           'text', CASE g.price_model
+                                     WHEN 'spot_plus_eur' THEN 'SPOT + ' || offer_fmt_num((e->>'ad')::numeric, 2, lang) || ' €/MWh'
+                                     WHEN 'spot_minus_eur' THEN 'SPOT − ' || offer_fmt_num((e->>'ad')::numeric, 2, lang) || ' €/MWh'
+                                     WHEN 'spot_minus_pct' THEN 'SPOT − ' || offer_fmt_num((e->>'pct')::numeric, 2, lang) || ' %'
+                                     ELSE offer_fmt_num((e->>'vt')::numeric, 2, lang)
+                                          || CASE WHEN e->>'nt' IS NOT NULL THEN ' / ' || offer_fmt_num((e->>'nt')::numeric, 2, lang) ELSE '' END
+                                          || ' €/MWh' END,
+                           'text_vat', CASE WHEN o.household AND g.price_model IN ('fix', 'cennik') AND g.vat IS NOT NULL THEN
+                                         offer_fmt_num((e->>'vt')::numeric * (1 + g.vat / 100), 2, lang)
+                                         || CASE WHEN e->>'nt' IS NOT NULL THEN ' / ' || offer_fmt_num((e->>'nt')::numeric * (1 + g.vat / 100), 2, lang) ELSE '' END
+                                         || ' €/MWh' END)
+                         ORDER BY (e->>'year')::int NULLS FIRST)
+                          FROM jsonb_array_elements(g.prices) e))
+             ORDER BY g.vg, p.name), '[]')
+      INTO rows
+      FROM grp g JOIN product p ON p.id = g.product_id;
+
+    -- VIWA: balík, mesačný poplatok účtu, €/kW za odchýlku, koeficient výmeny – zmluvná podmienka balíka z programu
+    -- položky cenníka (modul 3); odhad aditívu balíka slúži iba na pridanú hodnotu a koeficient nemení
+    viwa := NULL;
+    IF v.price_kind = 'viwa' THEN
+      SELECT pr.viwa_conversion_factor INTO coef
+        FROM offer_item i JOIN price_list_item_program pr ON pr.item_id = i.price_list_item_id
+       WHERE i.variant_id = v.id AND i.slot = 'viwa_ucet';
+      SELECT jsonb_build_object(
+               'package', upper(v.viwa_package),
+               'monthly_fee', (SELECT fee_eur_month FROM offer_item WHERE variant_id = v.id AND slot = 'viwa_ucet'),
+               'fee_kw', (SELECT max(fee_kw_eur_month) FROM offer_item WHERE variant_id = v.id AND slot = 'viwa_kw'),
+               'coefficient', coef,
+               'power_kw', (SELECT sum(coalesce(x.source_power_kw, m.source_power_kw, 0)) FROM deal_oom x JOIN oom m ON m.id = x.oom_id
+                             WHERE x.deal_id = o.deal_id))
+        INTO viwa;
+    END IF;
+
+    -- domácnosť: mesačné poplatky (OM, ZEM, VBattery) a odhad ročných nákladov na komoditu bez DPH a s DPH
+    hh := NULL;
+    IF o.household THEN
+      SELECT jsonb_build_object(
+               'fees_month', sum(coalesce(i.fee_eur_month, 0)),
+               'cost_year', (SELECT sum(coalesce(c.price_vt_eur_mwh, 0) * coalesce(x.planned_vt_mwh, 0)
+                                        + coalesce(c.price_nt_eur_mwh, c.price_vt_eur_mwh, 0) * coalesce(x.planned_nt_mwh, 0))
+                               FROM offer_item c JOIN deal_oom x ON x.deal_id = o.deal_id AND x.oom_id = c.oom_id
+                              WHERE c.variant_id = v.id AND c.slot = 'komodita' AND c.price_model IN ('fix', 'cennik')),
+               'vat_rate', max(coalesce(li.vat_rate, p.vat_rate)))
+        INTO hh
+        FROM offer_item i JOIN product p ON p.id = i.product_id LEFT JOIN price_list_item li ON li.id = i.price_list_item_id
+       WHERE i.variant_id = v.id;
+      hh := hh || jsonb_build_object('cost_year_total', round((hh->>'cost_year')::numeric + (hh->>'fees_month')::numeric * 12, 2));
+    END IF;
+
+    res := res || jsonb_build_object(
+      'id', v.id, 'letter', chr(64 + v.sort_order), 'name', v.name, 'label', chr(64 + v.sort_order) || ' · ' || v.name,
+      'price_kind', v.price_kind,
+      'period', CASE WHEN v.supply_to IS NULL
+                     THEN CASE lang WHEN 'sk' THEN 'od ' || offer_fmt_date(v.supply_from, lang) || ' na neurčito'
+                                    ELSE 'from ' || offer_fmt_date(v.supply_from, lang) || ', indefinite' END
+                     ELSE offer_fmt_date(v.supply_from, lang) || ' – ' || offer_fmt_date(v.supply_to, lang) END,
+      'flexibility', CASE WHEN v.flexibility_pct IS NULL THEN CASE lang WHEN 'sk' THEN 'plnej flexibility' ELSE 'full' END
+                          ELSE '± ' || offer_fmt_num(v.flexibility_pct, 0, lang) || ' %' END,
+      'volume_mwh', round(vol, 3),
+      'volume_text', offer_fmt_num(vol, 1, lang),
+      'advance', CASE v.advance_kind
+                   WHEN 'financna_zabezpeka' THEN CASE lang WHEN 'sk' THEN 'finančnej zábezpeky' ELSE 'a financial guarantee' END
+                   ELSE CASE lang WHEN 'sk' THEN offer_fmt_num(v.advance_pct, 0, lang) || ' % z 1/12 plánovaného ročného odberu'
+                                  ELSE offer_fmt_num(v.advance_pct, 0, lang) || '% of 1/12 of the planned annual consumption' END END,
+      'advance_due', CASE WHEN v.advance_due_day IS NULL THEN NULL
+                          WHEN lang = 'sk' THEN v.advance_due_day || '. deň v mesiaci'
+                          ELSE 'day ' || v.advance_due_day || ' of the month' END,
+      'invoice_due', v.invoice_due_days || CASE lang WHEN 'sk' THEN ' dní' ELSE ' days' END,
+      'spot', EXISTS (SELECT 1 FROM offer_item i WHERE i.variant_id = v.id AND i.slot = 'komodita'
+                        AND i.price_model IN ('spot_plus_eur', 'spot_minus_eur', 'spot_minus_pct'))
+              OR v.price_kind = 'spot',
+      'negative_price_compensation', v.negative_price_compensation,
+      'rows', rows, 'viwa', viwa, 'household', hh);
+  END LOOP;
+  RETURN res;
+END;
+$$;
+
+
+--
+-- Name: offer_doc_vars(uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_doc_vars(p_offer uuid, p_variants jsonb) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o     offer;
+  d     deal;
+  c     company;
+  pe    contact;
+  k     contact;
+  u     app_user;
+  t     offer_template_version;
+  lang  offer_language;
+  vu    timestamptz;
+  pen   numeric;
+  f     text;
+  per   jsonb := '{}';
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  SELECT * INTO c FROM company WHERE id = d.company_id;
+  SELECT * INTO pe FROM contact WHERE id = d.person_id;
+  SELECT * INTO k FROM contact WHERE id = o.contact_id;
+  SELECT * INTO u FROM app_user WHERE id = d.owner_id;
+  t := offer_template_for(o.id);
+  lang := o.language;
+  vu := offer_doc_valid_until(o);
+  pen := coalesce(o.penalty_eur_mwh, (t.defaults->>'zmluvna_pokuta')::numeric);
+  FOREACH f IN ARRAY ARRAY['flexibility', 'volume_text', 'advance', 'advance_due', 'invoice_due', 'period'] LOOP
+    per := per || jsonb_build_object(f,
+      CASE WHEN (SELECT count(DISTINCT coalesce(x->>f, '')) FROM jsonb_array_elements(p_variants) x) <= 1
+           THEN (SELECT x->>f FROM jsonb_array_elements(p_variants) x LIMIT 1)
+           ELSE (SELECT string_agg((x->>'letter') || ': ' || coalesce(x->>f, '–'), '; ') FROM jsonb_array_elements(p_variants) x) END);
+  END LOOP;
+  RETURN jsonb_build_object(
+    'číslo ponuky', offer_display_number(o),
+    'dátum ponuky', offer_fmt_date((coalesce(o.sent_at, now()) AT TIME ZONE 'Europe/Bratislava')::date, lang),
+    'názov', coalesce(c.name, nullif(btrim(concat_ws(' ', pe.title, pe.first_name, pe.last_name)), '')),
+    'sídlo', coalesce(c.address, pe.address),
+    'IČO', c.ico,
+    'IČ DPH', c.ic_dph,
+    'kontakt meno', nullif(btrim(concat_ws(' ', k.title, k.first_name, k.last_name)), ''),
+    'kontakt e-mail', k.email,
+    'kontakt telefón', coalesce(k.mobile, k.phone),
+    'obchodník meno', u.name,
+    'obchodník funkcia', u.job_title,
+    'obchodník telefón', u.phone,
+    'obchodník e-mail', u.email,
+    'flexibilita', per->>'flexibility',
+    'objem', per->>'volume_text',
+    'výška preddavkov', per->>'advance',
+    'splatnosť preddavku', per->>'advance_due',
+    'splatnosť faktúr', per->>'invoice_due',
+    'obdobie', per->>'period',
+    'platnosť čas', to_char(vu AT TIME ZONE 'Europe/Bratislava', 'HH24:MI'),
+    'platnosť dátum', offer_fmt_date((vu AT TIME ZONE 'Europe/Bratislava')::date, lang),
+    'dátum platnosti', to_char(vu AT TIME ZONE 'Europe/Bratislava', 'HH24:MI') || CASE lang WHEN 'sk' THEN ' hod. ' ELSE ' on ' END
+                       || offer_fmt_date((vu AT TIME ZONE 'Europe/Bratislava')::date, lang),
+    'zmluvná pokuta', offer_fmt_num(pen, 2, lang),
+    'koeficient', (SELECT CASE WHEN count(DISTINCT x->'viwa'->>'coefficient') <= 1
+                               THEN offer_fmt_num(max((x->'viwa'->>'coefficient')::numeric), 2, lang)
+                               ELSE string_agg((x->>'letter') || ': ' || offer_fmt_num((x->'viwa'->>'coefficient')::numeric, 2, lang), '; ') END
+                     FROM jsonb_array_elements(p_variants) x WHERE x->'viwa' IS NOT NULL AND x->>'viwa' <> 'null'),
+    'poplatok za kW', (SELECT CASE WHEN count(DISTINCT x->'viwa'->>'fee_kw') <= 1
+                                   THEN offer_fmt_num(max((x->'viwa'->>'fee_kw')::numeric), 2, lang)
+                                   ELSE string_agg((x->>'letter') || ': ' || offer_fmt_num((x->'viwa'->>'fee_kw')::numeric, 2, lang), '; ') END
+                         FROM jsonb_array_elements(p_variants) x WHERE x->'viwa' IS NOT NULL AND x->>'viwa' <> 'null'));
+END;
+$$;
+
+
+--
+-- Name: offer_document(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_document(p_offer uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT offer_document_internal(o.id)
+    FROM offer o JOIN deal d ON d.id = o.deal_id
+   WHERE o.id = p_offer AND d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id)
+$$;
+
+
+--
+-- Name: offer_document_internal(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_document_internal(p_offer uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o    offer;
+  t    offer_template_version;
+  vs   jsonb;
+  vars jsonb;
+  sec  jsonb := '[]';
+  key  text;
+  spot boolean;
+  komp boolean;
+  vu   timestamptz;
+  acc  offer_acceptance;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  t := offer_template_for(o.id);
+  vs := offer_doc_variants(o.id);
+  vars := offer_doc_vars(o.id, vs);
+  vu := offer_doc_valid_until(o);
+  spot := EXISTS (SELECT 1 FROM jsonb_array_elements(vs) x WHERE (x->>'spot')::boolean);
+  komp := EXISTS (SELECT 1 FROM jsonb_array_elements(vs) x WHERE (x->>'negative_price_compensation')::boolean);
+  IF t.id IS NOT NULL THEN
+    FOREACH key IN ARRAY offer_template_keys() LOOP
+      CONTINUE WHEN NOT t.sections ? key OR key = 'objednavka';
+      sec := sec || jsonb_build_object('key', key,
+                                       'nadpis', offer_template_fill(t.sections->key->>'nadpis', vars, spot, komp),
+                                       'text', offer_template_fill(t.sections->key->>'text', vars, spot, komp));
+    END LOOP;
+  END IF;
+  SELECT * INTO acc FROM offer_acceptance WHERE offer_id = o.id AND revoked_at IS NULL;
+  RETURN jsonb_build_object(
+    'offer', jsonb_build_object('id', o.id, 'number', o.number, 'version', o.version, 'display_number', offer_display_number(o),
+                                'kind', o.kind, 'language', o.language, 'household', o.household, 'status', o.status,
+                                'state', offer_state(o), 'sent_at', o.sent_at, 'valid_until', vu, 'stored_valid_until', o.valid_until,
+                                'pdf', o.pdf_key IS NOT NULL),
+    'template', CASE WHEN t.id IS NOT NULL THEN jsonb_build_object('id', t.id, 'version', t.version, 'status', t.status,
+                                                                    'order_title', offer_template_fill(t.sections->'objednavka'->>'nadpis', vars, spot, komp),
+                                                                    -- znenie pre PDF: «variant» ostáva, PDF ho nahradí voľbou variantov
+                                                                    'order_text', offer_template_fill(t.sections->'objednavka'->>'text', vars, spot, komp)) END,
+    'vars', vars,
+    'sections', sec,
+    'variants', (SELECT coalesce(jsonb_agg(x || jsonb_build_object(
+                    'terms', offer_terms_text(o.id, (x->>'id')::uuid),
+                    'terms_sha256', offer_terms_sha(offer_terms_text(o.id, (x->>'id')::uuid)))), '[]')
+                   FROM jsonb_array_elements(vs) x),
+    'acceptance', CASE WHEN acc.id IS NOT NULL THEN jsonb_build_object(
+                    'variant_id', acc.variant_id, 'variant', (SELECT chr(64 + sort_order) || ' · ' || name FROM offer_variant WHERE id = acc.variant_id),
+                    'method', acc.method, 'channel', acc.channel, 'accepted_at', acc.accepted_at,
+                    'signer_name', acc.signer_name, 'signer_function', acc.signer_function) END);
+END;
+$$;
+
+
+--
 -- Name: offer_fill_price_list(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -8037,6 +8687,76 @@ BEGIN
   END LOOP;
   RETURN n;
 END;
+$$;
+
+
+--
+-- Name: offer_fill_viwa(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_fill_viwa(p_variant uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v    offer_variant;
+  o    offer;
+  p    product;
+  it   price_list_item;
+  n    integer := 0;
+BEGIN
+  SELECT * INTO v FROM offer_variant WHERE id = p_variant;
+  IF NOT FOUND OR v.price_kind <> 'viwa' OR v.viwa_package IS NULL THEN
+    RETURN 0;
+  END IF;
+  SELECT * INTO o FROM offer WHERE id = v.offer_id;
+  DELETE FROM offer_item WHERE variant_id = v.id AND price_model = 'cennik';
+  SELECT * INTO p FROM product WHERE code = 'viwa_' || v.viwa_package;
+  IF NOT FOUND THEN
+    RETURN 0;
+  END IF;
+  SELECT i.* INTO it FROM price_list_item i JOIN price_list_version pv ON pv.id = i.version_id
+    JOIN price_list pl ON pl.id = pv.price_list_id
+   WHERE i.product_id = p.id AND pv.status = 'schvalena' AND pl.org_id = o.org_id
+     AND pv.valid_from <= v.supply_from AND (pv.valid_to IS NULL OR pv.valid_to >= v.supply_from)
+   ORDER BY pv.valid_from DESC LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN 0;   -- bez cenníka: výpočet hlási „chýba cena“
+  END IF;
+  INSERT INTO offer_item (variant_id, oom_id, org_id, year, slot, product_id, price_model, price_list_item_id, fee_eur_month)
+  VALUES (v.id, NULL, v.org_id, NULL, 'viwa_ucet', p.id, 'cennik', it.id, it.fee_program_eur_month);
+  INSERT INTO offer_item (variant_id, oom_id, org_id, year, slot, product_id, price_model, price_list_item_id, fee_kw_eur_month)
+  SELECT v.id, x.oom_id, v.org_id, NULL, s.slot, p.id, 'cennik', it.id, CASE WHEN s.slot = 'viwa_kw' THEN it.fee_kw_eur_month END
+    FROM deal_oom x CROSS JOIN (VALUES ('komodita'), ('viwa_kw')) s(slot)
+   WHERE x.deal_id = o.deal_id
+  ON CONFLICT ON CONSTRAINT offer_item_key DO NOTHING;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n + 1;
+END;
+$$;
+
+
+--
+-- Name: offer_fmt_date(date, public.offer_language); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_fmt_date(p date, p_lang public.offer_language) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN p IS NULL THEN '–' WHEN p_lang = 'sk' THEN to_char(p, 'FMDD. FMMM. YYYY') ELSE to_char(p, 'DD/MM/YYYY') END
+$$;
+
+
+--
+-- Name: offer_fmt_num(numeric, integer, public.offer_language); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_fmt_num(p numeric, p_dec integer, p_lang public.offer_language) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN p IS NULL THEN '–'
+              ELSE CASE p_lang WHEN 'sk' THEN translate(s, ',.', ' ,') ELSE s END END
+    FROM (SELECT btrim(to_char(round(p, p_dec), 'FM999,999,999,990' || CASE WHEN p_dec > 0 THEN '.' || repeat('0', p_dec) ELSE '' END)) AS s) x
 $$;
 
 
@@ -8102,6 +8822,36 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+
+--
+-- Name: offer_link_set(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_link_set(p_offer uuid, p_hash text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+  d deal;
+BEGIN
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Neplatný odtlačok odkazu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF o.status NOT IN ('odoslana', 'otvorena', 'akceptovana', 'zamietnuta') THEN
+    RAISE EXCEPTION 'Odkaz má iba odoslaná ponuka.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF o.link_hash IS NOT NULL AND NOT (d.owner_id = crm_active_user_id() OR crm_is_admin()) THEN
+    RAISE EXCEPTION 'Nový odkaz smie vytvoriť iba vlastník obchodu alebo admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  UPDATE offer SET link_hash = p_hash, link_created_at = now(), link_created_by = crm_active_user_id() WHERE id = o.id;
+  IF o.link_hash IS NOT NULL THEN
+    PERFORM deal_event_offer(o, 'ponuka_odkaz', jsonb_build_object('replaced', true));
+  END IF;
+END;
+$_$;
 
 
 --
@@ -8263,6 +9013,140 @@ $$;
 
 
 --
+-- Name: offer_public_accept(text, uuid, text, text, inet, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_public_accept(p_hash text, p_variant uuid, p_name text, p_function text, p_ip inet, p_ua text, p_terms_sha256 text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o    offer;
+  a    offer_acceptance;
+  v_id uuid;
+BEGIN
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Odkaz už neplatí.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT * INTO o FROM offer WHERE link_hash = p_hash FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Odkaz už neplatí.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT * INTO a FROM offer_acceptance WHERE offer_id = o.id AND revoked_at IS NULL;
+  IF FOUND THEN
+    IF a.variant_id = p_variant AND a.method = 'klik' THEN
+      RETURN offer_acceptance_result(a.id, true);
+    END IF;
+    RAISE EXCEPTION 'Ponuka už bola akceptovaná.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF offer_public_mode(o) <> 'aktivna' THEN
+    RAISE EXCEPTION 'Platnosť ponuky uplynula alebo ponuka už neplatí.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_ip IS NULL THEN
+    RAISE EXCEPTION 'Chýba IP adresa.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_terms_sha256 IS DISTINCT FROM offer_terms_sha(offer_terms_text(o.id, p_variant)) THEN
+    RAISE EXCEPTION 'Znenie ponuky sa medzitým zmenilo – obnovte stránku.' USING ERRCODE = 'check_violation';
+  END IF;
+  v_id := offer_accept_record(o.id, p_variant, 'klik', NULL, now(), p_name, p_function, p_ip, p_ua, NULL, NULL, NULL);
+  RETURN offer_acceptance_result(v_id, false);
+END;
+$_$;
+
+
+--
+-- Name: offer_public_mode(public.offer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_public_mode(o public.offer) RETURNS text
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT CASE WHEN o.id IS NULL OR o.link_hash IS NULL OR o.valid_until IS NULL THEN 'neplatny'
+              WHEN o.status IN ('odoslana', 'otvorena') AND now() < o.valid_until THEN 'aktivna'
+              WHEN o.status IN ('odoslana', 'otvorena', 'akceptovana', 'zamietnuta', 'nahradena')
+                   AND now() <= greatest(o.valid_until,
+                                         (SELECT max(a.accepted_at) FROM offer_acceptance a WHERE a.offer_id = o.id AND a.revoked_at IS NULL))
+                                + interval '30 days' THEN 'len_citanie'
+              ELSE 'neplatny' END
+$$;
+
+
+--
+-- Name: offer_public_pdf(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_public_pdf(p_hash text) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o offer;
+BEGIN
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO o FROM offer WHERE link_hash = p_hash;
+  IF offer_public_mode(o) = 'neplatny' OR o.pdf_key IS NULL THEN
+    RETURN NULL;
+  END IF;
+  RETURN jsonb_build_object('pdf_key', o.pdf_key, 'file_name', 'Cenova-ponuka-' || replace(offer_display_number(o), '/', '-') || '.pdf');
+END;
+$_$;
+
+
+--
+-- Name: offer_public_view(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_public_view(p_hash text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o    offer;
+  mode text;
+  doc  jsonb;
+  d    deal;
+  u    app_user;
+  first boolean := false;
+BEGIN
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+    RETURN jsonb_build_object('mode', 'neplatny');
+  END IF;
+  SELECT * INTO o FROM offer WHERE link_hash = p_hash FOR UPDATE;
+  mode := offer_public_mode(o);
+  IF mode = 'neplatny' THEN
+    RETURN jsonb_build_object('mode', 'neplatny');
+  END IF;
+  -- otvorenie: bez IP; prvé otvorenie odoslanej ponuky → Otvorená a udalosť v časovej osi
+  INSERT INTO offer_page_stat (offer_id, first_opened_at, last_opened_at, open_count) VALUES (o.id, now(), now(), 1)
+  ON CONFLICT (offer_id) DO UPDATE SET last_opened_at = now(), open_count = offer_page_stat.open_count + 1
+  RETURNING (xmax = 0) INTO first;
+  IF o.status = 'odoslana' THEN
+    UPDATE offer SET status = 'otvorena' WHERE id = o.id;
+  END IF;
+  IF first THEN
+    PERFORM deal_event_offer(o, 'ponuka_otvorena');
+  END IF;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  SELECT * INTO u FROM app_user WHERE id = d.owner_id;
+  doc := offer_document_internal(o.id);
+  RETURN jsonb_build_object(
+    'mode', mode,
+    'reason', CASE WHEN mode = 'aktivna' THEN NULL
+                   WHEN o.status = 'akceptovana' THEN 'akceptovana'
+                   WHEN o.status = 'nahradena' THEN 'nahradena'
+                   WHEN o.status = 'zamietnuta' THEN 'zamietnuta'
+                   ELSE 'vyprsana' END,
+    'document', CASE WHEN mode = 'aktivna' THEN doc
+                     ELSE doc || jsonb_build_object('variants', (SELECT jsonb_agg(x - 'terms' - 'terms_sha256') FROM jsonb_array_elements(doc->'variants') x)) END,
+    'seller', jsonb_build_object('name', u.name, 'job_title', u.job_title, 'email', u.email, 'phone', u.phone),
+    'pdf', o.pdf_key IS NOT NULL);
+END;
+$_$;
+
+
+--
 -- Name: offer_reject(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -8311,6 +9195,8 @@ BEGIN
     PERFORM offer_basis_fill(v);
     IF (SELECT price_kind FROM offer_variant WHERE id = v) = 'cennik' THEN
       PERFORM offer_fill_price_list(v);
+    ELSIF (SELECT price_kind FROM offer_variant WHERE id = v) = 'viwa' THEN
+      PERFORM offer_fill_viwa(v);   -- 0039
     END IF;
   END LOOP;
   PERFORM deal_event_offer(o, 'ponuka_prepocitana', jsonb_build_object('priced_on', crm_today()));
@@ -8384,6 +9270,307 @@ $$;
 
 
 --
+-- Name: offer_template_check(jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_check(p_sections jsonb) RETURNS text
+    LANGUAGE plpgsql IMMUTABLE
+    AS $$
+DECLARE
+  k   text;
+  t   text;
+  v   text;
+  b   text;
+BEGIN
+  IF jsonb_typeof(p_sections) <> 'object' THEN
+    RETURN 'Šablóna nemá sekcie.';
+  END IF;
+  FOR k IN SELECT jsonb_object_keys(p_sections) LOOP
+    IF NOT k = ANY (offer_template_keys()) THEN
+      RETURN format('Neznáma sekcia „%s“.', k);
+    END IF;
+    t := coalesce(p_sections->k->>'nadpis', '') || E'\n' || coalesce(p_sections->k->>'text', '');
+    FOR v IN SELECT m[1] FROM regexp_matches(t, '«([^«»]*)»', 'g') m LOOP
+      IF NOT v = ANY (offer_template_variables()) THEN
+        RETURN format('Neznáma premenná «%s» v sekcii „%s“.', v, k);
+      END IF;
+    END LOOP;
+    IF t ~ '[«»]' AND (length(t) - length(replace(t, '«', ''))) <> (length(t) - length(replace(t, '»', ''))) THEN
+      RETURN format('Neuzavretá premenná v sekcii „%s“.', k);
+    END IF;
+    FOREACH b IN ARRAY ARRAY['spot', 'kompenzacia'] LOOP
+      IF (length(t) - length(replace(t, '[[' || b || ']]', ''))) / length('[[' || b || ']]')
+         <> (length(t) - length(replace(t, '[[/' || b || ']]', ''))) / length('[[/' || b || ']]') THEN
+        RETURN format('Blok [[%s]] v sekcii „%s“ nie je uzavretý.', b, k);
+      END IF;
+    END LOOP;
+  END LOOP;
+  FOREACH k IN ARRAY ARRAY['hlavicka', 'udaje', 'predmet', 'cenova_ponuka', 'platnost', 'objednavka'] LOOP
+    IF coalesce(btrim(p_sections->k->>'text'), '') = '' THEN
+      RETURN format('Chýba text sekcie „%s“.', k);
+    END IF;
+  END LOOP;
+  IF position('«tabuľka variantov»' IN coalesce(p_sections->'cenova_ponuka'->>'text', '')) = 0 THEN
+    RETURN 'Sekcia „cenova_ponuka“ musí obsahovať «tabuľka variantov».';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: offer_template_fill(text, jsonb, boolean, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_fill(p_text text, p_vars jsonb, p_spot boolean, p_komp boolean) RETURNS text
+    LANGUAGE plpgsql IMMUTABLE
+    AS $$
+DECLARE
+  t text := coalesce(p_text, '');
+  k text;
+BEGIN
+  t := regexp_replace(t, '\[\[spot\]\](.*?)\[\[/spot\]\]', CASE WHEN p_spot THEN '\1' ELSE '' END, 'g');
+  t := regexp_replace(t, '\[\[kompenzacia\]\](.*?)\[\[/kompenzacia\]\]', CASE WHEN p_komp THEN '\1' ELSE '' END, 'g');
+  FOR k IN SELECT jsonb_object_keys(p_vars) LOOP
+    IF k <> 'tabuľka variantov' THEN
+      t := replace(t, '«' || k || '»', coalesce(nullif(p_vars->>k, ''), '–'));
+    END IF;
+  END LOOP;
+  RETURN t;
+END;
+$$;
+
+
+--
+-- Name: offer_template_version; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_template_version (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    kind public.offer_kind NOT NULL,
+    language public.offer_language NOT NULL,
+    version smallint NOT NULL,
+    status text DEFAULT 'navrh'::text NOT NULL,
+    sections jsonb NOT NULL,
+    defaults jsonb DEFAULT '{}'::jsonb NOT NULL,
+    note text,
+    created_by uuid,
+    published_at timestamp with time zone,
+    published_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT offer_template_version_check CHECK (((status = 'navrh'::text) = (published_at IS NULL))),
+    CONSTRAINT offer_template_version_status_check CHECK ((status = ANY (ARRAY['navrh'::text, 'platna'::text, 'nahradena'::text])))
+);
+
+
+--
+-- Name: TABLE offer_template_version; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_template_version IS 'pevné texty ponuky (PDF a stránka) – platná verzia sa nemení, zmena = nová verzia (0039)';
+
+
+--
+-- Name: offer_template_for(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_for(p_offer uuid) RETURNS public.offer_template_version
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT t.* FROM offer o
+    JOIN offer_template_version t ON t.org_id = o.org_id AND t.kind = o.kind AND t.language = o.language
+   WHERE o.id = p_offer
+     AND (t.id = o.template_version_id OR (o.template_version_id IS NULL AND t.status IN ('platna', 'navrh')))
+   ORDER BY (t.id = o.template_version_id) DESC, (t.status = 'platna') DESC
+   LIMIT 1
+$$;
+
+
+--
+-- Name: offer_template_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_err text;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status <> 'navrh' AND NOT (crm_owner_session() OR crm_internal_call()) THEN
+      RAISE EXCEPTION 'Zmazať sa dá iba návrh šablóny.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF NOT (crm_owner_session() OR crm_internal_call()) THEN
+    IF TG_OP = 'INSERT' THEN
+      NEW.status := 'navrh';
+      NEW.published_at := NULL;
+      NEW.published_by := NULL;
+      NEW.created_by := crm_active_user_id();
+    ELSE
+      IF OLD.status <> 'navrh' THEN
+        RAISE EXCEPTION 'Platná šablóna sa nemení – uložte novú verziu.' USING ERRCODE = 'check_violation';
+      END IF;
+      IF (NEW.status, NEW.kind, NEW.language, NEW.version, NEW.org_id, NEW.published_at)
+         IS DISTINCT FROM (OLD.status, OLD.kind, OLD.language, OLD.version, OLD.org_id, OLD.published_at) THEN
+        RAISE EXCEPTION 'Druh, jazyk, verziu a stav šablóny mení iba CRM (zverejnenie).' USING ERRCODE = 'insufficient_privilege';
+      END IF;
+    END IF;
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    NEW.version := coalesce((SELECT max(version) FROM offer_template_version
+                              WHERE org_id = NEW.org_id AND kind = NEW.kind AND language = NEW.language), 0) + 1;
+  END IF;
+  v_err := offer_template_check(NEW.sections);
+  IF v_err IS NOT NULL THEN
+    RAISE EXCEPTION '%', v_err USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.defaults ? 'zmluvna_pokuta' AND NOT (jsonb_typeof(NEW.defaults->'zmluvna_pokuta') = 'number'
+                                               AND (NEW.defaults->>'zmluvna_pokuta')::numeric BETWEEN 0 AND 10000) THEN
+    RAISE EXCEPTION 'Zmluvná pokuta musí byť číslo 0 až 10 000 €/MWh.' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: offer_template_keys(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_keys() RETURNS text[]
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT ARRAY['hlavicka', 'udaje', 'predmet', 'cenova_ponuka', 'podmienky', 'platnost', 'vseobecne', 'objednavka',
+               'spracoval', 'pribeh', 'vizia', 'paticka']
+$$;
+
+
+--
+-- Name: offer_template_publish(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_publish(p_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  t offer_template_version;
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Šablóny ponúk zverejňuje admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  SELECT * INTO t FROM offer_template_version WHERE id = p_id AND org_id = ANY (crm_user_orgs()) FOR UPDATE;
+  IF NOT FOUND OR t.status <> 'navrh' THEN
+    RAISE EXCEPTION 'Zverejniť sa dá iba návrh šablóny.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer_template_version SET status = 'nahradena'
+   WHERE org_id = t.org_id AND kind = t.kind AND language = t.language AND status = 'platna';
+  UPDATE offer_template_version SET status = 'platna', published_at = now(), published_by = crm_active_user_id()
+   WHERE id = t.id;
+END;
+$$;
+
+
+--
+-- Name: offer_template_variables(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_template_variables() RETURNS text[]
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT ARRAY['číslo ponuky', 'dátum ponuky', 'názov', 'sídlo', 'IČO', 'IČ DPH', 'kontakt meno', 'kontakt e-mail',
+               'kontakt telefón', 'obchodník meno', 'obchodník funkcia', 'obchodník telefón', 'obchodník e-mail',
+               'tabuľka variantov', 'flexibilita', 'objem', 'výška preddavkov', 'splatnosť preddavku', 'splatnosť faktúr',
+               'platnosť čas', 'platnosť dátum', 'variant', 'dátum platnosti', 'zmluvná pokuta', 'obdobie', 'koeficient',
+               'poplatok za kW']
+$$;
+
+
+--
+-- Name: offer_terms_normalize(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_terms_normalize(p text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT string_agg(l, E'\n' ORDER BY n)
+    FROM (SELECT n, btrim(regexp_replace(l, '[ \t ]+', ' ', 'g')) AS l
+            FROM regexp_split_to_table(normalize(replace(coalesce(p, ''), E'\r\n', E'\n'), NFC), E'\n') WITH ORDINALITY AS s(l, n)) x
+   WHERE l <> ''
+$$;
+
+
+--
+-- Name: offer_terms_sha(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_terms_sha(p_text text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT encode(sha256(convert_to(p_text, 'UTF8')), 'hex')
+$$;
+
+
+--
+-- Name: offer_terms_text(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_terms_text(p_offer uuid, p_variant uuid) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  t    offer_template_version := offer_template_for(p_offer);
+  vs   jsonb := offer_doc_variants(p_offer);
+  vars jsonb := offer_doc_vars(p_offer, vs);
+  v    jsonb;
+BEGIN
+  SELECT x INTO v FROM jsonb_array_elements(vs) x WHERE x->>'id' = p_variant::text;
+  IF v IS NULL OR t.id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  vars := vars || jsonb_build_object('variant', v->>'label');
+  RETURN offer_terms_normalize(
+    offer_template_fill(coalesce(t.sections->'objednavka'->>'nadpis', '') || E'\n' || coalesce(t.sections->'objednavka'->>'text', ''),
+                        vars, (v->>'spot')::boolean, (v->>'negative_price_compensation')::boolean));
+END;
+$$;
+
+
+--
+-- Name: offer_unblock(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_unblock(p_offer uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+  d deal;
+BEGIN
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  IF NOT (d.owner_id = crm_active_user_id() OR crm_is_admin()) THEN
+    RAISE EXCEPTION 'Verziu odblokuje vlastník obchodu alebo admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF o.blocked_by_offer_id IS NULL THEN
+    RAISE EXCEPTION 'Verzia nie je zablokovaná.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM offer x WHERE x.org_id = o.org_id AND x.number = o.number AND x.status = 'akceptovana') THEN
+    RAISE EXCEPTION 'Iná verzia je akceptovaná – najprv musí admin akceptáciu zrušiť.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer SET blocked_by_offer_id = NULL WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'ponuka_odblokovana');
+END;
+$$;
+
+
+--
 -- Name: offer_variant_add(uuid, public.offer_price_kind, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -8449,6 +9636,8 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM offer_variant_months(NEW) m WHERE m.year = i.year);
     IF NEW.price_kind = 'cennik' THEN
       PERFORM offer_fill_price_list(NEW.id);
+    ELSIF NEW.price_kind = 'viwa' THEN
+      PERFORM offer_fill_viwa(NEW.id);   -- 0039
     END IF;
   END IF;
   RETURN NULL;
@@ -8666,7 +9855,11 @@ SELECT oom_id, year, vg, item_id, price_model, kind, vt, nt, ad, pct, months,
        coalesce(kind IN ('fix', 'spot_plus_eur', 'vykup') AND price_model <> 'cennik'
                 AND rev - ucost * (v_vt + v_nt) < 0, false),
        CASE WHEN item_id IS NULL THEN 'chýba cena'
-            WHEN kind = 'fix' AND ucost IS NULL THEN 'chýba cena pre obchodníka'
+            -- 0041: pri manažérovi je hranicou odhad portfólia (hlásenie hovorí, čo chýba a čo urobiť)
+            WHEN kind = 'fix' AND ucost IS NULL THEN
+              CASE WHEN seller_type = 'manazer'
+                   THEN 'chýba odhad portfólia (hranica manažéra) – doplňte ho v cenách dňa a ponuku prepočítajte'
+                   ELSE 'chýba cena pre obchodníka – doplňte ceny dňa a ponuku prepočítajte' END
             WHEN kind IN ('spot_plus_eur', 'vykup') AND ucost IS NULL THEN 'chýba minimálny aditív'
             WHEN kind = 'viwa' AND viwa_additive IS NULL THEN 'chýba balík VIWA'
             WHEN kind = 'vykup' AND price_model = 'spot_minus_pct' AND spot_fve IS NULL THEN 'chýba očakávaná cena SPOT pre FVE' END
@@ -11527,6 +12720,91 @@ $$;
 
 
 --
+-- Name: ponuka_akceptovat(text, uuid, text, text, inet, text, text); Type: FUNCTION; Schema: verejne; Owner: -
+--
+
+CREATE FUNCTION verejne.ponuka_akceptovat(p_hash text, p_variant uuid, p_name text, p_function text, p_ip inet, p_ua text, p_terms_sha256 text) RETURNS jsonb
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT public.offer_public_accept(p_hash, p_variant, p_name, p_function, p_ip, p_ua, p_terms_sha256)
+$$;
+
+
+--
+-- Name: ponuka_pdf(text); Type: FUNCTION; Schema: verejne; Owner: -
+--
+
+CREATE FUNCTION verejne.ponuka_pdf(p_hash text) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT public.offer_public_pdf(p_hash)
+$$;
+
+
+--
+-- Name: ponuka_potvrdenie_pdf(text); Type: FUNCTION; Schema: verejne; Owner: -
+--
+
+CREATE FUNCTION verejne.ponuka_potvrdenie_pdf(p_hash text) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  o offer;
+  a offer_acceptance;
+BEGIN
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO o FROM offer WHERE link_hash = p_hash;
+  IF offer_public_mode(o) = 'neplatny' THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO a FROM offer_acceptance WHERE offer_id = o.id AND revoked_at IS NULL AND confirmation_pdf_key IS NOT NULL;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  RETURN jsonb_build_object('pdf_key', a.confirmation_pdf_key,
+                            'file_name', 'Potvrdenie-' || replace(offer_display_number(o), '/', '-') || '.pdf');
+END;
+$_$;
+
+
+--
+-- Name: ponuka_potvrdenie_ulozit(text, uuid, text, text); Type: FUNCTION; Schema: verejne; Owner: -
+--
+
+CREATE FUNCTION verejne.ponuka_potvrdenie_ulozit(p_hash text, p_acceptance uuid, p_key text, p_sha256 text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+BEGIN
+  IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' OR NOT EXISTS (
+       SELECT 1 FROM offer_acceptance a JOIN offer o ON o.id = a.offer_id
+        WHERE a.id = p_acceptance AND o.link_hash = p_hash AND a.method = 'klik' AND a.revoked_at IS NULL
+          AND a.created_at >= now() - interval '10 minutes') THEN
+    RAISE EXCEPTION 'Potvrdenie nemožno uložiť.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM public.offer_acceptance_confirmation_attach(p_acceptance, p_key, p_sha256);
+END;
+$_$;
+
+
+--
+-- Name: ponuka_zobrazit(text); Type: FUNCTION; Schema: verejne; Owner: -
+--
+
+CREATE FUNCTION verejne.ponuka_zobrazit(p_hash text) RETURNS jsonb
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT public.offer_public_view(p_hash)
+$$;
+
+
+--
 -- Name: activity; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -11601,9 +12879,13 @@ CREATE TABLE public.app_user (
     seller_type public.seller_type,
     approves_prices boolean DEFAULT false NOT NULL,
     approves_assignments boolean DEFAULT false NOT NULL,
+    phone text,
+    job_title text,
     CONSTRAINT app_user_deactivated_check CHECK (((status = 'deaktivovany'::public.user_status) = (deactivated_at IS NOT NULL))),
     CONSTRAINT app_user_email_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
-    CONSTRAINT app_user_name_check CHECK ((btrim(name) <> ''::text))
+    CONSTRAINT app_user_job_title_check CHECK (((job_title IS NULL) OR (length(job_title) <= 80))),
+    CONSTRAINT app_user_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT app_user_phone_check CHECK (((phone IS NULL) OR (length(phone) <= 40)))
 );
 
 
@@ -11647,6 +12929,13 @@ COMMENT ON COLUMN public.app_user.approves_prices IS '„schvaľuje ceny“ (CEO
 --
 
 COMMENT ON COLUMN public.app_user.approves_assignments IS 'schvaľuje pridelenie firmy (Peter Kalman, Daniel Dérer, Denis Kalman)';
+
+
+--
+-- Name: COLUMN app_user.phone; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.phone IS 'telefón obchodníka do ponuky („Cenovú ponuku spracoval“) – 0039';
 
 
 --
@@ -11728,6 +13017,7 @@ CREATE TABLE public.approval_request (
     valid_until timestamp with time zone,
     requested_valid_until timestamp with time zone,
     risk_snapshot jsonb,
+    penalty_eur_mwh numeric(12,2),
     CONSTRAINT approval_request_assign_check CHECK (((kind <> 'pridelenie_firmy'::public.approval_kind) OR ((company_id IS NOT NULL) AND (from_owner_id IS NOT NULL)))),
     CONSTRAINT approval_request_decided_check CHECK (((status = ANY (ARRAY['schvalena'::public.approval_status, 'zamietnuta'::public.approval_status])) = (decided_at IS NOT NULL))),
     CONSTRAINT approval_request_offer_check CHECK (
@@ -11737,6 +13027,7 @@ CASE kind
     WHEN 'rizikovy_zakaznik'::public.approval_kind THEN ((deal_id IS NOT NULL) AND (company_id IS NOT NULL) AND (risk_snapshot IS NOT NULL))
     ELSE true
 END),
+    CONSTRAINT approval_request_penalty_eur_mwh_check CHECK (((penalty_eur_mwh IS NULL) OR (penalty_eur_mwh >= (0)::numeric))),
     CONSTRAINT approval_request_reason_check CHECK ((btrim(reason) <> ''::text)),
     CONSTRAINT approval_request_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by)))
 );
@@ -11754,6 +13045,13 @@ COMMENT ON TABLE public.approval_request IS 'schvaľovanie: výnimka z ceny, riz
 --
 
 COMMENT ON COLUMN public.approval_request.valid_until IS 'výnimka z ceny platí 3 dni na odoslanie, schválenie rizika 30 dní (časť 1.8, odpoveď 9)';
+
+
+--
+-- Name: COLUMN approval_request.penalty_eur_mwh; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.approval_request.penalty_eur_mwh IS 'výnimka z ceny: žiadaná zmluvná pokuta pod predvolenou hodnotou šablóny (schvaľuje sa spolu, platí 3 dni) – 0040';
 
 
 --
@@ -12870,7 +14168,7 @@ CREATE TABLE public.deal_event (
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
     reason text,
     offer_id uuid,
-    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text, 'ponuka_nova'::text, 'ponuka_verzia'::text, 'ponuka_prepocitana'::text, 'ponuka_odoslana'::text, 'ponuka_zamietnuta'::text, 'ponuka_platnost'::text, 'schvalenie_ziadost'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text])))
+    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text, 'ponuka_nova'::text, 'ponuka_verzia'::text, 'ponuka_prepocitana'::text, 'ponuka_odoslana'::text, 'ponuka_zamietnuta'::text, 'ponuka_platnost'::text, 'schvalenie_ziadost'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'ponuka_otvorena'::text, 'ponuka_odkaz'::text, 'akceptacia_zrusena'::text, 'ponuka_odblokovana'::text])))
 );
 
 
@@ -13258,7 +14556,7 @@ CREATE TABLE public.notification (
     read_at timestamp with time zone,
     deal_id uuid,
     approval_id uuid,
-    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text])))
+    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'akceptacia_zrusena'::text])))
 );
 
 
@@ -13274,6 +14572,94 @@ COMMENT ON TABLE public.notification IS 'upozornenia v CRM (zvonček); bez audit
 --
 
 COMMENT ON COLUMN public.notification.ref_date IS 'konci_4_mesiace, sprolongovana, neprolongovana: koniec zmluvy, ku ktorému upozornenie patrí (posiela sa raz)';
+
+
+--
+-- Name: offer_acceptance; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_acceptance (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    offer_id uuid NOT NULL,
+    variant_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    method text NOT NULL,
+    channel text,
+    accepted_at timestamp with time zone NOT NULL,
+    signer_name text NOT NULL,
+    signer_function text NOT NULL,
+    ip inet,
+    user_agent text,
+    terms_text text NOT NULL,
+    terms_sha256 text NOT NULL,
+    offer_pdf_sha256 text,
+    signed_file_key text,
+    note text,
+    recorded_by uuid,
+    revoked_at timestamp with time zone,
+    revoked_by uuid,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    confirmation_pdf_key text,
+    confirmation_pdf_sha256 text,
+    CONSTRAINT offer_acceptance_channel_check CHECK ((channel = ANY (ARRAY['telefon'::text, 'email'::text, 'osobne'::text, 'podpisane_pdf'::text]))),
+    CONSTRAINT offer_acceptance_check CHECK (((method = 'klik'::text) = (ip IS NOT NULL))),
+    CONSTRAINT offer_acceptance_check1 CHECK (((method = 'rucne'::text) = ((channel IS NOT NULL) AND (recorded_by IS NOT NULL)))),
+    CONSTRAINT offer_acceptance_check2 CHECK (((signed_file_key IS NULL) OR (method = 'rucne'::text))),
+    CONSTRAINT offer_acceptance_check3 CHECK ((((revoked_at IS NULL) = (revoked_by IS NULL)) AND ((revoked_at IS NULL) = (revoke_reason IS NULL)))),
+    CONSTRAINT offer_acceptance_confirmation_check CHECK (((confirmation_pdf_key IS NULL) = (confirmation_pdf_sha256 IS NULL))),
+    CONSTRAINT offer_acceptance_confirmation_pdf_sha256_check CHECK (((confirmation_pdf_sha256 IS NULL) OR (confirmation_pdf_sha256 ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT offer_acceptance_method_check CHECK ((method = ANY (ARRAY['klik'::text, 'rucne'::text]))),
+    CONSTRAINT offer_acceptance_note_check CHECK (((note IS NULL) OR (length(note) <= 2000))),
+    CONSTRAINT offer_acceptance_signer_function_check CHECK (((btrim(signer_function) <> ''::text) AND (length(signer_function) <= 200))),
+    CONSTRAINT offer_acceptance_signer_name_check CHECK (((btrim(signer_name) <> ''::text) AND (length(signer_name) <= 200))),
+    CONSTRAINT offer_acceptance_terms_sha256_check CHECK ((terms_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT offer_acceptance_user_agent_check CHECK (((user_agent IS NULL) OR (length(user_agent) <= 500)))
+);
+
+
+--
+-- Name: TABLE offer_acceptance; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_acceptance IS 'akceptácia ponuky – nemení sa; jedinou zmenou je zrušenie adminom s dôvodom (0039)';
+
+
+--
+-- Name: COLUMN offer_acceptance.confirmation_pdf_key; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer_acceptance.confirmation_pdf_key IS 'R2: potvrdenie akceptácie v PDF uložené v momente akceptácie (nemení sa) – 0041';
+
+
+--
+-- Name: offer_asset; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_asset (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    code text NOT NULL,
+    mime text NOT NULL,
+    data bytea NOT NULL,
+    sha256 text NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT offer_asset_code_check CHECK ((code = ANY (ARRAY['titulna'::text, 'referencie_zakaznici'::text, 'referencie_partneri'::text, 'energeticky_mix'::text]))),
+    CONSTRAINT offer_asset_data_check CHECK ((octet_length(data) <= 1048576)),
+    CONSTRAINT offer_asset_mime_check CHECK ((mime = ANY (ARRAY['image/png'::text, 'image/jpeg'::text]))),
+    CONSTRAINT offer_asset_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: TABLE offer_asset; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_asset IS 'obrázky do PDF ponuky; bez auditu (obsahuje binárne dáta) – kto a kedy je v created_by / created_at (0039)';
 
 
 --
@@ -13318,6 +14704,25 @@ END),
 --
 
 COMMENT ON TABLE public.offer_item IS 'cena zložky (komodita, poplatky, program, VIWA) pre OOM a rok – rovnaké sloty a modely ako contract_price';
+
+
+--
+-- Name: offer_page_stat; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_page_stat (
+    offer_id uuid NOT NULL,
+    first_opened_at timestamp with time zone NOT NULL,
+    last_opened_at timestamp with time zone NOT NULL,
+    open_count integer DEFAULT 1 NOT NULL
+);
+
+
+--
+-- Name: TABLE offer_page_stat; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_page_stat IS 'otvorenia stránky ponuky zákazníkom – bez IP adries (zadanie 7.3)';
 
 
 --
@@ -15197,6 +16602,22 @@ ALTER TABLE ONLY public.notification
 
 
 --
+-- Name: offer_acceptance offer_acceptance_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_asset offer_asset_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_asset
+    ADD CONSTRAINT offer_asset_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: offer offer_hubspot_quote_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -15229,11 +16650,35 @@ ALTER TABLE ONLY public.offer
 
 
 --
+-- Name: offer_page_stat offer_page_stat_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_page_stat
+    ADD CONSTRAINT offer_page_stat_pkey PRIMARY KEY (offer_id);
+
+
+--
 -- Name: offer offer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_template_version offer_template_version_org_id_kind_language_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_template_version
+    ADD CONSTRAINT offer_template_version_org_id_kind_language_version_key UNIQUE (org_id, kind, language, version);
+
+
+--
+-- Name: offer_template_version offer_template_version_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_template_version
+    ADD CONSTRAINT offer_template_version_pkey PRIMARY KEY (id);
 
 
 --
@@ -16448,6 +17893,27 @@ CREATE INDEX notification_user_idx ON public.notification USING btree (user_id, 
 
 
 --
+-- Name: offer_acceptance_active_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_acceptance_active_key ON public.offer_acceptance USING btree (offer_id) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: offer_acceptance_offer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX offer_acceptance_offer_idx ON public.offer_acceptance USING btree (offer_id);
+
+
+--
+-- Name: offer_asset_active_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_asset_active_key ON public.offer_asset USING btree (org_id, code) WHERE active;
+
+
+--
 -- Name: offer_custom_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -16469,10 +17935,31 @@ CREATE INDEX offer_item_variant_idx ON public.offer_item USING btree (variant_id
 
 
 --
+-- Name: offer_link_hash_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_link_hash_key ON public.offer USING btree (link_hash) WHERE (link_hash IS NOT NULL);
+
+
+--
 -- Name: offer_org_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX offer_org_id_idx ON public.offer USING btree (org_id);
+
+
+--
+-- Name: offer_template_navrh_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_template_navrh_key ON public.offer_template_version USING btree (org_id, kind, language) WHERE (status = 'navrh'::text);
+
+
+--
+-- Name: offer_template_platna_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_template_platna_key ON public.offer_template_version USING btree (org_id, kind, language) WHERE (status = 'platna'::text);
 
 
 --
@@ -17029,10 +18516,24 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer FOR EA
 
 
 --
+-- Name: offer_acceptance trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer_acceptance FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: offer_item trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer_item FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: offer_template_version trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer_template_version FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -17551,6 +19052,27 @@ CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.lookup_valu
 --
 
 CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.market_price_guard();
+
+
+--
+-- Name: offer_acceptance trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer_acceptance FOR EACH ROW EXECUTE FUNCTION public.offer_acceptance_guard();
+
+
+--
+-- Name: offer_asset trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer_asset FOR EACH ROW EXECUTE FUNCTION public.offer_asset_guard();
+
+
+--
+-- Name: offer_template_version trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer_template_version FOR EACH ROW EXECUTE FUNCTION public.offer_template_guard();
 
 
 --
@@ -18107,10 +19629,31 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer FOR EACH ROW EXE
 
 
 --
+-- Name: offer_acceptance trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_acceptance FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: offer_asset trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_asset FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: offer_item trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_item FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: offer_template_version trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_template_version FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -19282,6 +20825,70 @@ ALTER TABLE ONLY public.notification
 
 
 --
+-- Name: offer_acceptance offer_acceptance_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id);
+
+
+--
+-- Name: offer_acceptance offer_acceptance_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer_acceptance offer_acceptance_recorded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_recorded_by_fkey FOREIGN KEY (recorded_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer_acceptance offer_acceptance_revoked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_revoked_by_fkey FOREIGN KEY (revoked_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer_acceptance offer_acceptance_variant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_acceptance
+    ADD CONSTRAINT offer_acceptance_variant_id_fkey FOREIGN KEY (variant_id) REFERENCES public.offer_variant(id);
+
+
+--
+-- Name: offer_asset offer_asset_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_asset
+    ADD CONSTRAINT offer_asset_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer_asset offer_asset_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_asset
+    ADD CONSTRAINT offer_asset_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer offer_blocked_by_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_blocked_by_offer_id_fkey FOREIGN KEY (blocked_by_offer_id) REFERENCES public.offer(id);
+
+
+--
 -- Name: offer offer_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -19346,11 +20953,27 @@ ALTER TABLE ONLY public.offer_item
 
 
 --
+-- Name: offer offer_link_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_link_created_by_fkey FOREIGN KEY (link_created_by) REFERENCES public.app_user(id);
+
+
+--
 -- Name: offer offer_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer_page_stat offer_page_stat_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_page_stat
+    ADD CONSTRAINT offer_page_stat_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id) ON DELETE CASCADE;
 
 
 --
@@ -19367,6 +20990,38 @@ ALTER TABLE ONLY public.offer
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_sent_by_fkey FOREIGN KEY (sent_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer_template_version offer_template_version_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_template_version
+    ADD CONSTRAINT offer_template_version_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer offer_template_version_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_template_version_id_fkey FOREIGN KEY (template_version_id) REFERENCES public.offer_template_version(id);
+
+
+--
+-- Name: offer_template_version offer_template_version_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_template_version
+    ADD CONSTRAINT offer_template_version_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer_template_version offer_template_version_published_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_template_version
+    ADD CONSTRAINT offer_template_version_published_by_fkey FOREIGN KEY (published_by) REFERENCES public.app_user(id);
 
 
 --
@@ -20351,6 +22006,41 @@ CREATE POLICY notification_update ON public.notification FOR UPDATE USING ((user
 ALTER TABLE public.offer ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: offer_acceptance; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_acceptance ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_acceptance offer_acceptance_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_acceptance_select ON public.offer_acceptance FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.offer o
+  WHERE (o.id = offer_acceptance.offer_id))));
+
+
+--
+-- Name: offer_asset; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_asset ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_asset offer_asset_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_asset_select ON public.offer_asset FOR SELECT USING (((public.crm_active_user_id() IS NOT NULL) AND (org_id = ANY (public.crm_user_orgs()))));
+
+
+--
+-- Name: offer_asset offer_asset_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_asset_write ON public.offer_asset USING ((public.crm_is_admin() AND (org_id = ANY (public.crm_user_orgs())))) WITH CHECK ((public.crm_is_admin() AND (org_id = ANY (public.crm_user_orgs()))));
+
+
+--
 -- Name: offer_item; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -20381,12 +22071,47 @@ CREATE POLICY offer_item_write ON public.offer_item USING ((EXISTS ( SELECT 1
 
 
 --
+-- Name: offer_page_stat; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_page_stat ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_page_stat offer_page_stat_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_page_stat_select ON public.offer_page_stat FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.offer o
+  WHERE (o.id = offer_page_stat.offer_id))));
+
+
+--
 -- Name: offer offer_select; Type: POLICY; Schema: public; Owner: -
 --
 
 CREATE POLICY offer_select ON public.offer FOR SELECT USING ((EXISTS ( SELECT 1
    FROM public.deal d
   WHERE (d.id = offer.deal_id))));
+
+
+--
+-- Name: offer_template_version offer_template_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_template_select ON public.offer_template_version FOR SELECT USING (((public.crm_active_user_id() IS NOT NULL) AND (org_id = ANY (public.crm_user_orgs()))));
+
+
+--
+-- Name: offer_template_version; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_template_version ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_template_version offer_template_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_template_write ON public.offer_template_version USING ((public.crm_is_admin() AND (org_id = ANY (public.crm_user_orgs())))) WITH CHECK ((public.crm_is_admin() AND (org_id = ANY (public.crm_user_orgs()))));
 
 
 --
@@ -21489,4 +23214,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0035'),
     ('0036'),
     ('0037'),
-    ('0038');
+    ('0038'),
+    ('0039'),
+    ('0040'),
+    ('0041');
