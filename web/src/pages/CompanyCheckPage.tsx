@@ -3,14 +3,14 @@
 // z Finstatu s výstrahami. Firmu iného obchodníka nejde zobrať – iba požiadať o pridelenie (schvaľuje
 // „schvaľuje pridelenie firmy“). Obrazovka je rovnaká pre interných aj externých obchodníkov.
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { NewDealPanel, RiskPills } from '../components/deal-forms';
 import { Field, Notice, Segmented, TextInput, useSave } from '../components/form';
 import { Card, Empty, Pill, Rows } from '../components/ui';
-import { get, send } from '../lib/api';
+import { ApiError, get, send } from '../lib/api';
 import { type Risk, Z_BAND } from '../lib/deals';
-import { date, eur, text } from '../lib/format';
+import { date, text } from '../lib/format';
 import { CUSTOMER_STATUS } from '../lib/labels';
 
 type Finstat = {
@@ -56,6 +56,9 @@ type CheckResult = { crm: CrmCheck; finstat: Finstat | null; finstat_error: stri
 type Suggest = { ico: string; name: string; city: string | null; cancelled: boolean; in_crm?: boolean; owner_name?: string | null };
 type SearchResult = { crm: { id: string; name: string; ico: string; owner_name: string | null }[]; finstat: Suggest[]; finstat_error: string | null };
 
+// Tržby a zisk v celých eurách (dlaždice ako v návrhu)
+const eur0 = (v: number) => new Intl.NumberFormat('sk-SK', { maximumFractionDigits: 0 }).format(v);
+
 const stamp = (v: string) =>
   new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(v));
 
@@ -99,6 +102,16 @@ export function CompanyCheckPage() {
   }, [q, mode]);
 
   const isIco = /^\d{6,8}$/.test(q.replace(/\s/g, ''));
+  // Názov: tlačidlo overí prvú zhodu (najprv firma v CRM, potom Finstat); IČO zadané aj v režime Názov sa overí priamo
+  const checkByName = () =>
+    save.run(async () => {
+      const v = q.trim();
+      if (isIco) return check(v.replace(/\s/g, ''));
+      const r = suggest ?? (await get<SearchResult>(`/api/company-search?q=${encodeURIComponent(v)}`));
+      const ico = r.crm[0]?.ico ?? r.finstat[0]?.ico;
+      if (!ico) throw new ApiError(404, r.finstat_error ? `Finstat: ${r.finstat_error}` : 'Nič sa nenašlo.');
+      return check(ico);
+    });
   const crm = result?.crm;
   const f = result?.finstat;
   const createCompany = () =>
@@ -110,16 +123,14 @@ export function CompanyCheckPage() {
   return (
     <>
       <header className="page-head">
-        <div>
+        <div className="page-head-main check-title">
           <h1 className="t-page-title">Overenie firmy</h1>
-          <div className="page-sub">
-            <span>pred založením obchodu</span>
-          </div>
+          <span className="check-title-sub">pred založením obchodu</span>
         </div>
       </header>
 
       <Card>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="check-search">
           <Segmented
             label="Hľadať podľa"
             value={mode}
@@ -132,7 +143,7 @@ export function CompanyCheckPage() {
               { value: 'nazov', label: 'Názov' },
             ]}
           />
-          <div style={{ flex: '1 1 320px' }}>
+          <div className="check-search-input">
             <TextInput
               value={q}
               onChange={setQ}
@@ -142,10 +153,14 @@ export function CompanyCheckPage() {
           </div>
           <button
             type="button"
-            className="btn primary"
-            disabled={(mode === 'ico' && !isIco) || (mode === 'nazov' && !suggest) || save.busy}
-            onClick={() => (mode === 'ico' ? check(q.replace(/\s/g, '')) : undefined)}
+            className="btn primary check-search-btn"
+            disabled={(mode === 'ico' ? !isIco : q.trim().length < 3) || save.busy}
+            onClick={() => (mode === 'ico' ? check(q.replace(/\s/g, '')) : checkByName())}
           >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
             {save.busy ? 'Overujem…' : 'Overiť firmu'}
           </button>
         </div>
@@ -173,7 +188,7 @@ export function CompanyCheckPage() {
       </Card>
 
       {result && crm && (
-        <div className="columns" style={{ marginTop: 16 }}>
+        <div className="columns check-columns">
           <div className="col-wide">
             <FinstatCard f={f ?? null} error={result.finstat_error} risk={crm.risk ?? null} crmName={crm.name} ico={crm.ico} />
           </div>
@@ -204,12 +219,13 @@ export function CompanyCheckPage() {
 function ZScoreScale(props: { value: number }) {
   const pos = Math.max(0, Math.min(5, props.value)) / 5 * 100;
   const band = props.value < 1.23 ? 'riziko' : props.value <= 2.9 ? 'seda_zona' : 'stabilna';
+  const value = new Intl.NumberFormat('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(props.value);
   return (
     <div className="zscale">
       <div className="zscale-head">
-        <span className="kl">Altmanovo Z-skóre · kreditné riziko</span>
-        <span>
-          <strong>{String(props.value).replace('.', ',')}</strong> <Pill tone={Z_BAND[band].tone}>{Z_BAND[band].label.split(' (')[0]}</Pill>
+        <span className="zscale-title">Altmanovo Z-skóre · kreditné riziko</span>
+        <span className={`zscale-value tone-${Z_BAND[band].tone}`}>
+          {value} · {Z_BAND[band].label.split(' (')[0]}
         </span>
       </div>
       <div className="zscale-bar" aria-hidden="true">
@@ -244,13 +260,24 @@ function CrmCard(props: { crm: CrmCheck; hasFinstat: boolean; busy: boolean; onC
     });
   const otherOwner = crm.exists && crm.owner_id && !crm.owner_is_me;
   return (
-    <Card title="V CRM" aside={crm.exists ? <Pill tone="info">{crm.status ? CUSTOMER_STATUS[crm.status]?.label ?? crm.status : 'v CRM'}</Pill> : <Pill>nie je v CRM</Pill>}>
+    <Card
+      title="V CRM"
+      aside={
+        crm.exists ? (
+          <Pill tone="info" live>
+            {crm.status ? CUSTOMER_STATUS[crm.status]?.label ?? crm.status : 'v CRM'}
+          </Pill>
+        ) : (
+          <Pill live>nie je v CRM</Pill>
+        )
+      }
+    >
       {save.error && <Notice tone="error">{save.error}</Notice>}
       {!crm.exists ? (
         <>
           <p>Firma s IČO {crm.ico} v CRM nie je.{props.hasFinstat ? ' Založte ju z Finstatu – vlastníkom budete vy.' : ''}</p>
           {props.hasFinstat && (
-            <button type="button" className="btn primary" disabled={props.busy} onClick={props.onCreateCompany}>
+            <button type="button" className="btn primary check-cta" disabled={props.busy} onClick={props.onCreateCompany}>
               Založiť firmu z Finstatu
             </button>
           )}
@@ -259,11 +286,25 @@ function CrmCard(props: { crm: CrmCheck; hasFinstat: boolean; busy: boolean; onC
         <>
           <Rows
             rows={[
-              ['Vlastník', crm.owner_name ? `${crm.owner_name}${crm.owner_is_me ? ' (vy)' : ''}` : 'bez vlastníka'],
+              ['Vlastník', crm.owner_name ? <strong>{`${crm.owner_name}${crm.owner_is_me ? ' (vy)' : ''}`}</strong> : 'bez vlastníka'],
               ...(crm.visible
                 ? ([
-                    ['Zmluvy', (crm.contracts ?? []).length ? crm.contracts!.map((k) => `${k.number} · ${k.state}`).join(', ') : '–'],
-                  ] as [string, string][])
+                    [
+                      'Zmluvy',
+                      (crm.contracts ?? []).length ? (
+                        <span>
+                          {crm.contracts!.map((k, i) => (
+                            <span key={k.number}>
+                              {i > 0 && ', '}
+                              <span className="mono">{k.number}</span> · {k.state}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        '–'
+                      ),
+                    ],
+                  ] as [string, ReactNode][])
                 : []),
               [
                 'Otvorené obchody',
@@ -287,27 +328,29 @@ function CrmCard(props: { crm: CrmCheck; hasFinstat: boolean; busy: boolean; onC
             sent ? (
               <Notice tone="ok">Žiadosť odoslaná. Výsledok uvidíte v Schvaľovaní a v zvončeku.</Notice>
             ) : (
-              <div style={{ marginTop: 12 }}>
-                <div className="ban ban-warn">
-                  Firmu vlastní iný obchodník. Nový obchod nemôžete založiť. Požiadajte o pridelenie – schvaľuje manažér alebo obchodný
-                  riaditeľ, vlastník dostane upozornenie.
+              <div className="check-request">
+                <div className="ban ban-warn check-warn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 3 2 20h20L12 3Z" />
+                    <path d="M12 10v4M12 17h.01" />
+                  </svg>
+                  <span>
+                    <strong>Firmu vlastní iný obchodník.</strong> Nový obchod nemôžete založiť. Požiadajte o pridelenie – schvaľuje manažér
+                    alebo obchodný riaditeľ, vlastník dostane upozornenie.
+                  </span>
                 </div>
                 <Field label="Dôvod žiadosti">
-                  <textarea className="inp" rows={3} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+                  <textarea className="inp" rows={2} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
                 </Field>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                  <button type="button" className="btn" disabled={save.busy || !reason.trim()} onClick={request}>
-                    Požiadať o pridelenie
-                  </button>
-                </div>
+                <button type="button" className="btn primary check-cta" disabled={save.busy || !reason.trim()} onClick={request}>
+                  Požiadať o pridelenie
+                </button>
               </div>
             )
           ) : crm.company_id ? (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button type="button" className="btn primary" onClick={props.onNewDeal}>
-                Založiť obchod
-              </button>
-            </div>
+            <button type="button" className="btn primary check-cta" onClick={props.onNewDeal}>
+              Založiť obchod
+            </button>
           ) : null}
         </>
       )}
@@ -324,7 +367,7 @@ function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Ris
       </Card>
     );
   const debts = f.debts.length
-    ? f.debts.map((d) => `${d.veritel}${d.suma_eur !== null ? ` ${eur(d.suma_eur)} €` : ''}`).join(', ')
+    ? f.debts.map((d) => `${d.veritel}${d.suma_eur !== null ? ` ${eur0(d.suma_eur)} €` : ''}`).join(', ')
     : f.has_debts ? 'áno' : 'Bez dlhov';
   return (
     <Card>
@@ -335,7 +378,15 @@ function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Ris
             IČO {f.ico} · DIČ {f.dic ?? '–'} · IČ DPH {f.ic_dph ?? '–'} · {text(f.address)}
           </div>
         </div>
-        {f.cancelled ? <Pill tone="negative">Zrušená</Pill> : <Pill tone="positive">Aktívna</Pill>}
+        {f.cancelled ? (
+          <Pill tone="negative" live>
+            Zrušená
+          </Pill>
+        ) : (
+          <Pill tone="positive" live>
+            Aktívna
+          </Pill>
+        )}
       </div>
       {props.risk && props.risk.warnings.length > 0 && (
         <div style={{ margin: '8px 0' }}>
@@ -343,9 +394,13 @@ function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Ris
         </div>
       )}
       <div className="tiles">
-        <Tile label={`Tržby${f.finance_year ? ` ${f.finance_year}` : ''}`} value={f.revenue_eur === null ? '–' : `${eur(f.revenue_eur)} €`} />
-        <Tile label={`Zisk${f.finance_year ? ` ${f.finance_year}` : ''}`} value={f.profit_eur === null ? '–' : `${eur(f.profit_eur)} €`} tone={f.profit_eur !== null && f.profit_eur < 0 ? 'negative' : undefined} />
-        <Tile label="Zamestnanci" value={text(f.employees_range)} />
+        <Tile label={`Tržby${f.finance_year ? ` ${f.finance_year}` : ''}`} value={f.revenue_eur === null ? '–' : `${eur0(f.revenue_eur)} €`} />
+        <Tile
+          label={`Zisk${f.finance_year ? ` ${f.finance_year}` : ''}`}
+          value={f.profit_eur === null ? '–' : `${eur0(f.profit_eur)} €`}
+          tone={f.profit_eur === null ? undefined : f.profit_eur < 0 ? 'negative' : 'positive'}
+        />
+        <Tile label="Zamestnanci" value={employees(f.employees_range)} />
         <Tile label="Dlhy a nedoplatky" value={debts} tone={f.debts.length || f.has_debts ? 'negative' : 'positive'} />
         <Tile label="Platobný rating" value={f.payment_rating ?? '–'} tone={f.payment_rating === 'E' || f.payment_rating === 'X' ? 'negative' : undefined} />
         <Tile
@@ -355,7 +410,7 @@ function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Ris
         />
       </div>
       {f.z_score !== null && <ZScoreScale value={f.z_score} />}
-      <p className="caption" style={{ marginTop: 12 }}>
+      <p className="caption check-foot">
         Údaje z Finstatu k {stamp(f.fetched_at)}. Pri dlhoch, nedoplatkoch, konkurze, ratingu E/X alebo Z-skóre pod 1,23 sa výstraha
         ukáže na firme, obchode aj pri ponuke.{' '}
         {f.finstat_url && (
@@ -366,6 +421,12 @@ function FinstatCard(props: { f: Finstat | null; error: string | null; risk: Ris
       </p>
     </Card>
   );
+}
+
+/** „10-19 zamestnancov“ z Finstatu → „10–19“ ako v návrhu */
+function employees(v: string | null) {
+  if (!v) return '–';
+  return v.replace(/\s*zamestnanc\w*/i, '').replace(/(\d)\s*-\s*(\d)/, '$1–$2').trim() || v;
 }
 
 function Tile(props: { label: string; value: string; tone?: 'negative' | 'positive' }) {

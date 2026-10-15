@@ -2,6 +2,11 @@
 
 ## 2026-10-15
 
+- Modul 5: **F2 uzavretá** – `app-role.sql` a testy na `dev` (195 kontrol), `db/schema.sql` z `dev` s `0036`–`0038`; oprava „Očakávaný JSON“ pri akciách bez údajov (nová ponuka, nová verzia, prepočet).
+- Modul 5, F2 krok 3 (lokálne overené, nenasadené): obrazovka 31 dorovnaná s návrhom (aj oprava generátora farieb `web/scripts/tokens.ts` – odkazy medzi tokenmi, zelené štítky v celej aplikácii); API ponúk (`offers.ts`) a rozšírené schvaľovanie; obrazovky 34 editor ponuky, 33 Ponuky a PH / provízia z ponuky, 39 výnimky / konkurz-rating / predĺženie so schválenou hranicou, 28 výnimky z ponúk, percento provízie v Nastaveniach; popisy upozornení obchodov v zvončeku. `0038` na `dev` (Peter).
+- Modul 5, F2 krok 2 (nenasadené): `0038_ponuky_doplnky` overená nanečisto, 195 kontrol – odhad portfólia (hranica FIX manažéra a cenníka) skrytý pre toho, kto nevidí maržu a nie je manažér (hodnoty, kontrola, detail výnimky, audit; položky výnimky aplikácia nečíta); schválená výnimka prejde na novú verziu v 3-dňovej lehote pri rovnakom rozsahu; akceptácia verzie zablokuje rozpracovanú novú verziu s upozornením (jadro pre F3); oprava: koncept ponuky sa dal zmazať iba bez udalostí v časovej osi. `0036`, `0037` na `dev` (Peter).
+- Modul 5, F2 krok 1 (nenasadené): obrazovky 31, 32, 33 dorovnané s návrhmi; `0036_ponuky` (ponuka, varianty, ceny OOM × rok, snímka hraníc, spoločný výpočet PH so zmluvami, verzie, platnosť podľa pracovných dní, označiť ako odoslanú, percento provízie s históriou) a `0037_schvalovanie_ponuk` overené nanečisto, 191 kontrol.
+- Modul 5: F1 uzavretá (commit `803cfd8`), plán F2 v návrhu časť 19.
 - `0035_audit_rls` (overená nanečisto, 181 kontrol; nenasadené): RLS na audite podľa toho, čo používateľ vidí; externý tím odomknutý. `0034` na `dev` a F1 na Teste (Peter).
 - Modul 5, F1 – API a obrazovky (lokálne overené, nenasadené): Obchody (kanban a zoznam), karta obchodu, Overenie firmy (CRM + Finstat), Schvaľovanie (pridelenie firmy), FinStat na karte firmy, príznak „schvaľuje pridelenie firmy“ v Nastaveniach, odkazy v upozorneniach; klient Finstatu (cache 24 h, denný limit, overené polia Ultimate). Migrácia `0034_obchod_f1_doplnky` (overená nanečisto, 179 kontrol). Plán `0035` RLS na audite.
 - Modul 5, F1: `0032` a `0033` na `dev` (Peter).

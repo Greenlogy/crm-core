@@ -184,9 +184,10 @@ BEGIN
      '00000000-0000-4000-8000-000000001021', 'Nováková – dodávka', '00000000-0000-4000-8000-000000000011', 'web');
   ASSERT customer_status_calc(NULL, n, t) = 'zaujemca', 'otvorený deal';
 
-  INSERT INTO offer (id, deal_id) VALUES ('00000000-0000-4000-8000-000000001412', '00000000-0000-4000-8000-000000001411');
+  -- od 0036 ponuka s číslom a druhom (zakladá ju offer_create; test ako vlastník databázy)
+  INSERT INTO offer (id, deal_id, number, kind, household) VALUES ('00000000-0000-4000-8000-000000001412', '00000000-0000-4000-8000-000000001411', 'P26-990001', 'dodavka', true);
   ASSERT customer_status_calc(NULL, n, t) = 'zaujemca', 'koncept ponuky nie je odoslaná ponuka';
-  UPDATE offer SET status = 'odoslana', sent_at = '2026-10-10 10:00+02' WHERE id = '00000000-0000-4000-8000-000000001412';
+  UPDATE offer SET status = 'odoslana', sent_at = '2026-10-10 10:00+02', sent_channel = 'osobne' WHERE id = '00000000-0000-4000-8000-000000001412';
   ASSERT customer_status_calc(NULL, n, t) = 'ponuka', 'odoslaná ponuka';
 
   INSERT INTO contract (id, deal_id, person_id, number, type, phase, valid_from) VALUES
@@ -228,7 +229,8 @@ BEGIN
   INSERT INTO deal (id, person_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
     ('00000000-0000-4000-8000-000000001511', h, '00000000-0000-4000-8000-000000000502',
      '00000000-0000-4000-8000-000000001021', 'Horváth – návrat', '00000000-0000-4000-8000-000000000011', 'web');
-  INSERT INTO offer (deal_id, status, sent_at) VALUES ('00000000-0000-4000-8000-000000001511', 'odoslana', now());
+  INSERT INTO offer (deal_id, status, sent_at, sent_channel, number, kind, household)
+  VALUES ('00000000-0000-4000-8000-000000001511', 'odoslana', now(), 'osobne', 'P26-990002', 'dodavka', true);
   ASSERT customer_status_calc(NULL, h, t) = 'ponuka', 'bývalý s ponukou';
 
   -- vracajúci sa: nová zmluva do budúcna → Čakajúci s príznakom bývalý (čl. 13)

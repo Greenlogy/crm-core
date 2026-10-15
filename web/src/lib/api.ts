@@ -658,6 +658,8 @@ export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 /** Zápis (POST, PATCH, DELETE) ako JSON; chyba nesie slovenskú správu z API. */
 export async function send<T = unknown>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<T> {
+  // API prijíma zápis iba ako JSON (ochrana pred cudzou stránkou) – akcia bez údajov pošle prázdny objekt
+  if (data === undefined && method !== 'DELETE') data = {};
   const res = await fetch(path, {
     method,
     headers: { Accept: 'application/json', ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },

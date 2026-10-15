@@ -22,6 +22,7 @@ import { settings } from './routes/settings';
 import { approvals } from './routes/approvals';
 import { companyCheck } from './routes/company-check';
 import { deals } from './routes/deals';
+import { offers } from './routes/offers';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTER } from './queries/contacts';
@@ -141,6 +142,7 @@ app.route('/', priceExceptions);
 app.route('/', notifications);
 app.route('/', jobRuns);
 app.route('/', deals);
+app.route('/', offers);
 app.route('/', approvals);
 app.route('/', companyCheck);
 

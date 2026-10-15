@@ -300,6 +300,7 @@ function UserForm(props: {
         Nákup vidia všetky spoločnosti.
       </p>
       {save.error && <Notice tone="error">{save.error}</Notice>}
+      {u && (u.seller_type || sellerType) && !readOnly && <CommissionSection userId={u.id} />}
     </SidePanel>
   );
 }
@@ -408,5 +409,68 @@ function DeactivatePanel(props: { user: SettingsUser; onClose: () => void; onDon
       )}
       {save.error && <Notice tone="error">{save.error}</Notice>}
     </SidePanel>
+  );
+}
+
+/** Percento provízie z pridanej hodnoty s históriou „platí od“ (modul 5, F2): mení admin a obchodný riaditeľ. */
+function CommissionSection(props: { userId: string }) {
+  type Rate = { id: string; valid_from: string; pct: string; changed_by_name: string | null; future: boolean };
+  const { data, reload } = useApi<{ items: Rate[]; current: string; can_edit: boolean; today: string }>(`/api/commission-rates/${props.userId}`);
+  const [from, setFrom] = useState('');
+  const [pct, setPct] = useState('');
+  const save = useSave();
+  if (!data) return null;
+  const add = () =>
+    save.run(async () => {
+      await send('POST', '/api/commission-rates', { user_id: props.userId, valid_from: from || data.today, pct });
+      setPct('');
+      setFrom('');
+      reload();
+    });
+  const remove = (id: string) =>
+    save.run(async () => {
+      await send('DELETE', `/api/commission-rates/${id}`);
+      reload();
+    });
+  return (
+    <fieldset className="fieldset" style={{ marginTop: 16 }}>
+      <legend>Percento provízie z pridanej hodnoty</legend>
+      <p className="caption" style={{ marginTop: 0 }}>
+        Teraz platí {String(Number(data.current)).replace('.', ',')} %. Bez záznamu 40 %. Provízia si pri Vyhratom obchode uloží platné percento.
+      </p>
+      {data.items.length > 0 && (
+        <ul className="plain-list">
+          {data.items.map((r) => (
+            <li key={r.id} className="approval-row" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>
+                od {new Date(r.valid_from).toLocaleDateString('sk-SK')}: <strong>{String(Number(r.pct)).replace('.', ',')} %</strong>
+                <span className="caption"> · {r.changed_by_name ?? EMPTY}</span>
+              </span>
+              {r.future && data.can_edit && (
+                <button type="button" className="btn btn-sm" disabled={save.busy} onClick={() => remove(r.id)}>
+                  Zmazať
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {data.can_edit && (
+        <div className="form-grid" style={{ marginTop: 8 }}>
+          <Field label="Platí od">
+            <input className="inp" type="date" min={data.today} value={from || data.today} onChange={(e) => setFrom(e.target.value)} />
+          </Field>
+          <Field label="Percento [%]">
+            <TextInput value={pct} onChange={setPct} maxLength={6} />
+          </Field>
+          <div style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn" disabled={save.busy || !pct.trim()} onClick={add}>
+              Pridať percento
+            </button>
+          </div>
+        </div>
+      )}
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+    </fieldset>
   );
 }

@@ -1,9 +1,10 @@
-// Karta obchodu (dizajn 33; zadanie časť 4, F1): štádiá, údaje obchodu, OOM s plánovanými objemami (aj nové OOM
-// v stave Pripravované), kontaktné osoby s rolami, ďalší krok, časová os s poznámkami, výstrahy Finstatu.
-// Ponuky, e-maily a podklady pre zmluvu pribudnú vo fázach F2–F5. Pravidlá štádií a vlastníka stráži databáza.
+// Karta obchodu (dizajn 33; zadanie časť 4, F1–F2): štádiá, údaje obchodu, OOM s plánovanými objemami (aj nové OOM
+// v stave Pripravované), kontaktné osoby s rolami, ďalší krok, časová os s poznámkami, výstrahy Finstatu, ponuky
+// s verziami a pridaná hodnota / odhad provízie z ponuky (F2). E-maily a podklady pre zmluvu pribudnú vo fázach F4–F5.
+// Pravidlá štádií a vlastníka stráži databáza.
 
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { LostPanel, ReopenPanel, RiskPills } from '../components/deal-forms';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
 import { changed, initialValues, OomFields, type OomFormValues, type OomOptions } from '../components/oom-forms';
@@ -12,6 +13,7 @@ import { send, useApi, type Owner } from '../lib/api';
 import { type DealCard, type DealContact, type DealOom, type DealOptions, isSupply, OUTCOME_TONE, type StageRef, STEP_STATE, type TimelineItem, VOLTAGE } from '../lib/deals';
 import { date, eur, mwh, num, text } from '../lib/format';
 import { OOM_STATUS, OOM_TYPE } from '../lib/labels';
+import { APPROVAL_KIND, dateTime, type DealOffers, OFFER_STATE, SEND_CHANNEL } from '../lib/offers';
 
 const time = (v: string) =>
   new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', hour: 'numeric', minute: '2-digit' }).format(new Date(v));
@@ -22,6 +24,8 @@ export function DealPage() {
   const { data: d, error, reload } = useApi<DealCard>(`/api/deals/${id}`);
   const { data: opts } = useApi<DealOptions>('/api/deals/options');
   const timeline = useApi<{ items: TimelineItem[] }>(`/api/deals/${id}/timeline`);
+  const offers = useApi<DealOffers>(`/api/deals/${id}/offers`);
+  const navigate = useNavigate();
   const [panel, setPanel] = useState<null | 'edit' | 'lost' | 'reopen' | 'step' | 'oom-add' | 'oom-new' | 'contact-add'>(null);
   const [editOom, setEditOom] = useState<DealOom | null>(null);
   const [tlFilter, setTlFilter] = useState<'vsetko' | 'poznamka' | 'udalost'>('vsetko');
@@ -29,6 +33,7 @@ export function DealPage() {
   const refresh = () => {
     reload();
     timeline.reload();
+    offers.reload();
   };
 
   if (error) return <ErrorState error={error} />;
@@ -37,6 +42,16 @@ export function DealPage() {
   const closed = d.closed_at !== null;
   const editable = d.can_edit && !closed;
   const lostStage = d.stages.find((s) => s.code === 'prehrane');
+  const mainTotal = offers.data?.main?.summary.find((x) => x.year === null) ?? null;
+  const mainYears = offers.data?.main?.summary.filter((x) => x.year !== null).map((x) => x.year).join(' + ');
+  const latest = offers.data?.items[0] ?? null;
+  const newOffer = () =>
+    save.run(async () => {
+      const r = latest
+        ? await send<{ id: string }>('POST', `/api/offers/${latest.id}/new-version`)
+        : await send<{ id: string }>('POST', `/api/deals/${d.id}/offers`);
+      navigate(`/ponuky/${r.id}`);
+    });
   const primary = d.contacts.find((c) => c.is_primary) ?? null;
 
   const totals = d.ooms.reduce(
@@ -56,7 +71,7 @@ export function DealPage() {
     });
   };
   const stageTitle = (s: StageRef): string | undefined =>
-    s.code === 'akceptacia' ? 'Nastaví sa sám pri akceptácii ponuky (fáza F3).'
+    s.code === 'akceptacia' ? 'Nastaví sa sám pri akceptácii ponuky (klik zákazníka alebo ručný záznam – fáza F3).'
       : s.code === 'vyhrane' ? 'Nastaví sa sám pri spárovaní zmluvy z importu (fáza F5).'
         : undefined;
 
@@ -139,7 +154,22 @@ export function DealPage() {
         ) : (
           <Kpi label="Výroba MWh / rok" value={mwh(totals.feed)} sub={`${num(d.ooms.length, 0)} OOM · ${num(totals.kw, 1)} kW`} />
         )}
-        <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad – z ponuky od fázy F2" />
+        {mainTotal ? (
+          <>
+            <Kpi
+              label={`Pridaná hodnota – variant ${offers.data?.main ? String.fromCharCode(64 + offers.data.main.sort_order) : ''}${offers.data?.main?.accepted ? ' (akceptovaný)' : ''}`}
+              value={`${eur(mainTotal.added_value_eur)} €`}
+              sub={`${offers.data?.main?.display_number ?? ''}${mainYears ? ` · ${mainYears}` : ''}`}
+            />
+            <Kpi
+              label={`Odhad provízie (${num(mainTotal.commission_pct, 2)} %)`}
+              value={`${eur(mainTotal.commission_eur)} €`}
+              sub="z pridanej hodnoty variantu"
+            />
+          </>
+        ) : (
+          <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad obchodníka – kým nie je ponuka" />
+        )}
         <Kpi
           label="Ďalší krok"
           value={d.next_step ? date(d.next_step_on) : '–'}
@@ -208,6 +238,49 @@ export function DealPage() {
         </div>
 
         <div className="col-right">
+          <Card
+            flush
+            title="Ponuky"
+            aside={
+              editable && (!latest || latest.state === 'odoslana' || latest.state === 'otvorena' || latest.state === 'zamietnuta' || latest.state === 'vyprsana') ? (
+                <button type="button" className="btn" disabled={save.busy} onClick={newOffer}>
+                  {latest ? '+ Nová verzia' : '+ Nová ponuka'}
+                </button>
+              ) : undefined
+            }
+          >
+            {!offers.data ? null : offers.data.items.length === 0 ? (
+              <Empty>{d.ooms.length === 0 ? 'Pred ponukou pridajte do obchodu aspoň jedno OOM.' : 'Zatiaľ bez ponuky.'}</Empty>
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Číslo</th>
+                    <th>Stav</th>
+                    <th>Platí do</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offers.data.items.map((x) => (
+                    <tr key={x.id} className="clickable" onClick={() => navigate(`/ponuky/${x.id}`)}>
+                      <td>
+                        <Link className="mono" to={`/ponuky/${x.id}`} onClick={(e) => e.stopPropagation()}>
+                          {x.display_number}
+                        </Link>
+                        <div className="sub">
+                          {x.variants} {x.variants === 1 ? 'variant' : x.variants < 5 ? 'varianty' : 'variantov'} · {x.language.toUpperCase()}
+                        </div>
+                      </td>
+                      <td>
+                        <StatusPill map={OFFER_STATE} value={x.state} />
+                      </td>
+                      <td className={x.state === 'nahradena' || x.state === 'vyprsana' ? 'muted' : undefined}>{x.valid_until ? dateTime(x.valid_until) : '–'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
           <Card title="Údaje obchodu">
             <Rows
               rows={[
@@ -246,6 +319,9 @@ export function DealPage() {
   );
 }
 
+const offerNo = (t: TimelineItem) =>
+  t.detail?.number ? `${String(t.detail.number)}${Number(t.detail.version) > 1 ? `/${String(t.detail.version)}` : ''}` : '';
+
 function eventText(t: TimelineItem): string {
   if (t.type === 'poznamka') return 'Poznámka';
   switch (t.kind) {
@@ -260,6 +336,16 @@ function eventText(t: TimelineItem): string {
     case 'kontakt_pridany': return `Kontakt pridaný: ${t.contact_name ?? '–'}`;
     case 'kontakt_odobrany': return `Kontakt odobratý: ${t.contact_name ?? '–'}`;
     case 'zakaznik_vlastnik': return `Zákazník bez vlastníka pridelený: ${t.to_owner ?? '–'}`;
+    case 'ponuka_nova': return `Nová ponuka ${offerNo(t)}`;
+    case 'ponuka_verzia': return `Nová verzia ponuky ${offerNo(t)}${t.detail?.exceptions_carried ? ` · prevzaté výnimky: ${String(t.detail.exceptions_carried)}` : ''}`;
+    case 'ponuka_prepocitana': return `Ponuka ${offerNo(t)} prepočítaná na ceny k ${date(String(t.detail?.priced_on ?? ''))}`;
+    case 'ponuka_odoslana': return `Ponuka ${offerNo(t)} odoslaná · ${SEND_CHANNEL[String(t.detail?.channel ?? '')] ?? ''} · platí do ${dateTime(String(t.detail?.valid_until ?? ''))}`;
+    case 'ponuka_zamietnuta': return `Zákazník ponuku ${offerNo(t)} odmietol`;
+    case 'ponuka_platnost': return `Platnosť ponuky ${offerNo(t)} ${t.detail?.extended ? 'predĺžená' : 'skrátená'} do ${dateTime(String(t.detail?.valid_until ?? ''))}`;
+    case 'ponuka_akceptovana': return `Zákazník akceptoval ponuku ${offerNo(t)}`;
+    case 'ponuka_zablokovana': return `Verzia ${offerNo(t)} zablokovaná – zákazník akceptoval inú verziu`;
+    case 'schvalenie_ziadost': return `Žiadosť o schválenie (${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? ''}) – ponuka ${offerNo(t)}`;
+    case 'schvalenie_rozhodnutie': return `${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? 'Žiadosť'} ${t.detail?.approved ? 'schválená' : 'zamietnutá'} – ponuka ${offerNo(t)}`;
     default: return t.kind ?? '';
   }
 }

@@ -388,15 +388,64 @@ CREATE TYPE public.fve_status AS ENUM (
 
 
 --
+-- Name: offer_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.offer_kind AS ENUM (
+    'dodavka',
+    'vykup',
+    'viwa'
+);
+
+
+--
+-- Name: offer_language; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.offer_language AS ENUM (
+    'sk',
+    'en'
+);
+
+
+--
+-- Name: offer_price_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.offer_price_kind AS ENUM (
+    'fix',
+    'spot',
+    'kombinacia',
+    'cennik',
+    'viwa'
+);
+
+
+--
+-- Name: offer_send_channel; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.offer_send_channel AS ENUM (
+    'email_mimo_crm',
+    'osobne',
+    'ine',
+    'crm'
+);
+
+
+--
 -- Name: offer_status; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.offer_status AS ENUM (
     'koncept',
+    'caka_na_schvalenie',
+    'pripravena',
     'odoslana',
     'otvorena',
-    'prijata',
-    'zamietnuta'
+    'akceptovana',
+    'zamietnuta',
+    'nahradena'
 );
 
 
@@ -870,27 +919,38 @@ CREATE FUNCTION public.approval_cancel(p_id uuid) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
+DECLARE
+  a approval_request;
 BEGIN
   UPDATE approval_request SET status = 'zrusena'
-   WHERE id = p_id AND status = 'caka' AND requested_by = crm_active_user_id();
+   WHERE id = p_id AND status = 'caka' AND requested_by = crm_active_user_id()
+  RETURNING * INTO a;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Zrušiť môžete iba vlastnú čakajúcu žiadosť.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF a.kind IN ('vynimka_ceny', 'rizikovy_zakaznik') THEN
+    UPDATE offer SET status = 'koncept' WHERE status = 'caka_na_schvalenie'
+       AND (id = a.offer_id OR (a.kind = 'rizikovy_zakaznik' AND deal_id = a.deal_id));
   END IF;
 END;
 $$;
 
 
 --
--- Name: approval_decide(uuid, boolean, text); Type: FUNCTION; Schema: public; Owner: -
+-- Name: approval_decide(uuid, boolean, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.approval_decide(p_id uuid, p_approve boolean, p_note text) RETURNS void
+CREATE FUNCTION public.approval_decide(p_id uuid, p_approve boolean, p_note text, p_items jsonb DEFAULT NULL::jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
 DECLARE
   a      approval_request;
+  o      offer;
+  it     approval_price_item;
+  v_val  numeric;
   v_user uuid := crm_active_user_id();
+  v_label text;
 BEGIN
   SELECT * INTO a FROM approval_request WHERE id = p_id FOR UPDATE;
   IF NOT FOUND OR NOT a.org_id = ANY (crm_user_orgs()) THEN
@@ -911,32 +971,100 @@ BEGIN
   IF NOT p_approve AND (p_note IS NULL OR btrim(p_note) = '') THEN
     RAISE EXCEPTION 'Pri zamietnutí zadajte poznámku.' USING ERRCODE = 'check_violation';
   END IF;
-  IF a.kind <> 'pridelenie_firmy' THEN
-    RAISE EXCEPTION 'Tento druh žiadosti sa schvaľuje až s ponukami (F2).' USING ERRCODE = 'feature_not_supported';
-  END IF;
+  SELECT * INTO o FROM offer WHERE id = a.offer_id;
 
   IF p_approve THEN
-    IF (SELECT owner_id FROM company WHERE id = a.company_id) IS DISTINCT FROM a.from_owner_id THEN
-      RAISE EXCEPTION 'Vlastník firmy sa medzitým zmenil – žiadosť zamietnite alebo nech žiadateľ požiada znova.'
-        USING ERRCODE = 'check_violation';
-    END IF;
-    PERFORM set_config('app.owner_assign', 'on', true);
-    UPDATE company SET owner_id = a.requested_by WHERE id = a.company_id;
-    PERFORM set_config('app.owner_assign', '', true);
+    CASE a.kind
+      WHEN 'pridelenie_firmy' THEN
+        IF (SELECT owner_id FROM company WHERE id = a.company_id) IS DISTINCT FROM a.from_owner_id THEN
+          RAISE EXCEPTION 'Vlastník firmy sa medzitým zmenil – žiadosť zamietnite alebo nech žiadateľ požiada znova.'
+            USING ERRCODE = 'check_violation';
+        END IF;
+        PERFORM set_config('app.owner_assign', 'on', true);
+        UPDATE company SET owner_id = a.requested_by WHERE id = a.company_id;
+        PERFORM set_config('app.owner_assign', '', true);
+      WHEN 'vynimka_ceny' THEN
+        FOR it IN SELECT * FROM approval_price_item WHERE approval_id = a.id LOOP
+          v_val := coalesce((SELECT (x->>'approved_value')::numeric FROM jsonb_array_elements(coalesce(p_items, '[]')) x
+                              WHERE (x->>'variant_id')::uuid = it.variant_id AND (x->>'year')::smallint = it.year
+                                AND x->>'price_model' = it.price_model::text AND x->>'voltage_group' = it.voltage_group),
+                            it.requested_value);
+          IF v_val > it.requested_value THEN
+            RAISE EXCEPTION 'Schválená hranica (%) nemôže byť vyššia ako žiadaná cena (%).', v_val, it.requested_value
+              USING ERRCODE = 'check_violation';
+          END IF;
+          UPDATE approval_price_item SET approved_value = v_val
+           WHERE approval_id = it.approval_id AND variant_id = it.variant_id AND year = it.year
+             AND price_model = it.price_model AND voltage_group = it.voltage_group;
+        END LOOP;
+        a.valid_until := now() + interval '3 days';
+      WHEN 'rizikovy_zakaznik' THEN
+        a.valid_until := now() + interval '30 days';
+      WHEN 'predlzenie_platnosti' THEN
+        IF o.status NOT IN ('odoslana', 'otvorena') THEN
+          RAISE EXCEPTION 'Ponuka už nie je odoslaná – predĺženie nemá zmysel.' USING ERRCODE = 'check_violation';
+        END IF;
+        UPDATE offer SET valid_until = a.requested_valid_until WHERE id = o.id;
+        PERFORM deal_event_offer(o, 'ponuka_platnost', jsonb_build_object('valid_until', a.requested_valid_until, 'extended', true));
+    END CASE;
   END IF;
 
   UPDATE approval_request
      SET status = CASE WHEN p_approve THEN 'schvalena' ELSE 'zamietnuta' END::approval_status,
-         decided_by = v_user, decided_at = now(), decision_note = nullif(btrim(p_note), '')
+         decided_by = v_user, decided_at = now(), decision_note = nullif(btrim(p_note), ''),
+         valid_until = CASE WHEN p_approve THEN a.valid_until END
    WHERE id = a.id;
 
-  PERFORM notification_add_deal(ARRAY[a.requested_by], 'schvalenie_rozhodnutie', NULL, a.id, NULL,
-          CASE WHEN p_approve THEN 'Pridelenie firmy schválené' ELSE 'Pridelenie firmy zamietnuté' END);
-  IF p_approve THEN
-    PERFORM notification_add_deal(ARRAY[a.from_owner_id], 'pridelenie_firmy', NULL, a.id, NULL,
-                                  'Firma bola pridelená inému obchodníkovi');
+  v_label := CASE a.kind WHEN 'pridelenie_firmy' THEN 'Pridelenie firmy' WHEN 'vynimka_ceny' THEN 'Výnimka z ceny'
+                         WHEN 'rizikovy_zakaznik' THEN 'Rizikový zákazník' ELSE 'Predĺženie platnosti' END
+             || CASE WHEN p_approve THEN ' schválené' ELSE ' zamietnuté' END
+             || CASE WHEN o.id IS NOT NULL THEN ' – ponuka ' || offer_display_number(o) ELSE '' END;
+  PERFORM notification_add_deal(ARRAY[a.requested_by], 'schvalenie_rozhodnutie', a.deal_id, a.id, NULL, v_label);
+  IF a.kind = 'pridelenie_firmy' AND p_approve THEN
+    PERFORM notification_add_deal(ARRAY[a.from_owner_id], 'pridelenie_firmy', NULL, a.id, NULL, 'Firma bola pridelená inému obchodníkovi');
+  END IF;
+  IF o.id IS NOT NULL THEN
+    PERFORM deal_event_offer(o, 'schvalenie_rozhodnutie',
+      jsonb_build_object('kind', a.kind, 'approval_id', a.id, 'approved', p_approve));
+  END IF;
+
+  -- ponuka čakajúca na schválenie: zamietnutie → koncept, všetko schválené → pripravená
+  IF a.kind IN ('vynimka_ceny', 'rizikovy_zakaznik') THEN
+    IF NOT p_approve THEN
+      UPDATE offer SET status = 'koncept' WHERE status = 'caka_na_schvalenie'
+         AND (id = a.offer_id OR (a.kind = 'rizikovy_zakaznik' AND deal_id = a.deal_id));
+    ELSE
+      PERFORM offer_sync_approvals(x.id) FROM offer x
+        WHERE x.status = 'caka_na_schvalenie' AND (x.id = a.offer_id OR (a.kind = 'rizikovy_zakaznik' AND x.deal_id = a.deal_id));
+    END IF;
   END IF;
 END;
+$$;
+
+
+--
+-- Name: approval_price_detail(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_price_detail(p_id uuid) RETURNS TABLE(variant_id uuid, variant text, year smallint, price_model public.price_model, voltage_group text, requested_value numeric, threshold_value numeric, approved_value numeric, volume_mwh numeric, added_value_requested numeric, portfolio_eur_mwh numeric, margin_requested numeric)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT i.variant_id, chr(64 + v.sort_order) || ' · ' || v.name, i.year, i.price_model, i.voltage_group,
+         i.requested_value,
+         CASE WHEN i.threshold_source = 'odhad_portfolia' AND NOT crm_sees_portfolio() THEN NULL ELSE i.threshold_value END,
+         i.approved_value, i.volume_mwh,
+         round((i.requested_value - coalesce(i.approved_value, i.requested_value)) * coalesce(i.volume_mwh, 0), 2),
+         CASE WHEN crm_can_see_margin() THEN (SELECT value FROM contract_market_value(a.org_id, i.year, crm_today(), 'portfolio')) END,
+         CASE WHEN crm_can_see_margin() AND i.price_model = 'fix' THEN
+           round((i.requested_value - (SELECT value FROM contract_market_value(a.org_id, i.year, crm_today(), 'portfolio')))
+                 * coalesce(i.volume_mwh, 0), 2) END
+    FROM approval_request a
+    JOIN approval_price_item i ON i.approval_id = a.id
+    JOIN offer_variant v ON v.id = i.variant_id AND v.offer_id = a.offer_id   -- bez kópií prenesených do novej verzie
+   WHERE a.id = p_id AND a.org_id = ANY (crm_user_orgs())
+     AND (crm_is_admin() OR a.requested_by = crm_active_user_id() OR crm_approves_prices())
+   ORDER BY v.sort_order, i.year, i.voltage_group
 $$;
 
 
@@ -1007,6 +1135,105 @@ BEGIN
   RETURN approval_request_assign(v_id, p_reason);
 END;
 $_$;
+
+
+--
+-- Name: approval_request_extend(uuid, timestamp with time zone, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_request_extend(p_offer uuid, p_until timestamp with time zone, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o    offer := offer_for_edit(p_offer);
+  v_id uuid;
+BEGIN
+  IF o.status NOT IN ('odoslana', 'otvorena') OR o.valid_until IS NULL THEN
+    RAISE EXCEPTION 'Predĺžiť sa dá platnosť odoslanej ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_until IS NULL OR p_until <= greatest(o.valid_until, now()) THEN
+    RAISE EXCEPTION 'Nová platnosť musí byť neskôr ako doterajšia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN
+    RAISE EXCEPTION 'Zadajte dôvod predĺženia.' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO approval_request (org_id, kind, deal_id, offer_id, company_id, reason, requested_by, requested_valid_until)
+  VALUES (o.org_id, 'predlzenie_platnosti', o.deal_id, o.id, (SELECT company_id FROM deal WHERE id = o.deal_id),
+          btrim(p_reason), crm_active_user_id(), p_until)
+  RETURNING id INTO v_id;
+  PERFORM notification_add_deal(array_remove(notification_approvers(o.org_id, false), crm_active_user_id()),
+                                'schvalenie_nove', o.deal_id, v_id, NULL, 'Predĺženie platnosti – ponuka ' || offer_display_number(o));
+  PERFORM deal_event_offer(o, 'schvalenie_ziadost', jsonb_build_object('kind', 'predlzenie_platnosti', 'approval_id', v_id));
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: approval_request_offer(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_request_offer(p_offer uuid, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o      offer := offer_for_edit(p_offer);
+  d      deal;
+  c      jsonb;
+  n      jsonb;
+  v_id   uuid;
+  v_user uuid := crm_active_user_id();
+  v_appr uuid[];
+BEGIN
+  IF o.status NOT IN ('koncept', 'pripravena') THEN
+    RAISE EXCEPTION 'O schválenie sa žiada pri koncepte ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  c := offer_check_internal(o.id);
+  IF jsonb_array_length(c->'errors') > 0 THEN
+    RAISE EXCEPTION '%', (SELECT string_agg(e, '; ') FROM jsonb_array_elements_text(c->'errors') e) USING ERRCODE = 'check_violation';
+  END IF;
+  IF jsonb_array_length(c->'needs') = 0 AND NOT (c->>'risk_needs_approval')::boolean THEN
+    RETURN offer_prepare(o.id);
+  END IF;
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN
+    RAISE EXCEPTION 'Zadajte dôvod žiadosti o schválenie.' USING ERRCODE = 'check_violation';
+  END IF;
+  v_appr := array_remove(notification_approvers(o.org_id, false), v_user);
+
+  IF jsonb_array_length(c->'needs') > 0 THEN
+    UPDATE approval_request SET status = 'zrusena' WHERE offer_id = o.id AND kind = 'vynimka_ceny' AND status = 'caka';
+    INSERT INTO approval_request (org_id, kind, deal_id, offer_id, company_id, reason, requested_by)
+    VALUES (o.org_id, 'vynimka_ceny', o.deal_id, o.id, d.company_id, btrim(p_reason), v_user)
+    RETURNING id INTO v_id;
+    FOR n IN SELECT * FROM jsonb_array_elements(c->'needs') LOOP
+      INSERT INTO approval_price_item (approval_id, variant_id, year, price_model, voltage_group, requested_value, threshold_value,
+                                       volume_mwh, threshold_source, scope)
+      VALUES (v_id, (n->>'variant_id')::uuid, (n->>'year')::smallint, (n->>'price_model')::price_model, n->>'voltage_group',
+              (n->>'requested_value')::numeric, coalesce((n->>'threshold_value')::numeric, 0), (n->>'volume_mwh')::numeric,
+              n->>'threshold_source', offer_variant_scope((n->>'variant_id')::uuid));
+    END LOOP;
+    PERFORM notification_add_deal(v_appr, 'schvalenie_nove', o.deal_id, v_id, NULL,
+                                  'Výnimka z ceny – ponuka ' || offer_display_number(o));
+    PERFORM deal_event_offer(o, 'schvalenie_ziadost', jsonb_build_object('kind', 'vynimka_ceny', 'approval_id', v_id));
+  END IF;
+
+  IF (c->>'risk_needs_approval')::boolean
+     AND NOT EXISTS (SELECT 1 FROM approval_request WHERE deal_id = o.deal_id AND kind = 'rizikovy_zakaznik' AND status = 'caka') THEN
+    INSERT INTO approval_request (org_id, kind, deal_id, offer_id, company_id, reason, requested_by, risk_snapshot)
+    VALUES (o.org_id, 'rizikovy_zakaznik', o.deal_id, o.id, d.company_id, btrim(p_reason), v_user, company_risk_snapshot(d.company_id))
+    RETURNING id INTO v_id;
+    PERFORM notification_add_deal(v_appr, 'schvalenie_nove', o.deal_id, v_id, NULL,
+                                  'Rizikový zákazník – ponuka ' || offer_display_number(o));
+    PERFORM deal_event_offer(o, 'schvalenie_ziadost', jsonb_build_object('kind', 'rizikovy_zakaznik', 'approval_id', v_id));
+  END IF;
+
+  UPDATE offer SET status = 'caka_na_schvalenie' WHERE id = o.id;
+  RETURN 'caka_na_schvalenie';
+END;
+$$;
 
 
 --
@@ -1173,6 +1400,32 @@ BEGIN
          AND (a.requested_by = crm_active_user_id() OR a.from_owner_id = crm_active_user_id()
               OR (a.kind = 'pridelenie_firmy' AND crm_approves_assignments())
               OR (a.kind <> 'pridelenie_firmy' AND crm_approves_prices()));
+    WHEN 'offer', 'offer_variant', 'offer_item' THEN
+      -- ponuka: podľa obchodu (0036); ceny ponuky neobsahujú hranice ani maržu
+      v_id := CASE p_table
+                WHEN 'offer' THEN coalesce((SELECT deal_id FROM offer WHERE id = p_record), audit_diff_value(p_diff, 'deal_id')::uuid)
+                WHEN 'offer_variant' THEN (SELECT o.deal_id FROM offer o
+                                            WHERE o.id = coalesce((SELECT offer_id FROM offer_variant WHERE id = p_record),
+                                                                  audit_diff_value(p_diff, 'offer_id')::uuid))
+                ELSE (SELECT o.deal_id FROM offer_variant v JOIN offer o ON o.id = v.offer_id
+                       WHERE v.id = coalesce((SELECT variant_id FROM offer_item WHERE id = p_record),
+                                             audit_diff_value(p_diff, 'variant_id')::uuid)) END;
+      SELECT * INTO d FROM deal WHERE id = v_id;
+      RETURN FOUND AND d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id);
+    WHEN 'approval_price_item' THEN
+      -- hranica z odhadu portfólia (FIX manažéra) iba pre crm_sees_portfolio(); neznámy zdroj = skryť (0038)
+      IF NOT crm_sees_portfolio()
+         AND coalesce((SELECT threshold_source FROM approval_price_item WHERE id = p_record),
+                      audit_diff_value(p_diff, 'threshold_source'), 'odhad_portfolia') = 'odhad_portfolia' THEN
+        RETURN false;
+      END IF;
+      RETURN audit_row_visible('approval_request',
+                               coalesce((SELECT approval_id FROM approval_price_item WHERE id = p_record),
+                                        audit_diff_value(p_diff, 'approval_id')::uuid), NULL);
+    WHEN 'user_commission_rate' THEN
+      RETURN crm_approves_prices()
+          OR coalesce((SELECT user_id FROM user_commission_rate WHERE id = p_record),
+                      audit_diff_value(p_diff, 'user_id')::uuid) = crm_active_user_id();
     WHEN 'price_parameter', 'market_price_daily' THEN
       RETURN crm_approves_prices() OR crm_can_see_margin();   -- kto smie čítať cenové parametre a trhové ceny (0023)
     ELSE
@@ -1623,6 +1876,40 @@ $$;
 --
 
 COMMENT ON FUNCTION public.company_risk(p_company_id uuid) IS 'výstrahy Finstatu pre firmu, obchod a ponuku; needs_approval = konkurz/reštrukturalizácia alebo rating E/X (bez osobných údajov)';
+
+
+--
+-- Name: company_risk_snapshot(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_risk_snapshot(p_company uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object(
+           'insolvency_kind', c.insolvency_kind,
+           'payment_rating', c.payment_rating,
+           'debts_count', jsonb_array_length(c.debts),
+           'debts_sum', (SELECT coalesce(sum((x->>'suma_eur')::numeric), 0) FROM jsonb_array_elements(c.debts) x),
+           'has_debts', c.has_debts)
+    FROM company c WHERE c.id = p_company
+$$;
+
+
+--
+-- Name: company_risk_worse(jsonb, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_risk_worse(p_then jsonb, p_now jsonb) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT (p_now->>'insolvency_kind' IS NOT NULL AND p_then->>'insolvency_kind' IS DISTINCT FROM p_now->>'insolvency_kind')
+      OR (p_now->>'payment_rating' IS NOT NULL
+          AND coalesce(p_then->>'payment_rating', 'A') < p_now->>'payment_rating')
+      OR coalesce((p_now->>'debts_count')::int, 0) > coalesce((p_then->>'debts_count')::int, 0)
+      OR coalesce((p_now->>'debts_sum')::numeric, 0) > coalesce((p_then->>'debts_sum')::numeric, 0)
+      OR (coalesce((p_now->>'has_debts')::boolean, false) AND NOT coalesce((p_then->>'has_debts')::boolean, false))
+$$;
 
 
 --
@@ -4878,37 +5165,13 @@ kl AS (
 ),
 calc AS (
   SELECT kl.*,
-         CASE kl.kind
-           WHEN 'fix' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
-           WHEN 'cennik' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
-           WHEN 'energo' THEN kl.vt * kl.v_vt + coalesce(kl.nt, kl.vt) * kl.v_nt
-           WHEN 'spot_plus_eur' THEN kl.ad * kl.vol
-           WHEN 'vykup' THEN CASE kl.price_model WHEN 'spot_minus_eur' THEN kl.ad * kl.vol
-                                                 WHEN 'spot_minus_pct' THEN kl.pct / 100 * (SELECT spot_fve FROM mk) * kl.vol
-                                                 -- výkup s pevnou cenou: nákup = predaj, pridaná hodnota a marža 0 (otázka 33)
-                                                 WHEN 'fix' THEN kl.vt * kl.vol END
-           WHEN 'viwa' THEN (SELECT viwa_additive FROM b) * kl.vol
-         END AS rev,
-         CASE kl.kind
-           WHEN 'fix' THEN coalesce((SELECT exception_value FROM b),
-                                    CASE WHEN (SELECT seller_type FROM b) = 'manazer' THEN (SELECT portfolio_eur_mwh FROM b)
-                                         ELSE (SELECT trader_price FROM b) END)
-           WHEN 'cennik' THEN (SELECT portfolio_eur_mwh FROM b)
-           WHEN 'energo' THEN (SELECT energopomoc_price FROM b)
-           WHEN 'spot_plus_eur' THEN coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b))
-           WHEN 'vykup' THEN CASE WHEN kl.price_model = 'fix' THEN kl.vt
-                                  ELSE coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b)) END
-           WHEN 'viwa' THEN 0
-         END AS unit_cost,
-         CASE kl.kind
-           WHEN 'fix' THEN (SELECT portfolio FROM mk)
-           WHEN 'cennik' THEN (SELECT portfolio FROM mk)
-           WHEN 'energo' THEN (SELECT energopomoc_price FROM b)
-           WHEN 'spot_plus_eur' THEN 0
-           WHEN 'vykup' THEN CASE WHEN kl.price_model = 'fix' THEN kl.vt
-                                  ELSE coalesce((SELECT exception_value FROM b), (SELECT min_additive FROM b)) END
-           WHEN 'viwa' THEN 0
-         END AS unit_mcost
+         pv_revenue(kl.kind, kl.price_model, kl.vt, kl.nt, kl.ad, kl.pct, kl.v_vt, kl.v_nt,
+                    (SELECT spot_fve FROM mk), (SELECT viwa_additive FROM b)) AS rev,
+         pv_unit_cost(kl.kind, kl.price_model, kl.vt, (SELECT seller_type FROM b), (SELECT trader_price FROM b),
+                      (SELECT portfolio_eur_mwh FROM b), (SELECT energopomoc_price FROM b), (SELECT min_additive FROM b),
+                      (SELECT exception_value FROM b)) AS unit_cost,
+         pv_unit_margin_cost(kl.kind, kl.price_model, kl.vt, (SELECT portfolio FROM mk), (SELECT energopomoc_price FROM b),
+                             (SELECT min_additive FROM b), (SELECT exception_value FROM b)) AS unit_mcost
     FROM kl
 ),
 vu AS (   -- VIWA: mesačná platba za účet (bez OOM)
@@ -5530,6 +5793,26 @@ COMMENT ON FUNCTION public.crm_sees_all_contracts() IS 'vidí všetky zmluvy a v
 
 
 --
+-- Name: crm_sees_portfolio(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_sees_portfolio() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_admin() OR crm_can_see_margin()
+      OR coalesce((SELECT u.seller_type = 'manazer' FROM app_user u WHERE u.id = crm_active_user_id()), false)
+$$;
+
+
+--
+-- Name: FUNCTION crm_sees_portfolio(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_sees_portfolio() IS 'odhad nákupnej ceny portfólia (hranica FIX manažéra a cenníka): admin, marža firmy, manažér (0038)';
+
+
+--
 -- Name: crm_session_ok(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -6054,7 +6337,7 @@ BEGIN
               WHERE d.company_id IS NOT DISTINCT FROM p_company_id
                 AND d.person_id IS NOT DISTINCT FROM p_person_id
                 AND NOT s.is_closed
-                AND (f.sent_at IS NOT NULL OR f.status <> 'koncept')) THEN
+                AND f.sent_at IS NOT NULL) THEN   -- 0036: iba odoslaná ponuka (Pripravená ešte nie)
     RETURN 'ponuka';
   END IF;
   IF EXISTS (SELECT 1 FROM deal d
@@ -6280,8 +6563,98 @@ CREATE FUNCTION public.deal_event_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  IF OLD.offer_id IS NOT NULL AND NEW.offer_id IS NULL AND (to_jsonb(NEW) - 'offer_id') = (to_jsonb(OLD) - 'offer_id') THEN
+    RETURN NEW;
+  END IF;
   RAISE EXCEPTION 'Udalosti časovej osi sa nemenia ani nemažú.' USING ERRCODE = 'check_violation';
 END;
+$$;
+
+
+--
+-- Name: offer; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deal_id uuid NOT NULL,
+    version smallint DEFAULT 1 NOT NULL,
+    status public.offer_status DEFAULT 'koncept'::public.offer_status NOT NULL,
+    valid_until timestamp with time zone,
+    sent_at timestamp with time zone,
+    hubspot_quote_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
+    org_id uuid NOT NULL,
+    number text NOT NULL,
+    kind public.offer_kind NOT NULL,
+    language public.offer_language DEFAULT 'sk'::public.offer_language NOT NULL,
+    household boolean DEFAULT false NOT NULL,
+    contact_id uuid,
+    priced_on date DEFAULT public.crm_today() NOT NULL,
+    seller_type public.seller_type,
+    valid_shortened boolean DEFAULT false NOT NULL,
+    sent_by uuid,
+    sent_channel public.offer_send_channel,
+    sent_note text,
+    rejected_at timestamp with time zone,
+    rejected_note text,
+    replaced_by_id uuid,
+    created_by uuid,
+    CONSTRAINT offer_number_check CHECK ((number ~ '^P[0-9]{2}-[0-9]{6}$'::text)),
+    CONSTRAINT offer_sent_channel_check CHECK (((sent_at IS NULL) = (sent_channel IS NULL))),
+    CONSTRAINT offer_sent_check CHECK (((status = ANY (ARRAY['koncept'::public.offer_status, 'caka_na_schvalenie'::public.offer_status, 'pripravena'::public.offer_status])) OR (sent_at IS NOT NULL))),
+    CONSTRAINT offer_version_check CHECK ((version > 0))
+);
+
+
+--
+-- Name: COLUMN offer.valid_until; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.valid_until IS 'koniec platnosti 16:00 Europe/Bratislava – určí sa pri odoslaní';
+
+
+--
+-- Name: COLUMN offer.custom; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
+
+
+--
+-- Name: COLUMN offer.org_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.org_id IS 'preberá sa od dealu';
+
+
+--
+-- Name: COLUMN offer.number; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.number IS 'P26-000123 – rovnaké pre všetky verzie; verzia sa zobrazí ako /2';
+
+
+--
+-- Name: COLUMN offer.priced_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.offer.priced_on IS 'deň snímky cien pre obchodníka a parametrov (vytvorenie verzie alebo prepočet)';
+
+
+--
+-- Name: deal_event_offer(public.offer, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_event_offer(o public.offer, p_kind text, p_detail jsonb DEFAULT '{}'::jsonb) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  INSERT INTO deal_event (deal_id, org_id, kind, user_id, offer_id, detail)
+  VALUES (o.deal_id, o.org_id, p_kind, crm_current_user_id(), o.id,
+          jsonb_build_object('number', o.number, 'version', o.version) || coalesce(p_detail, '{}'))
 $$;
 
 
@@ -6664,6 +7037,20 @@ CREATE FUNCTION public.deal_stage_needs_oom(p_code public.deal_stage_code) RETUR
     LANGUAGE sql IMMUTABLE
     AS $$
   SELECT p_code IN ('cenova_ponuka', 'vyjednavanie', 'akceptacia', 'vyhrane')
+$$;
+
+
+--
+-- Name: doc_number_next(uuid, text, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.doc_number_next(p_org uuid, p_kind text, p_year integer) RETURNS integer
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  INSERT INTO doc_counter (org_id, kind, year, last_value) VALUES (p_org, p_kind, p_year, 1)
+  ON CONFLICT (org_id, kind, year) DO UPDATE SET last_value = doc_counter.last_value + 1
+  RETURNING last_value
 $$;
 
 
@@ -7078,6 +7465,27 @@ $$;
 
 
 --
+-- Name: next_working_day(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.next_working_day(p_org uuid, p_day date) RETURNS date
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v date;
+BEGIN
+  SELECT min(date) INTO v FROM business_calendar
+   WHERE org_id = coalesce(p_org, crm_default_org()) AND date > p_day AND is_working_day;
+  IF v IS NULL THEN
+    RAISE EXCEPTION 'Pracovný kalendár nepokrýva dni po %.', p_day;
+  END IF;
+  RETURN v;
+END;
+$$;
+
+
+--
 -- Name: normalize_phone(text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -7191,6 +7599,1079 @@ BEGIN
   END LOOP;
   RETURN notification_approvers(k.org_id, false);
 END;
+$$;
+
+
+--
+-- Name: offer_accept_apply(uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_accept_apply(p_offer uuid, p_variant uuid, p_accepted_at timestamp with time zone DEFAULT now()) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o       offer;
+  d       deal;
+  x       offer;
+  v_stage uuid;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Ponuka neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id FOR UPDATE;
+  IF o.status NOT IN ('odoslana', 'otvorena') THEN
+    RAISE EXCEPTION 'Akceptovať sa dá iba odoslaná ponuka.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_accepted_at IS NULL OR p_accepted_at < o.sent_at OR p_accepted_at > now() + interval '5 minutes'
+     OR o.valid_until IS NULL OR p_accepted_at >= o.valid_until THEN
+    RAISE EXCEPTION 'Akceptovať sa dá iba v platnosti ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM offer_variant WHERE id = p_variant AND offer_id = o.id) THEN
+    RAISE EXCEPTION 'Variant nepatrí ponuke.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF d.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Obchod je uzavretý.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  UPDATE offer SET status = 'akceptovana' WHERE id = o.id;
+  UPDATE offer SET status = 'nahradena', replaced_by_id = o.id
+   WHERE org_id = o.org_id AND number = o.number AND id <> o.id AND status IN ('odoslana', 'otvorena', 'zamietnuta');
+  -- rozpracovaná nová verzia: späť do konceptu, čakajúce žiadosti zrušené, odoslať sa nedá (offer_check_internal)
+  FOR x IN SELECT * FROM offer WHERE org_id = o.org_id AND number = o.number
+                                 AND status IN ('koncept', 'caka_na_schvalenie', 'pripravena') LOOP
+    UPDATE approval_request SET status = 'zrusena' WHERE status = 'caka' AND offer_id = x.id;
+    UPDATE offer SET status = 'koncept' WHERE id = x.id AND status <> 'koncept';
+    PERFORM notification_add_deal(ARRAY[d.owner_id, x.created_by], 'ponuka_zablokovana', d.id, NULL, NULL,
+      format('Zákazník akceptoval ponuku %s – rozpracovanú verziu %s nemožno odoslať.', offer_display_number(o), offer_display_number(x)));
+    PERFORM deal_event_offer(x, 'ponuka_zablokovana', jsonb_build_object('accepted_offer_id', o.id, 'accepted_version', o.version));
+  END LOOP;
+
+  SELECT s2.id INTO v_stage
+    FROM pipeline_stage s JOIN pipeline_stage s2 ON s2.pipeline_id = d.pipeline_id AND s2.code = 'akceptacia'
+   WHERE s.id = d.stage_id AND s.code IN ('prilezitost', 'cenova_ponuka', 'vyjednavanie');
+  UPDATE deal SET accepted_variant_id = p_variant, stage_id = coalesce(v_stage, stage_id) WHERE id = d.id;
+  PERFORM notification_add_deal(ARRAY[d.owner_id], 'ponuka_akceptovana', d.id, NULL, NULL,
+                                'Zákazník akceptoval ponuku ' || offer_display_number(o));
+  SELECT * INTO o FROM offer WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'ponuka_akceptovana', jsonb_build_object('variant_id', p_variant, 'accepted_at', p_accepted_at));
+END;
+$$;
+
+
+--
+-- Name: offer_back_to_draft(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_back_to_draft(p_offer uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM offer_cancel_pending_approvals(p_offer);
+  UPDATE offer SET status = 'koncept' WHERE id = p_offer AND status IN ('pripravena', 'caka_na_schvalenie');
+END;
+$$;
+
+
+--
+-- Name: offer_basis_fill(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_basis_fill(p_variant uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v  offer_variant;
+  o  offer;
+  d  deal;
+  y  smallint;
+  st seller_type;
+  lz boolean;
+BEGIN
+  SELECT * INTO v FROM offer_variant WHERE id = p_variant;
+  SELECT * INTO o FROM offer WHERE id = v.offer_id;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  st := coalesce(o.seller_type, 'obchodnik');
+  lz := EXISTS (SELECT 1 FROM deal_oom x JOIN oom m ON m.id = x.oom_id WHERE x.deal_id = d.id AND m.source_category = 'lokalny_zdroj');
+  DELETE FROM offer_year_basis b WHERE b.variant_id = v.id AND b.year NOT IN (SELECT DISTINCT year FROM offer_variant_months(v));
+  FOR y IN SELECT DISTINCT year FROM offer_variant_months(v) ORDER BY 1 LOOP
+    INSERT INTO offer_year_basis (variant_id, year, seller_type, trader_price, portfolio_eur_mwh, min_additive,
+                                  energopomoc_price, viwa_additive, computed_on)
+    VALUES (v.id, y, st,
+            trader_price(o.org_id, y, o.priced_on),
+            (SELECT value FROM contract_market_value(o.org_id, y, o.priced_on, 'portfolio')),
+            contract_param(o.org_id,
+              CASE WHEN o.kind = 'vykup' THEN CASE WHEN lz THEN 'min_aditiv_vykup_lz' ELSE 'min_aditiv_vykup' END
+                   WHEN st = 'manazer' THEN 'min_aditiv_manazer' ELSE 'min_aditiv_obchodnik' END, o.priced_on),
+            contract_param(o.org_id, 'nakup_energopomoc', o.priced_on, y),
+            CASE WHEN v.viwa_package IS NOT NULL THEN contract_param(o.org_id, 'viwa_aditiv_' || v.viwa_package, o.priced_on) END,
+            o.priced_on)
+    ON CONFLICT (variant_id, year) DO UPDATE
+       SET seller_type = EXCLUDED.seller_type, trader_price = EXCLUDED.trader_price,
+           portfolio_eur_mwh = EXCLUDED.portfolio_eur_mwh, min_additive = EXCLUDED.min_additive,
+           energopomoc_price = EXCLUDED.energopomoc_price, viwa_additive = EXCLUDED.viwa_additive,
+           computed_on = EXCLUDED.computed_on;
+  END LOOP;
+END;
+$$;
+
+
+--
+-- Name: offer_cancel_pending_approvals(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_cancel_pending_approvals(p_offer uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF crm_active_user_id() IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM offer o JOIN deal d ON d.id = o.deal_id
+        WHERE o.id = p_offer AND crm_deal_editable(d.company_id, d.person_id, d.owner_id)) THEN
+    RAISE EXCEPTION 'Ponuku nemôžete upravovať.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  UPDATE approval_request SET status = 'zrusena'
+   WHERE status = 'caka'
+     AND id IN (SELECT a.approval_id FROM approval_price_item a JOIN offer_variant v ON v.id = a.variant_id WHERE v.offer_id = p_offer);
+END;
+$$;
+
+
+--
+-- Name: offer_check(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_check(p_offer uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE WHEN c IS NULL OR crm_sees_portfolio() THEN c
+              ELSE jsonb_set(c, '{needs}', coalesce(
+                     (SELECT jsonb_agg(CASE WHEN n->>'threshold_source' = 'odhad_portfolia'
+                                            THEN jsonb_set(n, '{threshold_value}', 'null') ELSE n END ORDER BY t.ord)
+                        FROM jsonb_array_elements(c->'needs') WITH ORDINALITY AS t(n, ord)), '[]')) END
+    FROM offer_check_internal(p_offer) AS c
+$$;
+
+
+--
+-- Name: offer_check_internal(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_check_internal(p_offer uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o       offer;
+  d       deal;
+  v       offer_variant;
+  errors  jsonb := '[]';
+  needs   jsonb := '[]';
+  r       record;
+  v_risk  jsonb;
+  v_risk_ok boolean;
+  v_acc   offer;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer;
+  SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  IF NOT FOUND OR NOT (d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id)) THEN
+    RETURN NULL;
+  END IF;
+  -- zákazník akceptoval inú verziu: rozpracovaná verzia sa nedá pripraviť ani odoslať (0038)
+  SELECT * INTO v_acc FROM offer x WHERE x.org_id = o.org_id AND x.number = o.number AND x.id <> o.id AND x.status = 'akceptovana';
+  IF FOUND THEN
+    errors := errors || to_jsonb(format('Zákazník akceptoval ponuku %s – túto verziu nemožno odoslať.', offer_display_number(v_acc)));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM offer_variant WHERE offer_id = o.id) THEN
+    errors := errors || to_jsonb('Ponuka nemá variant.'::text);
+  END IF;
+  FOR v IN SELECT * FROM offer_variant WHERE offer_id = o.id ORDER BY sort_order LOOP
+    FOR r IN SELECT x.year, x.missing, m.eic FROM offer_variant_values(v.id) x LEFT JOIN oom m ON m.id = x.oom_id
+              WHERE x.missing IS NOT NULL ORDER BY x.year, m.eic LOOP
+      errors := errors || to_jsonb(format('Variant %s (%s): %s – OOM %s, rok %s', chr(64 + v.sort_order), v.name, r.missing, r.eic, r.year));
+    END LOOP;
+    FOR r IN SELECT x.year, x.price_model, x.voltage_group,
+                    min(CASE WHEN x.price_model = 'spot_minus_pct' THEN x.additive_pct
+                             WHEN x.price_model IN ('spot_plus_eur', 'spot_minus_eur') THEN x.additive
+                             ELSE least(x.price_vt, coalesce(x.price_nt, x.price_vt)) END) AS requested,
+                    min(b.th) AS threshold, min(b.src) AS source, sum(x.volume_mwh) AS volume
+               FROM offer_variant_values(v.id) x
+               LEFT JOIN LATERAL (SELECT pv_unit_cost(x.kind, x.price_model, x.price_vt, ob.seller_type, ob.trader_price,
+                                                      ob.portfolio_eur_mwh, ob.energopomoc_price, ob.min_additive, NULL) AS th,
+                                         CASE WHEN x.price_model <> 'fix' THEN 'min_aditiv'
+                                              WHEN ob.seller_type = 'manazer' THEN 'odhad_portfolia'
+                                              ELSE 'cena_pre_obchodnika' END AS src
+                                    FROM offer_year_basis ob WHERE ob.variant_id = v.id AND ob.year = x.year) b ON true
+              WHERE x.below
+              GROUP BY 1, 2, 3 ORDER BY 1, 3 LOOP
+      needs := needs || jsonb_build_object('variant_id', v.id, 'variant', chr(64 + v.sort_order), 'year', r.year,
+                                           'price_model', r.price_model, 'voltage_group', r.voltage_group,
+                                           'requested_value', r.requested, 'threshold_value', r.threshold,
+                                           'threshold_source', coalesce(r.source, 'cena_pre_obchodnika'), 'volume_mwh', r.volume);
+    END LOOP;
+  END LOOP;
+  v_risk := CASE WHEN d.company_id IS NOT NULL THEN company_risk(d.company_id) END;
+  -- schválenie rizika platí pre celý obchod 30 dní, kým sa údaje Finstatu nezhoršia (odpoveď 9)
+  v_risk_ok := EXISTS (SELECT 1 FROM approval_request a
+                        WHERE a.deal_id = d.id AND a.kind = 'rizikovy_zakaznik' AND a.status = 'schvalena'
+                          AND (a.valid_until IS NULL OR a.valid_until > now())
+                          AND NOT company_risk_worse(a.risk_snapshot, company_risk_snapshot(d.company_id)));
+  RETURN jsonb_build_object('errors', errors, 'needs', needs,
+                            'risk_needs_approval', coalesce((v_risk->>'needs_approval')::boolean, false) AND NOT v_risk_ok,
+                            'risk', v_risk,
+                            'fix_stale', o.priced_on < crm_today()
+                                         AND EXISTS (SELECT 1 FROM offer_variant x WHERE x.offer_id = o.id AND x.price_kind IN ('fix', 'kombinacia')));
+END;
+$$;
+
+
+--
+-- Name: offer_child_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_child_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_variant uuid;
+  v_offer   uuid;
+  o         offer;
+  v         offer_variant;
+  p         product;
+  v_app     boolean := NOT (crm_internal_call() OR current_user = 'crm_sync');
+BEGIN
+  IF TG_TABLE_NAME = 'offer_variant' THEN
+    v_offer := coalesce(NEW.offer_id, OLD.offer_id);
+  ELSE
+    v_variant := coalesce(NEW.variant_id, OLD.variant_id);
+    SELECT offer_id INTO v_offer FROM offer_variant WHERE id = v_variant;
+  END IF;
+  SELECT * INTO o FROM offer WHERE id = v_offer;
+  IF o.status NOT IN ('koncept', 'pripravena', 'caka_na_schvalenie') AND v_app THEN
+    RAISE EXCEPTION 'Odoslaná ponuka sa nemení – vytvorte novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    IF v_app AND o.status <> 'koncept' THEN
+      PERFORM offer_back_to_draft(o.id);
+    END IF;
+    RETURN OLD;
+  END IF;
+  NEW.org_id := o.org_id;
+
+  IF TG_TABLE_NAME = 'offer_variant' THEN
+    IF NEW.offer_id IS DISTINCT FROM coalesce(OLD.offer_id, NEW.offer_id) THEN
+      RAISE EXCEPTION 'Variant nepatrí inej ponuke.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF (NEW.price_kind = 'viwa') <> (o.kind = 'viwa') THEN
+      RAISE EXCEPTION 'Variant VIWA patrí iba do ponuky VIWA.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSE
+    SELECT * INTO v FROM offer_variant WHERE id = NEW.variant_id;
+    IF NEW.oom_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM deal_oom x WHERE x.deal_id = o.deal_id AND x.oom_id = NEW.oom_id) THEN
+      RAISE EXCEPTION 'OOM nie je na obchode ponuky.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.year IS NOT NULL AND NOT EXISTS (SELECT 1 FROM offer_variant_months(v) m WHERE m.year = NEW.year) THEN
+      RAISE EXCEPTION 'Rok % nie je v období variantu.', NEW.year USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT * INTO p FROM product WHERE id = NEW.product_id;
+    IF v_app THEN
+      IF NEW.price_model = 'cennik' OR (TG_OP = 'UPDATE' AND OLD.price_model = 'cennik') THEN
+        RAISE EXCEPTION 'Ceny z cenníka dopĺňa CRM a obchodník ich nemení.' USING ERRCODE = 'check_violation';
+      END IF;
+      IF o.household AND NEW.slot = 'komodita' AND v.price_kind = 'cennik' THEN
+        RAISE EXCEPTION 'Domácnosť má ceny z cenníka.' USING ERRCODE = 'check_violation';
+      END IF;
+      IF p.status <> 'predava_sa' AND (TG_OP = 'INSERT' OR NEW.product_id <> OLD.product_id) THEN
+        RAISE EXCEPTION 'Produkt % sa už nepredáva.', p.name USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
+    IF NOT NEW.price_model = ANY (p.price_models) THEN
+      RAISE EXCEPTION 'Produkt % nemá cenový model %.', p.name, NEW.price_model USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  IF v_app AND o.status <> 'koncept' THEN
+    PERFORM offer_back_to_draft(o.id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: offer_create(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_create(p_deal uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d       deal;
+  p       pipeline;
+  o       offer;
+  v_kind  offer_kind;
+  v_pk    offer_price_kind;
+  v_from  date;
+  v_year  integer := extract(year FROM crm_today());
+BEGIN
+  SELECT * INTO d FROM deal WHERE id = p_deal FOR UPDATE;
+  IF NOT FOUND OR NOT (d.org_id = ANY (crm_user_orgs()) AND crm_deal_editable(d.company_id, d.person_id, d.owner_id)) THEN
+    RAISE EXCEPTION 'Obchod neexistuje alebo ho nemôžete upravovať.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF d.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Uzavretý obchod nemôže dostať ponuku.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM offer WHERE deal_id = d.id AND status <> 'nahradena') THEN
+    RAISE EXCEPTION 'Obchod už má ponuku – vytvorte jej novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM deal_oom WHERE deal_id = d.id) THEN
+    RAISE EXCEPTION 'Pred ponukou pridajte do obchodu aspoň jedno OOM.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO p FROM pipeline WHERE id = d.pipeline_id;
+  v_kind := CASE p.kind WHEN 'b2b_vykup' THEN 'vykup' WHEN 'green_viwa' THEN 'viwa' ELSE 'dodavka' END;
+  v_pk := CASE WHEN d.person_id IS NOT NULL THEN 'cennik' WHEN v_kind = 'vykup' THEN 'spot' WHEN v_kind = 'viwa' THEN 'viwa' ELSE 'fix' END;
+  v_from := coalesce(d.supply_start, make_date(v_year + 1, 1, 1));
+
+  INSERT INTO offer (deal_id, org_id, number, version, kind, household, status, contact_id, priced_on, seller_type, created_by)
+  VALUES (d.id, d.org_id,
+          'P' || lpad((v_year % 100)::text, 2, '0') || '-' || lpad(doc_number_next(d.org_id, 'ponuka', v_year)::text, 6, '0'),
+          1, v_kind, d.person_id IS NOT NULL, 'koncept',
+          (SELECT contact_id FROM deal_contact WHERE deal_id = d.id AND is_primary),
+          crm_today(),
+          coalesce((SELECT seller_type FROM app_user WHERE id = d.owner_id), 'obchodnik'),
+          crm_current_user_id())
+  RETURNING * INTO o;
+
+  INSERT INTO offer_variant (offer_id, org_id, sort_order, name, price_kind, supply_from, supply_to, viwa_package)
+  VALUES (o.id, o.org_id, 1,
+          offer_variant_default_name(v_pk, v_from, CASE WHEN v_pk = 'fix' THEN make_date(extract(year FROM v_from)::int, 12, 31) END),
+          v_pk, v_from,
+          CASE WHEN v_pk = 'fix' THEN make_date(extract(year FROM v_from)::int, 12, 31) END,
+          CASE WHEN v_pk = 'viwa' THEN 'plus' END);
+  PERFORM deal_event_offer(o, 'ponuka_nova');
+  RETURN o.id;
+END;
+$$;
+
+
+--
+-- Name: offer_default_valid_until(uuid, timestamp with time zone, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_default_valid_until(p_org uuid, p_sent_at timestamp with time zone, p_fix boolean) RETURNS timestamp with time zone
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_day date := (p_sent_at AT TIME ZONE 'Europe/Bratislava')::date;
+  v_end date;
+BEGIN
+  IF p_fix THEN
+    v_end := next_working_day(p_org, v_day);
+  ELSE
+    v_end := v_day + 14;
+    IF NOT coalesce((SELECT is_working_day FROM business_calendar
+                      WHERE org_id = coalesce(p_org, crm_default_org()) AND date = v_end), true) THEN
+      v_end := next_working_day(p_org, v_end);
+    END IF;
+  END IF;
+  RETURN (v_end + time '16:00') AT TIME ZONE 'Europe/Bratislava';
+END;
+$$;
+
+
+--
+-- Name: offer_display_number(public.offer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_display_number(o public.offer) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT o.number || CASE WHEN o.version > 1 THEN '/' || o.version ELSE '' END
+$$;
+
+
+--
+-- Name: offer_fill_price_list(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_fill_price_list(p_variant uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v    offer_variant;
+  o    offer;
+  r    record;
+  n    integer := 0;
+BEGIN
+  SELECT * INTO v FROM offer_variant WHERE id = p_variant;
+  SELECT * INTO o FROM offer WHERE id = v.offer_id;
+  DELETE FROM offer_item WHERE variant_id = v.id AND price_model = 'cennik';
+  FOR r IN
+    SELECT x.oom_id, c.product_id,
+           (SELECT i.id FROM price_list_item i JOIN price_list_version pv ON pv.id = i.version_id
+             WHERE i.product_id = c.product_id AND pv.status = 'schvalena'
+               AND pv.valid_from <= v.supply_from AND (pv.valid_to IS NULL OR pv.valid_to >= v.supply_from)
+             ORDER BY pv.valid_from DESC LIMIT 1) AS item_id,
+           p.category
+      FROM deal_oom x
+      JOIN LATERAL product_candidates(x.oom_id) c ON true
+      JOIN product p ON p.id = c.product_id
+     WHERE x.deal_id = o.deal_id AND (c.rank = 1 OR c.is_addon)
+  LOOP
+    CONTINUE WHEN r.item_id IS NULL;
+    INSERT INTO offer_item (variant_id, oom_id, org_id, year, slot, product_id, price_model, price_list_item_id,
+                            price_vt_eur_mwh, price_nt_eur_mwh, fee_eur_month)
+    SELECT v.id, r.oom_id, v.org_id, NULL,
+           CASE WHEN r.category = 'zem' THEN 'zem' ELSE 'komodita' END,
+           r.product_id, 'cennik', i.id, i.price_vt_eur_mwh, i.price_nt_eur_mwh, coalesce(i.fee_oom_eur_month, i.fee_program_eur_month)
+      FROM price_list_item i WHERE i.id = r.item_id
+    ON CONFLICT ON CONSTRAINT offer_item_key DO NOTHING;
+    n := n + 1;
+  END LOOP;
+  RETURN n;
+END;
+$$;
+
+
+--
+-- Name: offer_for_edit(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_for_edit(p_offer uuid) RETURNS public.offer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer;
+  d deal;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer FOR UPDATE;
+  IF FOUND THEN
+    SELECT * INTO d FROM deal WHERE id = o.deal_id;
+  END IF;
+  IF NOT FOUND OR NOT (d.org_id = ANY (crm_user_orgs()) AND crm_deal_editable(d.company_id, d.person_id, d.owner_id)) THEN
+    RAISE EXCEPTION 'Ponuka neexistuje alebo ju nemôžete upravovať.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN o;
+END;
+$$;
+
+
+--
+-- Name: offer_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF crm_internal_call() OR current_user = 'crm_sync' THEN
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION 'Ponuku zakladá funkcia offer_create.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status <> 'koncept' OR OLD.sent_at IS NOT NULL THEN
+      RAISE EXCEPTION 'Zmazať sa dá iba koncept, ktorý nebol odoslaný.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.status NOT IN ('koncept', 'pripravena', 'caka_na_schvalenie') THEN
+    RAISE EXCEPTION 'Odoslaná ponuka sa nemení – vytvorte novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (NEW.number, NEW.version, NEW.deal_id, NEW.kind, NEW.household, NEW.priced_on, NEW.seller_type, NEW.status,
+      NEW.sent_at, NEW.sent_by, NEW.sent_channel, NEW.valid_until, NEW.replaced_by_id, NEW.org_id)
+     IS DISTINCT FROM
+     (OLD.number, OLD.version, OLD.deal_id, OLD.kind, OLD.household, OLD.priced_on, OLD.seller_type, OLD.status,
+      OLD.sent_at, OLD.sent_by, OLD.sent_channel, OLD.valid_until, OLD.replaced_by_id, OLD.org_id) THEN
+    RAISE EXCEPTION 'Stav, číslo, platnosť a snímku ponuky mení iba CRM (pripraviť, odoslať, nová verzia).'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.status <> 'koncept' THEN
+    NEW.status := 'koncept';   -- úprava pripravenej ponuky ju vráti do konceptu (schválenie treba znova)
+    PERFORM offer_cancel_pending_approvals(OLD.id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: offer_mark_sent(uuid, timestamp with time zone, public.offer_send_channel, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_mark_sent(p_offer uuid, p_sent_at timestamp with time zone, p_channel public.offer_send_channel, p_note text) RETURNS timestamp with time zone
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o       offer := offer_for_edit(p_offer);
+  c       jsonb;
+  v_fix   boolean;
+  v_until timestamptz;
+  v_stage uuid;
+BEGIN
+  IF o.status <> 'pripravena' THEN
+    RAISE EXCEPTION 'Odoslať sa dá iba pripravená ponuka (nie koncept ani ponuka čakajúca na schválenie).' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_sent_at IS NULL OR p_sent_at > now() + interval '5 minutes' OR p_sent_at < o.created_at - interval '1 minute' THEN
+    RAISE EXCEPTION 'Čas odoslania musí byť medzi vytvorením verzie a teraz.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_channel IS NULL THEN
+    RAISE EXCEPTION 'Vyberte, ako bola ponuka odoslaná.' USING ERRCODE = 'check_violation';
+  END IF;
+  c := offer_check(o.id);
+  IF jsonb_array_length(c->'errors') > 0 OR jsonb_array_length(c->'needs') > 0 OR (c->>'risk_needs_approval')::boolean THEN
+    RAISE EXCEPTION 'Ponuka potrebuje opravu alebo schválenie – pripravte ju znova.' USING ERRCODE = 'check_violation';
+  END IF;
+  v_fix := EXISTS (SELECT 1 FROM offer_variant x WHERE x.offer_id = o.id AND x.price_kind IN ('fix', 'kombinacia'));
+  IF v_fix AND o.priced_on < (p_sent_at AT TIME ZONE 'Europe/Bratislava')::date THEN
+    RAISE EXCEPTION 'Ceny pre obchodníka sú z %. FIX ponuku prepočítajte na dnešné ceny.', to_char(o.priced_on, 'DD. MM. YYYY')
+      USING ERRCODE = 'check_violation';
+  END IF;
+  v_until := offer_default_valid_until(o.org_id, p_sent_at, v_fix);
+  UPDATE offer SET status = 'odoslana', sent_at = p_sent_at, sent_by = crm_current_user_id(), sent_channel = p_channel,
+                   sent_note = nullif(btrim(p_note), ''), valid_until = v_until
+   WHERE id = o.id;
+  UPDATE offer SET status = 'nahradena', replaced_by_id = o.id
+   WHERE org_id = o.org_id AND number = o.number AND id <> o.id AND status IN ('odoslana', 'otvorena', 'zamietnuta');
+  -- obchod iba dopredu: z Príležitosti do Cenovej ponuky
+  SELECT s2.id INTO v_stage
+    FROM deal d JOIN pipeline_stage s ON s.id = d.stage_id
+    JOIN pipeline_stage s2 ON s2.pipeline_id = d.pipeline_id AND s2.code = 'cenova_ponuka'
+   WHERE d.id = o.deal_id AND s.code = 'prilezitost';
+  IF v_stage IS NOT NULL THEN
+    UPDATE deal SET stage_id = v_stage WHERE id = o.deal_id;
+  END IF;
+  IF v_stage IS NULL AND crm_setting_on('customer_status_auto') THEN
+    PERFORM customer_refresh((SELECT company_id FROM deal WHERE id = o.deal_id), (SELECT person_id FROM deal WHERE id = o.deal_id));
+  END IF;
+  SELECT * INTO o FROM offer WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'ponuka_odoslana',
+    jsonb_build_object('channel', p_channel, 'sent_at', p_sent_at, 'valid_until', v_until));
+  RETURN v_until;
+END;
+$$;
+
+
+--
+-- Name: offer_new_version(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_new_version(p_offer uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o     offer := offer_for_edit(p_offer);
+  n     offer;
+  v     offer_variant;
+  v_new uuid;
+  v_exc integer := 0;
+  v_cnt integer;
+BEGIN
+  IF o.status IN ('koncept', 'caka_na_schvalenie', 'pripravena') THEN
+    RAISE EXCEPTION 'Rozpracovanú ponuku upravte priamo (alebo prepočítajte na dnešné ceny).' USING ERRCODE = 'check_violation';
+  END IF;
+  IF o.status IN ('akceptovana', 'nahradena') THEN
+    RAISE EXCEPTION 'Z akceptovanej alebo nahradenej verzie sa nová verzia nerobí.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM offer WHERE org_id = o.org_id AND number = o.number
+                                   AND status IN ('koncept', 'caka_na_schvalenie', 'pripravena')) THEN
+    RAISE EXCEPTION 'Rozpracovaná verzia už existuje.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (SELECT closed_at FROM deal WHERE id = o.deal_id) IS NOT NULL THEN
+    RAISE EXCEPTION 'Uzavretý obchod nemôže dostať novú verziu ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO offer (deal_id, org_id, number, version, kind, household, status, language, contact_id, priced_on, seller_type,
+                     custom, created_by)
+  SELECT o.deal_id, o.org_id, o.number, (SELECT max(version) + 1 FROM offer WHERE org_id = o.org_id AND number = o.number),
+         o.kind, o.household, 'koncept', o.language, o.contact_id, crm_today(),
+         coalesce((SELECT u.seller_type FROM deal d JOIN app_user u ON u.id = d.owner_id WHERE d.id = o.deal_id), 'obchodnik'),
+         o.custom, crm_current_user_id()
+  RETURNING * INTO n;
+  FOR v IN SELECT * FROM offer_variant WHERE offer_id = o.id ORDER BY sort_order LOOP
+    INSERT INTO offer_variant (offer_id, org_id, sort_order, name, price_kind, supply_from, supply_to, viwa_package,
+                               flexibility_pct, planned_volume_mwh, invoice_due_days, advance_kind, advance_pct, advance_due_day,
+                               negative_price_compensation)
+    VALUES (n.id, n.org_id, v.sort_order, v.name, v.price_kind, v.supply_from, v.supply_to, v.viwa_package,
+            v.flexibility_pct, v.planned_volume_mwh, v.invoice_due_days, v.advance_kind, v.advance_pct, v.advance_due_day,
+            v.negative_price_compensation)
+    RETURNING id INTO v_new;
+    INSERT INTO offer_item (variant_id, oom_id, org_id, year, slot, product_id, price_model, price_list_item_id,
+                            price_vt_eur_mwh, price_nt_eur_mwh, additive_eur_mwh, additive_pct, fee_eur_month, fee_kw_eur_month)
+    SELECT v_new, i.oom_id, i.org_id, i.year, i.slot, i.product_id, i.price_model, i.price_list_item_id,
+           i.price_vt_eur_mwh, i.price_nt_eur_mwh, i.additive_eur_mwh, i.additive_pct, i.fee_eur_month, i.fee_kw_eur_month
+      FROM offer_item i
+     WHERE i.variant_id = v.id AND i.price_model <> 'cennik'
+       AND (i.oom_id IS NULL OR EXISTS (SELECT 1 FROM deal_oom x WHERE x.deal_id = n.deal_id AND x.oom_id = i.oom_id))
+    ON CONFLICT ON CONSTRAINT offer_item_key DO NOTHING;
+    -- schválená výnimka v 3-dňovej lehote prejde s rozsahom zo žiadosti (0038): platí, kým sa OOM, roky a objemy
+    -- nezmenia; cena pod schválenou hranicou → výpočet „pod hranicou“ → nové schválenie
+    INSERT INTO approval_price_item (approval_id, variant_id, year, price_model, voltage_group, requested_value, threshold_value,
+                                     approved_value, volume_mwh, threshold_source, scope)
+    SELECT a.approval_id, v_new, a.year, a.price_model, a.voltage_group, a.requested_value, a.threshold_value,
+           a.approved_value, a.volume_mwh, a.threshold_source, a.scope
+      FROM approval_price_item a JOIN approval_request r ON r.id = a.approval_id
+     WHERE a.variant_id = v.id AND r.kind = 'vynimka_ceny' AND r.status = 'schvalena' AND a.approved_value IS NOT NULL
+       AND r.valid_until > now();
+    GET DIAGNOSTICS v_cnt = ROW_COUNT;
+    v_exc := v_exc + v_cnt;
+  END LOOP;
+  PERFORM deal_event_offer(n, 'ponuka_verzia', CASE WHEN v_exc > 0 THEN jsonb_build_object('exceptions_carried', v_exc) END);
+  RETURN n.id;
+END;
+$$;
+
+
+--
+-- Name: offer_prepare(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_prepare(p_offer uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+  c jsonb;
+BEGIN
+  IF o.status NOT IN ('koncept', 'pripravena') THEN
+    RAISE EXCEPTION 'Pripraviť sa dá iba koncept.' USING ERRCODE = 'check_violation';
+  END IF;
+  c := offer_check(o.id);
+  IF jsonb_array_length(c->'errors') > 0 THEN
+    RAISE EXCEPTION '%', (SELECT string_agg(e, '; ') FROM jsonb_array_elements_text(c->'errors') e)
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF jsonb_array_length(c->'needs') > 0 OR (c->>'risk_needs_approval')::boolean THEN
+    RAISE EXCEPTION 'Ponuka potrebuje schválenie (cena pod hranicou alebo rizikový zákazník) – požiadajte o schválenie.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer SET status = 'pripravena' WHERE id = o.id;
+  RETURN 'pripravena';
+END;
+$$;
+
+
+--
+-- Name: offer_reject(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_reject(p_offer uuid, p_note text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+BEGIN
+  IF o.status NOT IN ('odoslana', 'otvorena') THEN
+    RAISE EXCEPTION 'Zamietnuť sa dá iba odoslaná ponuka.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer SET status = 'zamietnuta', rejected_at = now(), rejected_note = nullif(btrim(p_note), '') WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'ponuka_zamietnuta', jsonb_build_object('note', nullif(btrim(p_note), '')));
+END;
+$$;
+
+
+--
+-- Name: offer_reprice(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_reprice(p_offer uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+  v uuid;
+BEGIN
+  IF o.status NOT IN ('koncept', 'pripravena', 'caka_na_schvalenie') THEN
+    RAISE EXCEPTION 'Odoslanú ponuku prepočíta nová verzia.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM offer_back_to_draft(o.id);
+  -- vlastné schválené výnimky verzie sa zrušia; prevzaté zo starej verzie sa iba odpoja (stará verzia si ich ponechá)
+  UPDATE approval_request SET status = 'zrusena'
+   WHERE status = 'schvalena' AND kind = 'vynimka_ceny' AND offer_id = o.id;
+  DELETE FROM approval_price_item a
+   USING offer_variant x, approval_request r
+   WHERE x.id = a.variant_id AND x.offer_id = o.id AND r.id = a.approval_id AND r.offer_id IS DISTINCT FROM o.id;
+  UPDATE offer SET priced_on = crm_today(),
+                   seller_type = coalesce((SELECT u.seller_type FROM deal d JOIN app_user u ON u.id = d.owner_id WHERE d.id = o.deal_id), 'obchodnik')
+   WHERE id = o.id;
+  FOR v IN SELECT id FROM offer_variant WHERE offer_id = o.id LOOP
+    PERFORM offer_basis_fill(v);
+    IF (SELECT price_kind FROM offer_variant WHERE id = v) = 'cennik' THEN
+      PERFORM offer_fill_price_list(v);
+    END IF;
+  END LOOP;
+  PERFORM deal_event_offer(o, 'ponuka_prepocitana', jsonb_build_object('priced_on', crm_today()));
+END;
+$$;
+
+
+--
+-- Name: offer_shorten(uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_shorten(p_offer uuid, p_until timestamp with time zone) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer := offer_for_edit(p_offer);
+BEGIN
+  IF o.status NOT IN ('odoslana', 'otvorena') OR o.valid_until IS NULL THEN
+    RAISE EXCEPTION 'Skrátiť sa dá platnosť odoslanej ponuky.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_until IS NULL OR p_until >= o.valid_until OR p_until <= now() THEN
+    RAISE EXCEPTION 'Nová platnosť musí byť skôr ako doterajšia a v budúcnosti. Predĺženie schvaľuje schvaľovateľ cien.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE offer SET valid_until = p_until, valid_shortened = true WHERE id = o.id;
+  PERFORM deal_event_offer(o, 'ponuka_platnost', jsonb_build_object('valid_until', p_until, 'shortened', true));
+END;
+$$;
+
+
+--
+-- Name: offer_state(public.offer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_state(o public.offer) RETURNS text
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT CASE WHEN o.status IN ('odoslana', 'otvorena') AND o.valid_until IS NOT NULL AND now() > o.valid_until
+              THEN 'vyprsana' ELSE o.status::text END
+$$;
+
+
+--
+-- Name: offer_sync_approvals(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_sync_approvals(p_offer uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o offer;
+  c jsonb;
+BEGIN
+  SELECT * INTO o FROM offer WHERE id = p_offer FOR UPDATE;
+  IF NOT FOUND OR o.status <> 'caka_na_schvalenie' THEN
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM approval_request a
+              WHERE a.status = 'caka' AND (a.offer_id = o.id OR (a.kind = 'rizikovy_zakaznik' AND a.deal_id = o.deal_id))) THEN
+    RETURN;   -- ešte niečo čaká
+  END IF;
+  c := offer_check(o.id);
+  UPDATE offer SET status = CASE WHEN jsonb_array_length(c->'errors') = 0 AND jsonb_array_length(c->'needs') = 0
+                                      AND NOT (c->>'risk_needs_approval')::boolean
+                                 THEN 'pripravena' ELSE 'koncept' END::offer_status
+   WHERE id = o.id;
+END;
+$$;
+
+
+--
+-- Name: offer_variant_add(uuid, public.offer_price_kind, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_add(p_offer uuid, p_price_kind public.offer_price_kind, p_copy_from uuid DEFAULT NULL::uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  o      offer := offer_for_edit(p_offer);
+  src    offer_variant;
+  v_id   uuid;
+  v_ord  smallint;
+BEGIN
+  SELECT coalesce(max(sort_order), 0) + 1 INTO v_ord FROM offer_variant WHERE offer_id = o.id;
+  IF v_ord > 5 THEN
+    RAISE EXCEPTION 'Ponuka má najviac 5 variantov.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF o.status NOT IN ('koncept', 'pripravena', 'caka_na_schvalenie') THEN
+    RAISE EXCEPTION 'Odoslaná ponuka sa nemení – vytvorte novú verziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO src FROM offer_variant WHERE id = p_copy_from AND offer_id = o.id;
+  IF NOT FOUND THEN
+    SELECT * INTO src FROM offer_variant WHERE offer_id = o.id ORDER BY sort_order LIMIT 1;
+  END IF;
+  INSERT INTO offer_variant (offer_id, org_id, sort_order, name, price_kind, supply_from, supply_to, viwa_package,
+                             flexibility_pct, planned_volume_mwh, invoice_due_days, advance_kind, advance_pct, advance_due_day,
+                             negative_price_compensation)
+  VALUES (o.id, o.org_id, v_ord,
+          offer_variant_default_name(p_price_kind, src.supply_from, CASE WHEN p_price_kind IN ('fix', 'kombinacia') THEN coalesce(src.supply_to, make_date(extract(year FROM src.supply_from)::int, 12, 31)) ELSE src.supply_to END),
+          p_price_kind, src.supply_from,
+          CASE WHEN p_price_kind IN ('fix', 'kombinacia') THEN coalesce(src.supply_to, make_date(extract(year FROM src.supply_from)::int, 12, 31)) ELSE src.supply_to END,
+          CASE WHEN p_price_kind = 'viwa' THEN coalesce(src.viwa_package, 'plus') END,
+          src.flexibility_pct, src.planned_volume_mwh, src.invoice_due_days, src.advance_kind, src.advance_pct, src.advance_due_day,
+          src.negative_price_compensation)
+  RETURNING id INTO v_id;
+  IF p_copy_from IS NOT NULL THEN
+    INSERT INTO offer_item (variant_id, oom_id, org_id, year, slot, product_id, price_model, price_list_item_id,
+                            price_vt_eur_mwh, price_nt_eur_mwh, additive_eur_mwh, additive_pct, fee_eur_month, fee_kw_eur_month)
+    SELECT v_id, i.oom_id, i.org_id, i.year, i.slot, i.product_id, i.price_model, i.price_list_item_id,
+           i.price_vt_eur_mwh, i.price_nt_eur_mwh, i.additive_eur_mwh, i.additive_pct, i.fee_eur_month, i.fee_kw_eur_month
+      FROM offer_item i WHERE i.variant_id = p_copy_from AND i.price_model <> 'cennik'
+    ON CONFLICT ON CONSTRAINT offer_item_key DO NOTHING;
+  END IF;
+  PERFORM offer_back_to_draft(o.id);
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: offer_variant_after(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_after() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'INSERT' OR (NEW.supply_from, NEW.supply_to, NEW.viwa_package) IS DISTINCT FROM (OLD.supply_from, OLD.supply_to, OLD.viwa_package) THEN
+    PERFORM offer_basis_fill(NEW.id);
+    -- položky rokov mimo nového obdobia sa odstránia
+    DELETE FROM offer_item i WHERE i.variant_id = NEW.id AND i.year IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM offer_variant_months(NEW) m WHERE m.year = i.year);
+    IF NEW.price_kind = 'cennik' THEN
+      PERFORM offer_fill_price_list(NEW.id);
+    END IF;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: offer_variant_default_name(public.offer_price_kind, date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_default_name(p_kind public.offer_price_kind, p_from date, p_to date) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE p_kind WHEN 'fix' THEN 'FIX' WHEN 'spot' THEN 'SPOT + aditív' WHEN 'kombinacia' THEN 'FIX + SPOT'
+                     WHEN 'cennik' THEN 'Cenník' WHEN 'viwa' THEN 'VIWA' END
+         || CASE WHEN p_to IS NULL THEN ''
+                 WHEN extract(year FROM p_from) = extract(year FROM p_to) THEN ' ' || extract(year FROM p_from)
+                 ELSE ' ' || extract(year FROM p_from) || '–' || extract(year FROM p_to) END
+$$;
+
+
+--
+-- Name: offer_variant; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_variant (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    offer_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    sort_order smallint NOT NULL,
+    name text NOT NULL,
+    price_kind public.offer_price_kind NOT NULL,
+    supply_from date NOT NULL,
+    supply_to date,
+    viwa_package text,
+    flexibility_pct numeric(5,2),
+    planned_volume_mwh numeric(12,3),
+    invoice_due_days smallint DEFAULT 14 NOT NULL,
+    advance_kind text DEFAULT 'mesacne'::text NOT NULL,
+    advance_pct numeric(5,2) DEFAULT 100,
+    advance_due_day smallint DEFAULT 5,
+    negative_price_compensation boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT offer_variant_advance_due_day_check CHECK (((advance_due_day >= 1) AND (advance_due_day <= 31))),
+    CONSTRAINT offer_variant_advance_kind_check CHECK ((advance_kind = ANY (ARRAY['mesacne'::text, 'financna_zabezpeka'::text]))),
+    CONSTRAINT offer_variant_advance_pct_check CHECK (((advance_pct >= (0)::numeric) AND (advance_pct <= (100)::numeric))),
+    CONSTRAINT offer_variant_check CHECK (((supply_to IS NULL) OR (supply_to >= supply_from))),
+    CONSTRAINT offer_variant_check1 CHECK (((supply_to IS NOT NULL) OR (price_kind = ANY (ARRAY['spot'::public.offer_price_kind, 'viwa'::public.offer_price_kind, 'cennik'::public.offer_price_kind])))),
+    CONSTRAINT offer_variant_check2 CHECK (((price_kind = 'viwa'::public.offer_price_kind) = (viwa_package IS NOT NULL))),
+    CONSTRAINT offer_variant_flexibility_pct_check CHECK (((flexibility_pct > (0)::numeric) AND (flexibility_pct <= (100)::numeric))),
+    CONSTRAINT offer_variant_invoice_due_days_check CHECK (((invoice_due_days >= 1) AND (invoice_due_days <= 120))),
+    CONSTRAINT offer_variant_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT offer_variant_planned_volume_mwh_check CHECK ((planned_volume_mwh >= (0)::numeric)),
+    CONSTRAINT offer_variant_sort_order_check CHECK (((sort_order >= 1) AND (sort_order <= 5))),
+    CONSTRAINT offer_variant_viwa_package_check CHECK ((viwa_package = ANY (ARRAY['basic'::text, 'plus'::text, 'pro'::text])))
+);
+
+
+--
+-- Name: TABLE offer_variant; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_variant IS 'variant ponuky (A–E); zákazník prijme jeden';
+
+
+--
+-- Name: offer_variant_months(public.offer_variant); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_months(v public.offer_variant) RETURNS TABLE(m_start date, year smallint)
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT g::date, extract(year FROM g)::smallint
+    FROM generate_series(date_trunc('month', v.supply_from),
+                         date_trunc('month', coalesce(v.supply_to, (v.supply_from + interval '11 months')::date)),
+                         interval '1 month') g
+$$;
+
+
+--
+-- Name: offer_variant_scope(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_scope(p_variant uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object(
+           'supply_from', v.supply_from, 'supply_to', v.supply_to, 'planned_volume_mwh', v.planned_volume_mwh,
+           'oom', (SELECT coalesce(jsonb_agg(jsonb_build_array(x.oom_id, oom_voltage_group(m.voltage_level),
+                                                               x.planned_vt_mwh, x.planned_nt_mwh, x.planned_feed_in_mwh,
+                                                               coalesce(x.source_power_kw, m.source_power_kw))
+                                             ORDER BY x.oom_id), '[]')
+                     FROM deal_oom x JOIN oom m ON m.id = x.oom_id
+                    WHERE x.deal_id = o.deal_id))
+    FROM offer_variant v JOIN offer o ON o.id = v.offer_id
+   WHERE v.id = p_variant
+$$;
+
+
+--
+-- Name: offer_variant_summary(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_summary(p_variant uuid) RETURNS TABLE(year smallint, volume_mwh numeric, added_value_eur numeric, margin_eur numeric, commission_eur numeric, commission_pct numeric, below boolean, missing integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  WITH x AS (SELECT * FROM offer_variant_values(p_variant)),
+       pct AS (SELECT user_commission_pct(d.owner_id) AS p
+                 FROM offer_variant v JOIN offer o ON o.id = v.offer_id JOIN deal d ON d.id = o.deal_id
+                WHERE v.id = p_variant)
+  SELECT x.year, sum(x.volume_mwh), sum(x.added_value_eur), sum(x.margin_eur),
+         round(greatest(sum(x.added_value_eur), 0) * (SELECT p FROM pct) / 100, 2), (SELECT p FROM pct),
+         bool_or(x.below), count(*) FILTER (WHERE x.missing IS NOT NULL)::int
+    FROM x GROUP BY ROLLUP (x.year)
+   ORDER BY x.year NULLS LAST
+$$;
+
+
+--
+-- Name: offer_variant_values(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.offer_variant_values(p_variant uuid) RETURNS TABLE(oom_id uuid, year smallint, voltage_group text, item_id uuid, price_model public.price_model, kind text, price_vt numeric, price_nt numeric, additive numeric, additive_pct numeric, months integer, volume_mwh numeric, revenue_eur numeric, threshold numeric, threshold_source text, exception_value numeric, added_value_eur numeric, fees_eur numeric, margin_eur numeric, below boolean, missing text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+WITH v AS (
+  SELECT v.*, o.kind AS okind, o.household, o.org_id AS oorg, o.sent_at AS osent, d.id AS deal_id, crm_can_see_margin() AS see_margin,
+         crm_sees_portfolio() AS see_portfolio
+    FROM offer_variant v JOIN offer o ON o.id = v.offer_id JOIN deal d ON d.id = o.deal_id
+   WHERE v.id = p_variant
+     AND d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id)
+),
+sc AS (SELECT offer_variant_scope(p_variant) AS scope WHERE EXISTS (SELECT 1 FROM v)),
+mo AS (SELECT m.m_start, m.year FROM offer_variant ov, offer_variant_months(ov) m
+        WHERE ov.id = p_variant AND EXISTS (SELECT 1 FROM v)),
+dm AS (
+  SELECT x.oom_id, oom_voltage_group(o.voltage_level) AS vg, o.price_regulation AS reg,
+         coalesce(x.planned_vt_mwh, 0) AS vt_y, coalesce(x.planned_nt_mwh, 0) AS nt_y,
+         coalesce(x.planned_feed_in_mwh, x.source_power_kw * 4 * 365 * 0.1 / 1000, 0) AS feed_y,
+         coalesce(x.source_power_kw, o.source_power_kw, 0) AS kw
+    FROM v JOIN deal_oom x ON x.deal_id = v.deal_id JOIN oom o ON o.id = x.oom_id
+),
+oy AS (   -- OOM × rok: mesiace a objemy
+  SELECT dm.oom_id, dm.vg, dm.reg, dm.kw, mo.year, count(*)::int AS months,
+         CASE WHEN (SELECT okind FROM v) IN ('vykup', 'viwa') THEN dm.feed_y ELSE dm.vt_y END * count(*) / 12 AS v_vt,
+         CASE WHEN (SELECT okind FROM v) IN ('vykup', 'viwa') THEN 0 ELSE dm.nt_y END * count(*) / 12 AS v_nt
+    FROM dm CROSS JOIN mo
+   GROUP BY dm.oom_id, dm.vg, dm.reg, dm.kw, dm.feed_y, dm.vt_y, dm.nt_y, mo.year
+),
+it AS (
+  SELECT oy.*, i.id AS item_id, i.price_model, i.price_vt_eur_mwh AS vt, i.price_nt_eur_mwh AS nt,
+         i.additive_eur_mwh AS ad, i.additive_pct AS pct,
+         CASE WHEN (SELECT okind FROM v) = 'viwa' THEN 'viwa'
+              WHEN (SELECT okind FROM v) = 'vykup' THEN CASE WHEN i.price_model IS NOT NULL THEN 'vykup' END
+              WHEN i.price_model = 'cennik' AND (SELECT household FROM v) AND oy.reg THEN 'energo'
+              WHEN i.price_model IN ('fix', 'cennik', 'spot_plus_eur') THEN i.price_model::text END AS kind
+    FROM oy
+    LEFT JOIN LATERAL (SELECT * FROM offer_item i
+                        WHERE i.variant_id = p_variant AND i.oom_id = oy.oom_id AND i.slot = 'komodita'
+                          AND (i.year = oy.year OR i.year IS NULL)
+                        ORDER BY i.year NULLS LAST LIMIT 1) i ON true
+),
+ex AS (   -- schválená výnimka pre rok, model a napäťovú skupinu (0037), pri nezmenenom rozsahu variantu (0038)
+  SELECT a.year, a.price_model, a.voltage_group, min(a.approved_value) AS value
+    FROM approval_price_item a JOIN approval_request r ON r.id = a.approval_id
+   WHERE a.variant_id = p_variant AND r.status = 'schvalena' AND a.approved_value IS NOT NULL
+     -- neodoslaná verzia: rozsah variantu (OOM, roky, objemy) ako pri žiadosti; odoslaná si výnimku ponechá
+     AND ((SELECT osent FROM v) IS NOT NULL OR a.scope = (SELECT scope FROM sc))
+     -- výnimka platí 3 dni na odoslanie; odoslaná ponuka si ju ponechá
+     AND CASE WHEN (SELECT osent FROM v) IS NULL THEN r.valid_until IS NULL OR r.valid_until > now()
+              ELSE r.valid_until IS NULL OR (SELECT osent FROM v) <= r.valid_until END
+   GROUP BY 1, 2, 3
+),
+calc AS (
+  SELECT it.*, b.seller_type, b.trader_price, b.portfolio_eur_mwh AS portfolio_b, b.min_additive, b.energopomoc_price,
+         b.viwa_additive,
+         (SELECT e.value FROM ex e WHERE e.year = it.year AND e.price_model = it.price_model
+                                    AND e.voltage_group IN (it.vg, 'vsetko') ORDER BY e.value LIMIT 1) AS exc,
+         (SELECT value FROM contract_market_value((SELECT oorg FROM v), it.year, crm_today(), 'portfolio')) AS portfolio_today,
+         (SELECT value FROM contract_market_value((SELECT oorg FROM v), it.year, crm_today(), 'spot_fve')) AS spot_fve,
+         (SELECT coalesce(sum((coalesce(f.fee_eur_month, 0) + coalesce(f.fee_kw_eur_month, 0) * it.kw) * it.months), 0)
+            FROM offer_item f
+           WHERE f.variant_id = p_variant AND f.oom_id = it.oom_id AND f.slot <> 'komodita'
+             AND (f.year = it.year OR f.year IS NULL)) AS fees
+    FROM it
+    LEFT JOIN offer_year_basis b ON b.variant_id = p_variant AND b.year = it.year
+),
+val AS (
+  SELECT calc.*,
+         pv_revenue(kind, price_model, vt, nt, ad, pct, v_vt, v_nt, spot_fve, viwa_additive) AS rev,
+         pv_unit_cost(kind, price_model, vt, seller_type, trader_price, portfolio_b, energopomoc_price, min_additive, exc) AS ucost,
+         pv_unit_margin_cost(kind, price_model, vt, portfolio_today, energopomoc_price, min_additive, exc) AS mcost,
+         CASE WHEN exc IS NOT NULL AND kind IN ('fix', 'spot_plus_eur', 'vykup') THEN 'vynimka'
+              WHEN kind = 'fix' THEN CASE WHEN seller_type = 'manazer' THEN 'odhad_portfolia' ELSE 'cena_pre_obchodnika' END
+              WHEN kind IN ('spot_plus_eur', 'vykup') THEN CASE WHEN price_model = 'fix' THEN 'cena_vykupu' ELSE 'min_aditiv' END
+              WHEN kind = 'cennik' THEN 'odhad_portfolia'
+              WHEN kind = 'energo' THEN 'energopomoc'
+              WHEN kind = 'viwa' THEN 'viwa' END AS src
+    FROM calc
+)
+SELECT oom_id, year, vg, item_id, price_model, kind, vt, nt, ad, pct, months,
+       round(v_vt + v_nt, 3),
+       round(rev, 2),
+       CASE WHEN src = 'odhad_portfolia' AND NOT (SELECT see_portfolio FROM v) THEN NULL ELSE ucost END,
+       src,
+       exc,
+       round(rev - ucost * (v_vt + v_nt), 2),
+       round(fees, 2),
+       CASE WHEN (SELECT see_margin FROM v) THEN round(rev + fees - mcost * (v_vt + v_nt), 2) END,
+       coalesce(kind IN ('fix', 'spot_plus_eur', 'vykup') AND price_model <> 'cennik'
+                AND rev - ucost * (v_vt + v_nt) < 0, false),
+       CASE WHEN item_id IS NULL THEN 'chýba cena'
+            WHEN kind = 'fix' AND ucost IS NULL THEN 'chýba cena pre obchodníka'
+            WHEN kind IN ('spot_plus_eur', 'vykup') AND ucost IS NULL THEN 'chýba minimálny aditív'
+            WHEN kind = 'viwa' AND viwa_additive IS NULL THEN 'chýba balík VIWA'
+            WHEN kind = 'vykup' AND price_model = 'spot_minus_pct' AND spot_fve IS NULL THEN 'chýba očakávaná cena SPOT pre FVE' END
+  FROM val
+ ORDER BY year, vg, oom_id
 $$;
 
 
@@ -8833,6 +10314,17 @@ $$;
 
 
 --
+-- Name: oom_voltage_group(public.voltage_level); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_voltage_group(p_level public.voltage_level) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN p_level IN ('vn', 'vvn') THEN 'vn' ELSE 'nn' END
+$$;
+
+
+--
 -- Name: org_bank_account_normalize(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -9693,6 +11185,63 @@ $$;
 
 
 --
+-- Name: pv_revenue(text, public.price_model, numeric, numeric, numeric, numeric, numeric, numeric, numeric, numeric); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pv_revenue(p_kind text, p_model public.price_model, p_vt numeric, p_nt numeric, p_ad numeric, p_pct numeric, p_v_vt numeric, p_v_nt numeric, p_spot_fve numeric, p_viwa_additive numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE p_kind
+           WHEN 'fix' THEN p_vt * p_v_vt + coalesce(p_nt, p_vt) * p_v_nt
+           WHEN 'cennik' THEN p_vt * p_v_vt + coalesce(p_nt, p_vt) * p_v_nt
+           WHEN 'energo' THEN p_vt * p_v_vt + coalesce(p_nt, p_vt) * p_v_nt
+           WHEN 'spot_plus_eur' THEN p_ad * (p_v_vt + p_v_nt)
+           WHEN 'vykup' THEN CASE p_model WHEN 'spot_minus_eur' THEN p_ad * (p_v_vt + p_v_nt)
+                                          WHEN 'spot_minus_pct' THEN p_pct / 100 * p_spot_fve * (p_v_vt + p_v_nt)
+                                          -- výkup s pevnou cenou: nákup = predaj, pridaná hodnota a marža 0 (otázka 33)
+                                          WHEN 'fix' THEN p_vt * (p_v_vt + p_v_nt) END
+           WHEN 'viwa' THEN p_viwa_additive * (p_v_vt + p_v_nt)
+         END
+$$;
+
+
+--
+-- Name: pv_unit_cost(text, public.price_model, numeric, public.seller_type, numeric, numeric, numeric, numeric, numeric); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pv_unit_cost(p_kind text, p_model public.price_model, p_vt numeric, p_seller public.seller_type, p_trader numeric, p_portfolio numeric, p_energopomoc numeric, p_min_additive numeric, p_exception numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE p_kind
+           WHEN 'fix' THEN coalesce(p_exception, CASE WHEN p_seller = 'manazer' THEN p_portfolio ELSE p_trader END)
+           WHEN 'cennik' THEN p_portfolio
+           WHEN 'energo' THEN p_energopomoc
+           WHEN 'spot_plus_eur' THEN coalesce(p_exception, p_min_additive)
+           WHEN 'vykup' THEN CASE WHEN p_model = 'fix' THEN p_vt ELSE coalesce(p_exception, p_min_additive) END
+           WHEN 'viwa' THEN 0
+         END
+$$;
+
+
+--
+-- Name: pv_unit_margin_cost(text, public.price_model, numeric, numeric, numeric, numeric, numeric); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pv_unit_margin_cost(p_kind text, p_model public.price_model, p_vt numeric, p_portfolio_today numeric, p_energopomoc numeric, p_min_additive numeric, p_exception numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE p_kind
+           WHEN 'fix' THEN p_portfolio_today
+           WHEN 'cennik' THEN p_portfolio_today
+           WHEN 'energo' THEN p_energopomoc
+           WHEN 'spot_plus_eur' THEN 0
+           WHEN 'vykup' THEN CASE WHEN p_model = 'fix' THEN p_vt ELSE coalesce(p_exception, p_min_additive) END
+           WHEN 'viwa' THEN 0
+         END
+$$;
+
+
+--
 -- Name: record_org_fill(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -9918,6 +11467,66 @@ COMMENT ON FUNCTION public.trader_price(p_org uuid, p_year smallint, p_on date) 
 
 
 --
+-- Name: user_commission_pct(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_commission_pct(p_user uuid, p_on date DEFAULT public.crm_today()) RETURNS numeric
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce((SELECT r.pct FROM user_commission_rate r
+                    WHERE r.user_id = p_user AND r.valid_from <= p_on ORDER BY r.valid_from DESC LIMIT 1),
+                  (SELECT (value #>> '{}')::numeric FROM app_setting WHERE key = 'commission_pct_default'), 40)
+$$;
+
+
+--
+-- Name: user_commission_rate_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_commission_rate_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF crm_owner_session() OR crm_internal_call() THEN
+    RETURN coalesce(NEW, OLD);
+  END IF;
+  IF NOT (crm_is_admin() OR crm_approves_prices()) THEN
+    RAISE EXCEPTION 'Percento provízie mení admin alebo obchodný riaditeľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'Percento sa nemení – zadajte nové s dátumom „platí od“.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.valid_from <= crm_today() THEN
+      RAISE EXCEPTION 'Zmazať sa dá iba percento s budúcim dátumom.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF NEW.valid_from < crm_today() THEN
+    RAISE EXCEPTION 'Percento platí od dnes alebo neskôr.' USING ERRCODE = 'check_violation';
+  END IF;
+  NEW.changed_by := crm_active_user_id();
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: working_days_before(uuid, date, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.working_days_before(p_org uuid, p_day date, p_n integer) RETURNS date
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT date FROM business_calendar
+   WHERE org_id = coalesce(p_org, crm_default_org()) AND date < p_day AND is_working_day
+   ORDER BY date DESC OFFSET greatest(p_n, 1) - 1 LIMIT 1
+$$;
+
+
+--
 -- Name: activity; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -10061,6 +11670,42 @@ COMMENT ON TABLE public.app_user_org IS 'prístup používateľa k spoločnostia
 
 
 --
+-- Name: approval_price_item; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.approval_price_item (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    approval_id uuid NOT NULL,
+    variant_id uuid NOT NULL,
+    year smallint NOT NULL,
+    price_model public.price_model NOT NULL,
+    voltage_group text NOT NULL,
+    requested_value numeric(12,4) NOT NULL,
+    threshold_value numeric(12,4) NOT NULL,
+    approved_value numeric(12,4),
+    volume_mwh numeric(12,3),
+    threshold_source text NOT NULL,
+    scope jsonb NOT NULL,
+    CONSTRAINT approval_price_item_threshold_source_check CHECK ((threshold_source = ANY (ARRAY['cena_pre_obchodnika'::text, 'odhad_portfolia'::text, 'min_aditiv'::text]))),
+    CONSTRAINT approval_price_item_voltage_group_check CHECK ((voltage_group = ANY (ARRAY['nn'::text, 'vn'::text, 'vsetko'::text])))
+);
+
+
+--
+-- Name: COLUMN approval_price_item.threshold_source; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.approval_price_item.threshold_source IS 'odkiaľ je hranica; odhad portfólia vidí iba crm_sees_portfolio() (0038)';
+
+
+--
+-- Name: COLUMN approval_price_item.scope; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.approval_price_item.scope IS 'rozsah variantu pri žiadosti (offer_variant_scope) – výnimka platí, kým sa nezmení (0038)';
+
+
+--
 -- Name: approval_request; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -10079,8 +11724,19 @@ CREATE TABLE public.approval_request (
     decision_note text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    offer_id uuid,
+    valid_until timestamp with time zone,
+    requested_valid_until timestamp with time zone,
+    risk_snapshot jsonb,
     CONSTRAINT approval_request_assign_check CHECK (((kind <> 'pridelenie_firmy'::public.approval_kind) OR ((company_id IS NOT NULL) AND (from_owner_id IS NOT NULL)))),
     CONSTRAINT approval_request_decided_check CHECK (((status = ANY (ARRAY['schvalena'::public.approval_status, 'zamietnuta'::public.approval_status])) = (decided_at IS NOT NULL))),
+    CONSTRAINT approval_request_offer_check CHECK (
+CASE kind
+    WHEN 'vynimka_ceny'::public.approval_kind THEN ((offer_id IS NOT NULL) AND (deal_id IS NOT NULL))
+    WHEN 'predlzenie_platnosti'::public.approval_kind THEN ((offer_id IS NOT NULL) AND (deal_id IS NOT NULL) AND (requested_valid_until IS NOT NULL))
+    WHEN 'rizikovy_zakaznik'::public.approval_kind THEN ((deal_id IS NOT NULL) AND (company_id IS NOT NULL) AND (risk_snapshot IS NOT NULL))
+    ELSE true
+END),
     CONSTRAINT approval_request_reason_check CHECK ((btrim(reason) <> ''::text)),
     CONSTRAINT approval_request_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by)))
 );
@@ -10091,6 +11747,13 @@ CREATE TABLE public.approval_request (
 --
 
 COMMENT ON TABLE public.approval_request IS 'schvaľovanie: výnimka z ceny, rizikový zákazník, predĺženie platnosti, pridelenie firmy (obrazovka 39)';
+
+
+--
+-- Name: COLUMN approval_request.valid_until; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.approval_request.valid_until IS 'výnimka z ceny platí 3 dni na odoslanie, schválenie rizika 30 dní (časť 1.8, odpoveď 9)';
 
 
 --
@@ -11110,6 +12773,7 @@ CREATE TABLE public.deal (
     estimated_value_eur numeric(12,2),
     stage_changed_at timestamp with time zone DEFAULT now() NOT NULL,
     note text,
+    accepted_variant_id uuid,
     CONSTRAINT deal_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
     CONSTRAINT deal_estimated_value_check CHECK ((estimated_value_eur >= (0)::numeric)),
     CONSTRAINT deal_lost_note_check CHECK (((lost_note IS NULL) OR (btrim(lost_note) <> ''::text))),
@@ -11182,6 +12846,13 @@ COMMENT ON COLUMN public.deal.estimated_value_eur IS 'odhad pridanej hodnoty pre
 
 
 --
+-- Name: COLUMN deal.accepted_variant_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.accepted_variant_id IS 'akceptovaný variant ponuky (nastaví akceptácia, F3)';
+
+
+--
 -- Name: deal_event; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -11198,7 +12869,8 @@ CREATE TABLE public.deal_event (
     contact_id uuid,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
     reason text,
-    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text])))
+    offer_id uuid,
+    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text, 'ponuka_nova'::text, 'ponuka_verzia'::text, 'ponuka_prepocitana'::text, 'ponuka_odoslana'::text, 'ponuka_zamietnuta'::text, 'ponuka_platnost'::text, 'schvalenie_ziadost'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text])))
 );
 
 
@@ -11207,6 +12879,27 @@ CREATE TABLE public.deal_event (
 --
 
 COMMENT ON TABLE public.deal_event IS 'časová os obchodu: udalosti, ktoré nie sú poznámka ani e-mail; zapisujú ich iba spúšťače, nemení sa';
+
+
+--
+-- Name: doc_counter; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.doc_counter (
+    org_id uuid NOT NULL,
+    kind text NOT NULL,
+    year smallint NOT NULL,
+    last_value integer DEFAULT 0 NOT NULL,
+    CONSTRAINT doc_counter_kind_check CHECK ((kind = ANY (ARRAY['ponuka'::text, 'provizny_list'::text]))),
+    CONSTRAINT doc_counter_last_value_check CHECK ((last_value >= 0))
+);
+
+
+--
+-- Name: TABLE doc_counter; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.doc_counter IS 'počítadlá čísel dokladov po spoločnosti, druhu a roku (od 1 každý rok)';
 
 
 --
@@ -11565,7 +13258,7 @@ CREATE TABLE public.notification (
     read_at timestamp with time zone,
     deal_id uuid,
     approval_id uuid,
-    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text])))
+    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text])))
 );
 
 
@@ -11584,56 +13277,63 @@ COMMENT ON COLUMN public.notification.ref_date IS 'konci_4_mesiace, sprolongovan
 
 
 --
--- Name: offer; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.offer (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    deal_id uuid NOT NULL,
-    version integer DEFAULT 1 NOT NULL,
-    status public.offer_status DEFAULT 'koncept'::public.offer_status NOT NULL,
-    valid_until date,
-    total_eur numeric(12,2),
-    pdf_url text,
-    sent_at timestamp with time zone,
-    opened_at timestamp with time zone,
-    hubspot_quote_id text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    custom jsonb DEFAULT '{}'::jsonb NOT NULL,
-    org_id uuid NOT NULL,
-    CONSTRAINT offer_version_check CHECK ((version > 0))
-);
-
-
---
--- Name: COLUMN offer.custom; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.offer.custom IS 'vlastné polia z Nastavení: {kľúč poľa: hodnota}';
-
-
---
--- Name: COLUMN offer.org_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.offer.org_id IS 'preberá sa od dealu';
-
-
---
 -- Name: offer_item; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.offer_item (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    offer_id uuid NOT NULL,
+    variant_id uuid NOT NULL,
     oom_id uuid,
-    product_id uuid,
-    price_eur_mwh numeric(12,4),
-    volume_mwh numeric(12,3),
-    fee_eur_month numeric(12,2),
+    org_id uuid NOT NULL,
+    year smallint,
+    slot text NOT NULL,
+    product_id uuid NOT NULL,
+    price_model public.price_model NOT NULL,
+    price_list_item_id uuid,
+    price_vt_eur_mwh numeric(12,4),
+    price_nt_eur_mwh numeric(12,4),
+    additive_eur_mwh numeric(12,4),
+    additive_pct numeric(7,4),
+    fee_eur_month numeric(12,4),
+    fee_kw_eur_month numeric(12,4),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT offer_item_check CHECK (((oom_id IS NULL) = (slot = 'viwa_ucet'::text))),
+    CONSTRAINT offer_item_check1 CHECK (((price_model = 'cennik'::public.price_model) = (price_list_item_id IS NOT NULL))),
+    CONSTRAINT offer_item_check2 CHECK (
+CASE price_model
+    WHEN 'fix'::public.price_model THEN (price_vt_eur_mwh IS NOT NULL)
+    WHEN 'spot_plus_eur'::public.price_model THEN (additive_eur_mwh IS NOT NULL)
+    WHEN 'spot_minus_eur'::public.price_model THEN (additive_eur_mwh IS NOT NULL)
+    WHEN 'spot_minus_pct'::public.price_model THEN (additive_pct IS NOT NULL)
+    ELSE true
+END),
+    CONSTRAINT offer_item_slot_check CHECK ((slot = ANY (ARRAY['komodita'::text, 'poplatok_om'::text, 'zem'::text, 'program'::text, 'viwa_ucet'::text, 'viwa_kw'::text]))),
+    CONSTRAINT offer_item_year_check CHECK (((year IS NULL) OR ((year >= 2020) AND (year <= 2100))))
+);
+
+
+--
+-- Name: TABLE offer_item; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.offer_item IS 'cena zložky (komodita, poplatky, program, VIWA) pre OOM a rok – rovnaké sloty a modely ako contract_price';
+
+
+--
+-- Name: offer_year_basis; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.offer_year_basis (
+    variant_id uuid NOT NULL,
+    year smallint NOT NULL,
+    seller_type public.seller_type NOT NULL,
+    trader_price numeric(12,4),
+    portfolio_eur_mwh numeric(12,4),
+    min_additive numeric(12,4),
+    energopomoc_price numeric(12,4),
+    viwa_additive numeric(12,4),
+    computed_on date NOT NULL
 );
 
 
@@ -12863,6 +14563,29 @@ COMMENT ON VIEW public.trader_price_today_v IS 'obrazovka 29: posledné ceny BL/
 
 
 --
+-- Name: user_commission_rate; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_commission_rate (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    valid_from date NOT NULL,
+    pct numeric(5,2) NOT NULL,
+    changed_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_commission_rate_pct_check CHECK (((pct >= (0)::numeric) AND (pct <= (100)::numeric)))
+);
+
+
+--
+-- Name: TABLE user_commission_rate; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.user_commission_rate IS 'percento provízie obchodníka z pridanej hodnoty, platí od dátumu; bez záznamu 40 %';
+
+
+--
 -- Name: voucher; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -12959,6 +14682,22 @@ ALTER TABLE ONLY public.app_user_org
 
 ALTER TABLE ONLY public.app_user
     ADD CONSTRAINT app_user_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: approval_price_item approval_price_item_approval_id_variant_id_year_price_model_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_price_item
+    ADD CONSTRAINT approval_price_item_approval_id_variant_id_year_price_model_key UNIQUE (approval_id, variant_id, year, price_model, voltage_group);
+
+
+--
+-- Name: approval_price_item approval_price_item_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_price_item
+    ADD CONSTRAINT approval_price_item_pkey PRIMARY KEY (id);
 
 
 --
@@ -13362,6 +15101,14 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: doc_counter doc_counter_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.doc_counter
+    ADD CONSTRAINT doc_counter_pkey PRIMARY KEY (org_id, kind, year);
+
+
+--
 -- Name: export_log export_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -13450,19 +15197,19 @@ ALTER TABLE ONLY public.notification
 
 
 --
--- Name: offer offer_deal_id_version_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.offer
-    ADD CONSTRAINT offer_deal_id_version_key UNIQUE (deal_id, version);
-
-
---
 -- Name: offer offer_hubspot_quote_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_hubspot_quote_id_key UNIQUE (hubspot_quote_id);
+
+
+--
+-- Name: offer_item offer_item_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_item
+    ADD CONSTRAINT offer_item_key UNIQUE NULLS NOT DISTINCT (variant_id, oom_id, slot, year);
 
 
 --
@@ -13474,11 +15221,43 @@ ALTER TABLE ONLY public.offer_item
 
 
 --
+-- Name: offer offer_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_number_key UNIQUE (org_id, number, version);
+
+
+--
 -- Name: offer offer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_variant offer_variant_offer_id_sort_order_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_variant
+    ADD CONSTRAINT offer_variant_offer_id_sort_order_key UNIQUE (offer_id, sort_order);
+
+
+--
+-- Name: offer_variant offer_variant_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_variant
+    ADD CONSTRAINT offer_variant_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_year_basis offer_year_basis_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_year_basis
+    ADD CONSTRAINT offer_year_basis_pkey PRIMARY KEY (variant_id, year);
 
 
 --
@@ -13970,6 +15749,22 @@ ALTER TABLE ONLY public.team
 
 
 --
+-- Name: user_commission_rate user_commission_rate_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_commission_rate
+    ADD CONSTRAINT user_commission_rate_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_commission_rate user_commission_rate_user_id_valid_from_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_commission_rate
+    ADD CONSTRAINT user_commission_rate_user_id_valid_from_key UNIQUE (user_id, valid_from);
+
+
+--
 -- Name: voucher voucher_code_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -14076,6 +15871,20 @@ CREATE INDEX app_user_team_id_idx ON public.app_user USING btree (team_id);
 --
 
 CREATE UNIQUE INDEX approval_request_pending_assign_key ON public.approval_request USING btree (company_id, requested_by) WHERE ((kind = 'pridelenie_firmy'::public.approval_kind) AND (status = 'caka'::public.approval_status));
+
+
+--
+-- Name: approval_request_pending_offer_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX approval_request_pending_offer_key ON public.approval_request USING btree (offer_id, kind) WHERE ((status = 'caka'::public.approval_status) AND (kind = ANY (ARRAY['vynimka_ceny'::public.approval_kind, 'predlzenie_platnosti'::public.approval_kind])));
+
+
+--
+-- Name: approval_request_pending_risk_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX approval_request_pending_risk_key ON public.approval_request USING btree (deal_id) WHERE ((status = 'caka'::public.approval_status) AND (kind = 'rizikovy_zakaznik'::public.approval_kind));
 
 
 --
@@ -14646,24 +16455,17 @@ CREATE INDEX offer_custom_idx ON public.offer USING gin (custom jsonb_path_ops);
 
 
 --
--- Name: offer_item_offer_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: offer_deal_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX offer_item_offer_id_idx ON public.offer_item USING btree (offer_id);
-
-
---
--- Name: offer_item_oom_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX offer_item_oom_id_idx ON public.offer_item USING btree (oom_id);
+CREATE INDEX offer_deal_idx ON public.offer USING btree (deal_id);
 
 
 --
--- Name: offer_item_product_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: offer_item_variant_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX offer_item_product_id_idx ON public.offer_item USING btree (product_id);
+CREATE INDEX offer_item_variant_idx ON public.offer_item USING btree (variant_id);
 
 
 --
@@ -14968,6 +16770,13 @@ CREATE TRIGGER trg_active_guard BEFORE INSERT OR DELETE OR UPDATE ON public.oom_
 
 
 --
+-- Name: offer_variant trg_after; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_after AFTER INSERT OR UPDATE ON public.offer_variant FOR EACH ROW EXECUTE FUNCTION public.offer_variant_after();
+
+
+--
 -- Name: deal trg_after_change; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -15014,6 +16823,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user FOR
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user_org FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: approval_price_item trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.approval_price_item FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -15220,6 +17036,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer_item F
 
 
 --
+-- Name: offer_variant trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.offer_variant FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: oom trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -15423,6 +17246,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.team_permiss
 
 
 --
+-- Name: user_commission_rate trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.user_commission_rate FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: voucher trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -15483,6 +17313,20 @@ CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE OF scope_code, tariff_code ON p
 --
 
 CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.tariff_scope FOR EACH ROW EXECUTE FUNCTION public.tariff_scope_check();
+
+
+--
+-- Name: offer_item trg_child_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_child_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer_item FOR EACH ROW EXECUTE FUNCTION public.offer_child_guard();
+
+
+--
+-- Name: offer_variant trg_child_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_child_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer_variant FOR EACH ROW EXECUTE FUNCTION public.offer_child_guard();
 
 
 --
@@ -15759,6 +17603,13 @@ CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.product FOR EACH ROW 
 
 
 --
+-- Name: user_commission_rate trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.user_commission_rate FOR EACH ROW EXECUTE FUNCTION public.user_commission_rate_guard();
+
+
+--
 -- Name: company trg_import_flag; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -15847,6 +17698,13 @@ CREATE TRIGGER trg_notify AFTER INSERT ON public.contract_flag FOR EACH ROW WHEN
 --
 
 CREATE TRIGGER trg_notify AFTER INSERT OR UPDATE OF status ON public.price_exception FOR EACH ROW EXECUTE FUNCTION public.price_exception_notify();
+
+
+--
+-- Name: offer trg_offer_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_offer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer FOR EACH ROW EXECUTE FUNCTION public.offer_guard();
 
 
 --
@@ -16256,6 +18114,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_item FOR EACH RO
 
 
 --
+-- Name: offer_variant trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.offer_variant FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: oom trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -16459,6 +18324,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.team_permission FOR EA
 
 
 --
+-- Name: user_commission_rate trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.user_commission_rate FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: voucher trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -16594,6 +18466,22 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: approval_price_item approval_price_item_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_price_item
+    ADD CONSTRAINT approval_price_item_approval_id_fkey FOREIGN KEY (approval_id) REFERENCES public.approval_request(id) ON DELETE CASCADE;
+
+
+--
+-- Name: approval_price_item approval_price_item_variant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_price_item
+    ADD CONSTRAINT approval_price_item_variant_id_fkey FOREIGN KEY (variant_id) REFERENCES public.offer_variant(id) ON DELETE CASCADE;
+
+
+--
 -- Name: approval_request approval_request_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -16623,6 +18511,14 @@ ALTER TABLE ONLY public.approval_request
 
 ALTER TABLE ONLY public.approval_request
     ADD CONSTRAINT approval_request_from_owner_id_fkey FOREIGN KEY (from_owner_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: approval_request approval_request_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id) ON DELETE CASCADE;
 
 
 --
@@ -17082,6 +18978,14 @@ ALTER TABLE ONLY public.custom_field_team
 
 
 --
+-- Name: deal deal_accepted_variant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal
+    ADD CONSTRAINT deal_accepted_variant_id_fkey FOREIGN KEY (accepted_variant_id) REFERENCES public.offer_variant(id);
+
+
+--
 -- Name: deal deal_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17127,6 +19031,14 @@ ALTER TABLE ONLY public.deal_event
 
 ALTER TABLE ONLY public.deal_event
     ADD CONSTRAINT deal_event_from_stage_id_fkey FOREIGN KEY (from_stage_id) REFERENCES public.pipeline_stage(id);
+
+
+--
+-- Name: deal_event deal_event_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id) ON DELETE SET NULL;
 
 
 --
@@ -17231,6 +19143,14 @@ ALTER TABLE ONLY public.deal
 
 ALTER TABLE ONLY public.deal
     ADD CONSTRAINT deal_stage_in_pipeline_fkey FOREIGN KEY (stage_id, pipeline_id) REFERENCES public.pipeline_stage(id, pipeline_id);
+
+
+--
+-- Name: doc_counter doc_counter_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.doc_counter
+    ADD CONSTRAINT doc_counter_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -17362,19 +19282,27 @@ ALTER TABLE ONLY public.notification
 
 
 --
+-- Name: offer offer_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contact(id);
+
+
+--
+-- Name: offer offer_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
 -- Name: offer offer_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
-
-
---
--- Name: offer_item offer_item_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.offer_item
-    ADD CONSTRAINT offer_item_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id) ON DELETE CASCADE;
 
 
 --
@@ -17386,6 +19314,22 @@ ALTER TABLE ONLY public.offer_item
 
 
 --
+-- Name: offer_item offer_item_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_item
+    ADD CONSTRAINT offer_item_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer_item offer_item_price_list_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_item
+    ADD CONSTRAINT offer_item_price_list_item_id_fkey FOREIGN KEY (price_list_item_id) REFERENCES public.price_list_item(id);
+
+
+--
 -- Name: offer_item offer_item_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17394,11 +19338,59 @@ ALTER TABLE ONLY public.offer_item
 
 
 --
+-- Name: offer_item offer_item_variant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_item
+    ADD CONSTRAINT offer_item_variant_id_fkey FOREIGN KEY (variant_id) REFERENCES public.offer_variant(id) ON DELETE CASCADE;
+
+
+--
 -- Name: offer offer_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.offer
     ADD CONSTRAINT offer_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer offer_replaced_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_replaced_by_id_fkey FOREIGN KEY (replaced_by_id) REFERENCES public.offer(id);
+
+
+--
+-- Name: offer offer_sent_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer
+    ADD CONSTRAINT offer_sent_by_fkey FOREIGN KEY (sent_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: offer_variant offer_variant_offer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_variant
+    ADD CONSTRAINT offer_variant_offer_id_fkey FOREIGN KEY (offer_id) REFERENCES public.offer(id) ON DELETE CASCADE;
+
+
+--
+-- Name: offer_variant offer_variant_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_variant
+    ADD CONSTRAINT offer_variant_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: offer_year_basis offer_year_basis_variant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.offer_year_basis
+    ADD CONSTRAINT offer_year_basis_variant_id_fkey FOREIGN KEY (variant_id) REFERENCES public.offer_variant(id) ON DELETE CASCADE;
 
 
 --
@@ -17826,6 +19818,22 @@ ALTER TABLE ONLY public.team_permission
 
 
 --
+-- Name: user_commission_rate user_commission_rate_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_commission_rate
+    ADD CONSTRAINT user_commission_rate_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: user_commission_rate user_commission_rate_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_commission_rate
+    ADD CONSTRAINT user_commission_rate_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
 -- Name: voucher voucher_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17866,6 +19874,21 @@ ALTER TABLE public.app_user ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.app_user_org ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: approval_price_item; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.approval_price_item ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: approval_price_item approval_price_item_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY approval_price_item_select ON public.approval_price_item FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.approval_request a
+  WHERE (a.id = approval_price_item.approval_id))));
+
 
 --
 -- Name: approval_request; Type: ROW SECURITY; Schema: public; Owner: -
@@ -18231,6 +20254,12 @@ CREATE POLICY deal_update ON public.deal FOR UPDATE USING (((org_id = ANY (( SEL
 
 
 --
+-- Name: doc_counter; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.doc_counter ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: import_alias; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -18314,6 +20343,96 @@ CREATE POLICY notification_select ON public.notification FOR SELECT USING ((user
 
 CREATE POLICY notification_update ON public.notification FOR UPDATE USING ((user_id = public.crm_active_user_id())) WITH CHECK ((user_id = public.crm_active_user_id()));
 
+
+--
+-- Name: offer; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_item; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_item ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_item offer_item_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_item_select ON public.offer_item FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.offer_variant v
+  WHERE (v.id = offer_item.variant_id))));
+
+
+--
+-- Name: offer_item offer_item_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_item_write ON public.offer_item USING ((EXISTS ( SELECT 1
+   FROM ((public.offer_variant v
+     JOIN public.offer o ON ((o.id = v.offer_id)))
+     JOIN public.deal d ON ((d.id = o.deal_id)))
+  WHERE ((v.id = offer_item.variant_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM ((public.offer_variant v
+     JOIN public.offer o ON ((o.id = v.offer_id)))
+     JOIN public.deal d ON ((d.id = o.deal_id)))
+  WHERE ((v.id = offer_item.variant_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id)))));
+
+
+--
+-- Name: offer offer_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_select ON public.offer FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE (d.id = offer.deal_id))));
+
+
+--
+-- Name: offer_variant; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_variant ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: offer_variant offer_variant_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_variant_select ON public.offer_variant FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.offer o
+  WHERE (o.id = offer_variant.offer_id))));
+
+
+--
+-- Name: offer_variant offer_variant_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_variant_write ON public.offer_variant USING ((EXISTS ( SELECT 1
+   FROM (public.offer o
+     JOIN public.deal d ON ((d.id = o.deal_id)))
+  WHERE ((o.id = offer_variant.offer_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM (public.offer o
+     JOIN public.deal d ON ((d.id = o.deal_id)))
+  WHERE ((o.id = offer_variant.offer_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id)))));
+
+
+--
+-- Name: offer offer_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY offer_write ON public.offer USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = offer.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = offer.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id)))));
+
+
+--
+-- Name: offer_year_basis; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.offer_year_basis ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: oom; Type: ROW SECURITY; Schema: public; Owner: -
@@ -19303,6 +21422,26 @@ ALTER TABLE public.team ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.team_permission ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: user_commission_rate; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_commission_rate ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: user_commission_rate user_commission_rate_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_commission_rate_select ON public.user_commission_rate FOR SELECT USING ((public.crm_is_service() OR (user_id = public.crm_active_user_id()) OR public.crm_is_admin() OR public.crm_approves_prices()));
+
+
+--
+-- Name: user_commission_rate user_commission_rate_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_commission_rate_write ON public.user_commission_rate USING ((public.crm_is_admin() OR public.crm_approves_prices())) WITH CHECK ((public.crm_is_admin() OR public.crm_approves_prices()));
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -19347,4 +21486,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0032'),
     ('0033'),
     ('0034'),
-    ('0035');
+    ('0035'),
+    ('0036'),
+    ('0037'),
+    ('0038');

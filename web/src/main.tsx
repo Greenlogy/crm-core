@@ -6,6 +6,7 @@ import { ApprovalsPage } from './pages/ApprovalsPage';
 import { CompanyCheckPage } from './pages/CompanyCheckPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { DealPage } from './pages/DealPage';
+import { OfferPage } from './pages/OfferPage';
 import { DealsPage } from './pages/DealsPage';
 import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'obchody', element: <DealsPage /> },
       { path: 'obchody/:id', element: <DealPage /> },
+      { path: 'ponuky/:id', element: <OfferPage /> },
       { path: 'overenie-firmy', element: <CompanyCheckPage /> },
       { path: 'schvalovanie', element: <ApprovalsPage /> },
       { path: 'zmluvy', element: <ContractsPage /> },

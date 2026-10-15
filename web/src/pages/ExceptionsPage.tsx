@@ -164,6 +164,7 @@ export function ExceptionsPage() {
               na podpis.
             </div>
           </Card>
+          <OfferExceptions />
         </div>
         <div className="col-right">
           {sel ? <Detail e={sel} margin={!!data?.margin} onChanged={reload} /> : <Card title="Detail"><Empty>Vyberte žiadosť.</Empty></Card>}
@@ -352,5 +353,93 @@ function NewException(props: { onClose: () => void; onSaved: (id: string) => voi
         <textarea className="inp" rows={4} value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
       </Field>
     </SidePanel>
+  );
+}
+
+// Výnimky z ponúk (modul 5, F2) – iba prehľad; žiada sa z ponuky a rozhoduje v Schvaľovaní. Pri spárovaní zmluvy
+// s obchodom (F5) sa schválená výnimka akceptovaného variantu prenesie na zmluvu.
+type OfferException = {
+  approval_id: string;
+  status: 'caka' | 'schvalena' | 'zamietnuta' | 'zrusena';
+  valid_until: string | null;
+  created_at: string;
+  requested_by_name: string | null;
+  deal_id: string;
+  deal_name: string;
+  offer_id: string;
+  offer_number: string;
+  customer_name: string | null;
+  variant: string;
+  year: number;
+  price_model: string;
+  voltage_group: string;
+  requested_value: string;
+  threshold_value: string | null;
+  approved_value: string | null;
+  volume_mwh: string | null;
+};
+const OFFER_EXC_STATUS: Record<string, { label: string; tone: 'warning' | 'positive' | 'negative' | 'neutral'; live?: boolean }> = {
+  caka: { label: 'Čaká', tone: 'warning', live: true },
+  schvalena: { label: 'Schválená', tone: 'positive', live: true },
+  zamietnuta: { label: 'Zamietnutá', tone: 'negative', live: true },
+  zrusena: { label: 'Zrušená', tone: 'neutral' },
+};
+
+function OfferExceptions() {
+  const { data } = useApi<{ items: OfferException[] }>('/api/offer-exceptions');
+  if (!data) return null;
+  return (
+    <Card flush title="Výnimky z ponúk" aside={<Link to="/schvalovanie">Schvaľovanie</Link>}>
+      <div className="table-wrap">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Zákazník · ponuka</th>
+              <th>Rok · skupina</th>
+              <th className="num">Žiadaná cena</th>
+              <th className="num">Hranica</th>
+              <th className="num">Schválená</th>
+              <th className="num">Objem [MWh]</th>
+              <th>Stav</th>
+              <th>Platná do</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.length === 0 && (
+              <tr>
+                <td colSpan={8} className="muted">
+                  Žiadna výnimka z ponuky.
+                </td>
+              </tr>
+            )}
+            {data.items.map((e) => (
+              <tr key={`${e.approval_id}-${e.variant}-${e.year}-${e.voltage_group}-${e.price_model}`}>
+                <td>
+                  <Link to={`/obchody/${e.deal_id}`}>{text(e.customer_name)}</Link>
+                  <div className="sub">
+                    <Link className="mono" to={`/ponuky/${e.offer_id}`}>{e.offer_number}</Link> · {e.variant} · {text(e.requested_by_name)}
+                  </div>
+                </td>
+                <td>
+                  {e.year} · {e.voltage_group === 'vsetko' ? 'všetko' : e.voltage_group.toUpperCase()}
+                </td>
+                <td className="num">{dec(e.requested_value, 2, 4)}</td>
+                <td className="num muted">{e.threshold_value === null ? 'skrytá' : dec(e.threshold_value, 2, 4)}</td>
+                <td className="num">{e.approved_value === null ? '–' : dec(e.approved_value, 2, 4)}</td>
+                <td className="num">{e.volume_mwh === null ? '–' : dec(e.volume_mwh, 1, 1)}</td>
+                <td>
+                  <StatusPill map={OFFER_EXC_STATUS} value={e.status} />
+                </td>
+                <td>{e.status === 'schvalena' && e.valid_until ? date(e.valid_until) : '–'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="caption" style={{ padding: '8px 16px' }}>
+        Výnimky z ponúk žiada obchodník z ponuky a schvaľuje sa v Schvaľovaní. Platia 3 dni na odoslanie ponuky; odoslaná ponuka si ich ponechá.
+        Na zmluvu sa prenesú pri spárovaní s obchodom (fáza F5).
+      </div>
+    </Card>
   );
 }

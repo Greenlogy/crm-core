@@ -1,8 +1,10 @@
 # Modul 5 – Obchod a ponuky: návrh databázy a riešenia
 
-Verzia 0.5 · 15. 10. 2026 · **F1: `0032`–`0034` na `dev`, API a obrazovky na Teste; `0035_audit_rls` overená nanečisto (časť 17), na `dev` nespustená**
+Verzia 0.7 · 15. 10. 2026 · **F2 krok 1: obrazovky F1 dorovnané, `0036`, `0037` overené nanečisto (časť 20), na `dev` nespustené**
 - v0.1 (14. 10.) = analýza a návrh, 21 otázok;
 - v0.2 (15. 10.) = Petrove odpovede 1–21 a poistky Gmailu zapracované do textu, odhad ceny R2 a Browser Rendering (časť 12), plán F1 – migrácie `0032_obchod_jadro` a `0033_finstat` (časť 13);
+- v0.7 (15. 10.) = odpovede k F2 (19.6), dorovnanie obrazoviek F1, `0036_ponuky` a `0037_schvalovanie_ponuk` overené nanečisto (časť 20);
+- v0.6 (15. 10.) = F1 uzavretá, plán F2 (časť 19) s dorovnaním obrazoviek F1 s návrhmi;
 - v0.5 (15. 10.) = Peter súhlasil s návrhom k platobnému ratingu a s plánom `0035`; `0035_audit_rls` napísaná a overená nanečisto (časť 17);
 - v0.4 (15. 10.) = API a obrazovky F1 (31, 32, 33, 39), `0034` (žiadosť o pridelenie podľa IČO, firma bez vlastníka v overení, oprava hlášky, platobný rating pri zápise Finstatu), Finstat overený 3 volaniami, plán `0035` RLS na audite;
 - v0.3 (15. 10.) = Petrov súhlas s plánom F1 a doplnky (Obnova pri existujúcom obchode, Sales_internal/external, dátum prechodu provízií ako nastavenie, Gmail iba vlákna s aktivitou 30 dní, región PDF otvorený do F3, externí = všetci predajcovia); F1 migrácie a testy overené nanečisto (časť 15).
@@ -1253,3 +1255,132 @@ Cieľ: audit vidí iba to, čo používateľ smie vidieť; potom `crm_external_r
 ## 18. Otázky (15. 10. 2026)
 
 1. **Platobný rating A–E/X** – *rozhodnuté (Peter 15. 10.): súhlas s návrhom.* Finstat ho v odpovedi (Ultimate) neposiela. Posiela Altmanovo Z-skóre, FinStat skóre, Index 05, index daňovej spoľahlivosti a stupne kreditného skóre (číslo). Odkiaľ je dnes rating v HubSpote? Návrh: kým sa nezistí zdroj, ostáva rating na firme ručný (alebo z HubSpotu pri prenose) a schválenie spúšťa konkurz / reštrukturalizácia a rating E/X, ak je vyplnený.
+
+---
+
+## 19. Plán F2 – ponuka, varianty, ceny OOM × rok, schvaľovanie (na schválenie)
+
+F1 je uzavretá (commit `803cfd8`, 15. 10.). F2 podľa časti 9: ponuka, varianty, ceny OOM × rok, cena pre obchodníka, pridaná hodnota, verzie, platnosť, schvaľovanie výnimiek, rizika a predĺženia. PDF, stránka ponuky a akceptácia sú F3, e-mail F4.
+
+### 19.0 Dorovnanie obrazoviek F1 s návrhmi (prvý krok F2)
+
+Obrazovky F1 sú funkčne hotové, vzhľadom však zjednodušené. Pred ponukami ich dorovnám s návrhmi:
+- **31 Overenie firmy:** prepínač IČO / Názov; hlavička firmy (názov, IČO · DIČ · IČ DPH · adresa, stav Aktívna); rad dlaždíc (tržby, zisk, zamestnanci, dlhy, platobný rating, konkurz); Z-skóre ako stupnica 0 – 1,23 – 2,90 – 5+ s pásmami; vedľa karta „V CRM“ s dôvodom žiadosti priamo v karte (nie v bočnom paneli); text o výstrahách pod údajmi. Tabuľka „Ďalšie stavy overenia“ v návrhu je iba vysvetlenie pre teba, do aplikácie nepatrí.
+- **32, 33, 39:** porovnám s návrhmi a doplním chýbajúce prvky (napr. odznaky na kartách kanbanu, uzavreté v mesiaci podľa dôvodu prehry, rozpad objemu NN/VN). Prvky ponúk sa doplnia s ponukami.
+
+### 19.1 `0036_ponuky` (`-- migrate:up`)
+
+1. **Počítadlo dokladov** `doc_counter (org_id, kind, year, last_value)` a `doc_number_next(org, 'ponuka', rok)` → `P26-000123` (od 1 každý rok).
+2. **Pracovné dni:** `next_working_day(org, deň)`, `working_days_before(org, deň, n)`, `offer_default_valid_until(org, odoslané, druh)` – FIX a kombinácia do 16:00 nasledujúceho pracovného dňa; SPOT a VIWA 14 dní, posun na pracovný deň (časť 6).
+3. **Ponuka** podľa časti 1.5: stará tabuľka `offer` a `offer_item` (prázdne) sa prerobia; nový `offer_status`; `offer_variant`, `offer_item` (OOM × rok × zložka), `offer_year_basis` (snímka hraníc ku dňu verzie); `deal.accepted_variant_id` (vyplní akceptácia v F3).
+4. **Spoločný výpočet pridanej hodnoty** so zmluvami: výnos a náklad riadku sa vyčlení z `contract_year_calc` (modul 4) do spoločných funkcií; `contract_year_calc` ich začne používať. Testy modulu 4 musia dať rovnaké čísla na halier.
+5. **Výpočet ponuky** `offer_variant_calc(variant)` po rokoch: objem (z obchodu, podiel roka ako v bilancii), hranica (cena pre obchodníka / minimálny aditív podľa typu predajcu, alebo schválená výnimka), pridaná hodnota, odhad provízie (PH × % vlastníka); marža firmy iba s právom „vidieť maržu firmy“.
+6. **Funkcie ponuky:**
+   - `offer_create(obchod)` – číslo, verzia 1, snímka hraníc, variant A s OOM obchodu;
+   - `offer_new_version(ponuka, prepočítať)` – kópia variantov a cien, nová snímka, stará verzia Nahradená;
+   - `offer_prepare(ponuka)` – kontrola (ceny vyplnené, hranice, výnimky, rizikový zákazník) → Čaká na schválenie alebo Pripravená;
+   - `offer_mark_sent(ponuka)` – ručné „Označiť ako odoslanú“ (PDF a e-mail prídu v F3 a F4): platnosť podľa pravidiel, ponuka sa už nemení, obchod z Príležitosti do Cenovej ponuky (otázka 1);
+   - zamietnutá (zákazník odmietol), zmazanie konceptu, ktorý nebol odoslaný.
+7. **Domácnosti a malé podniky:** ceny z cenníka podľa sadzby a regulácie OOM (`product_candidates_by`, modul 3), obchodník ich nemení; upozornenie nad 30 MWh.
+8. **Percento provízie obchodníka** `app_user.commission_pct` (predvolene 40 %) už teraz, kvôli odhadu provízie v editore (otázka 4); celé provízie sú F7.
+9. **Stav zákazníka** (`customer_status_calc`, „Ponuka“): iba odoslaná ponuka (`sent_at`), nie Pripravená.
+10. RLS (podľa obchodu), audit, práva `crm_app`.
+
+### 19.2 `0037_schvalovanie_ponuk`
+
+- `approval_price_item` (rok, model, napäťová skupina, žiadaná hodnota, hranica, schválená hodnota) – časť 1.8.
+- Žiadosti z ponuky: výnimka z ceny (platí 3 dni na odoslanie), rizikový zákazník (celý obchod 30 dní alebo do zhoršenia Finstatu), predĺženie platnosti; `approval_decide` pre tieto druhy („schvaľuje ceny“, schválená hranica môže byť iná ako žiadaná).
+- Upozornenia schvaľovateľom do zvončeka (e-mail až s Gmailom v F4).
+
+### 19.3 API a obrazovky
+
+- **API:** `/offers` (založenie z obchodu, karta, hlavička, varianty, uloženie cien po rokoch, prepočítať / nová verzia, pripraviť, označiť ako odoslanú, zamietnutá, zmazať koncept); `/approvals` doplní tri druhy a detail výnimky (ponuka, variant, roky, hranica, objem, PH s výnimkou, marža s právom).
+- **Obrazovky:** 34 editor ponuky (varianty, ceny OOM × rok s hranicou a PH, „Rovnaká cena pre NN“, podmienky, súhrn PH a provízie, marža s právom, platnosť), 33 sekcia Ponuky na karte obchodu a PH obchodu z ponuky, 39 záložky Výnimky z ceny, Konkurz / rating, Predĺženie platnosti, 28 výnimky z ponúk iba na čítanie.
+
+### 19.4 Overenie
+
+Ako doteraz: nanečisto na dočasnej databáze (nové testy série C + všetky doterajšie, vrátane bilancie modulu 4 na halier), down/up, lokálne API a obrazovky, potom `dev` po tvojom súhlase, Test, commit po tvojom teste.
+
+### 19.5 Otázky k F2
+
+1. **Štádium pri odoslaní:** keď sa ponuka odošle (zatiaľ ručne „Označiť ako odoslanú“), obchod v Príležitosti sa sám presunie do Cenovej ponuky. Súhlas?
+2. **Ručné „Označiť ako odoslanú“** už v F2 (kým nie je PDF a e-mail), aby sa dala vyskúšať platnosť a schvaľovanie; ostane aj potom pre ponuky poslané mimo CRM. Súhlas?
+3. **Manažér a FIX:** v bilancii zmlúv (modul 4) je pri predajcovi typu „manažér“ nákladom FIX odhad portfólia, nie cena pre obchodníka. Návrh: v ponuke rovnako – hranica FIX pre manažéra = odhad portfólia, pre obchodníka = cena pre obchodníka. Súhlas?
+4. **Percento provízie** pridať k používateľovi už v F2 (predvolene 40 %, mení admin v Nastaveniach), aby editor ukazoval odhad provízie. Súhlas?
+5. **Počet variantov:** najviac 5 v jednej ponuke. Súhlas?
+
+### 19.6 Odpovede (Peter, 15. 10. 2026) – plán F2 schválený
+
+1. Odoslanie ponuky posunie obchod z Príležitosti do Cenovej ponuky, **iba dopredu** – obchod vo Vyjednávaní alebo neskôr sa novou verziou nevracia.
+2. „Označiť ako odoslanú“ už v F2 a ostáva aj neskôr:
+   - nedá sa pri ponuke, ktorá čaká na schválenie alebo má zamietnutú či prepadnutú výnimku;
+   - zadá sa **dátum a čas odoslania** a **kanál** (e-mail mimo CRM, osobne, iné); zapíše sa do časovej osi a auditu;
+   - platnosť sa počíta od času odoslania;
+   - verzia z predošlého pracovného dňa pri FIX → upozornenie a „Prepočítať na dnešné ceny“.
+3. Manažér: hranica FIX = odhad nákupnej ceny portfólia (ako bilancia modulu 4), pri SPOT minimálny aditív pre manažéra.
+4. Percento provízie pri používateľovi už v F2, predvolene 40 %; mení **admin a obchodný riaditeľ** (schvaľuje ceny); **história „platí od“** a audit; provízia si pri Vyhraté uloží percento platné v tej chvíli (F7), neskoršia zmena ju nemení.
+5. Najviac 5 variantov.
+- Dokumentácia plánu F2 ide do commitu F2.
+
+## 20. F2 – krok 1: dorovnanie obrazoviek F1, migrácie `0036`, `0037` overené nanečisto (15. 10. 2026)
+
+**Dorovnanie obrazoviek F1 s návrhmi (19.0):**
+- 31 Overenie firmy: prepínač IČO / Názov, hlavička firmy (IČO · DIČ · IČ DPH · adresa, Aktívna / Zrušená), dlaždice (tržby, zisk, zamestnanci, dlhy, platobný rating, konkurz), stupnica Z-skóre 0 – 1,23 – 2,90 – 5+, karta „V CRM“ s dôvodom žiadosti priamo v karte, text o výstrahách.
+- 32 Obchody: kanban iba otvorené štádiá, súhrn „Uzavreté v mesiaci“ (vyhraté s PH, prehraté podľa dôvodu), predvolený filter „Vlastník: ja“ pre obchodníka, výstrahy navrchu karty, zvýraznenie bez kroku / po termíne, popisy KPI ako v návrhu.
+- 33 Karta obchodu: ✓ pri prejdených štádiách, kontaktná osoba a stav Finstatu v údajoch obchodu, filter časovej osi (všetko / poznámky / udalosti). Ponuky, odhad provízie a e-mail pribudnú s API F2.
+
+**`0036_ponuky`** (podľa 19.1 a odpovedí 19.6) – spresnenia oproti plánu:
+- percento provízie ako **tabuľka s históriou** `user_commission_rate` (platí od dnes, mení admin a schvaľovateľ cien, riadok sa nemení, budúci sa dá zmazať, audit); `user_commission_pct(používateľ, deň)`, predvolene 40 % (`app_setting`);
+- stĺpce schvaľovania (`approval_request.offer_id`, `valid_until`, `requested_valid_until`, `risk_snapshot`), `approval_price_item` a porovnanie rizika (`company_risk_snapshot`, `company_risk_worse`) sú už v `0036`, lebo ich potrebuje výpočet ponuky (výnimka platí 3 dni na odoslanie; odoslaná ponuka si ju ponechá);
+- `contract_year_calc` používa spoločné funkcie `pv_revenue`, `pv_unit_cost`, `pv_unit_margin_cost`; testy bilancie modulu 4 dávajú rovnaké čísla na halier;
+- stará verzia ponuky dostane stav Nahradená **až pri odoslaní novej** (dovtedy ju zákazník môže prijať); naraz je rozpracovaná najviac jedna verzia;
+- ponuka na obchod je jedna (ďalšie sú jej verzie); „Prepočítať na dnešné ceny“ pri rozpracovanej verzii prepočíta snímku na mieste, odoslaná dostane novú verziu;
+- audit (`0035`) rozšírený o ponuky, varianty, ceny, položky výnimky a percento provízie;
+- zložka ceny (`slot`) je text s rovnakými hodnotami ako pri zmluve.
+
+**`0037_schvalovanie_ponuk`:** `approval_request_offer` (výnimky z kontroly ponuky + rizikový zákazník, bez potreby schválenia iba pripraví), `approval_request_extend`, `approval_decide` pre všetky druhy (schválená hranica ≤ žiadaná cena, výnimka 3 dni, riziko 30 dní, predĺženie zapíše platnosť), `approval_cancel` vráti ponuku do konceptu, `approval_price_detail` pre obrazovku 39 (marža iba s právom).
+
+**Overenie (dočasný Postgres, `0001`–`0037` + cenníky):** **191 kontrol OK** (+ C0–C6 v `db/test/checks_ponuky.sql`: pracovné dni a sviatky, platnosť FIX a SPOT, číslo a variant, stráženie zmien, PH s cenou pre obchodníka / minimálnym aditívom / manažér = portfólio, snímka sa nemení s BL/PL, marža iba s právom, RLS, výnimka s inou hranicou a 3 dňami, prepadnutá výnimka, FIX zo starého dňa, kanál a čas odoslania, posun obchodu iba dopredu, nová verzia, skrátenie a predĺženie, zamietnutie, Vypršaná, rizikový zákazník 30 dní a zhoršenie, percento provízie); mutačná skúška (manažér = cena pre obchodníka) zlyhá už v teste bilancie modulu 4; `0037` + `0036` down = schéma `0035`, znova hore bez rozdielu. Existujúci test `checks_zakaznici.sql` zakladá ponuku s číslom a kanálom odoslania.
+
+**Ďalej:** po tvojom súhlase `0036`, `0037` na `dev` → `app-role.sql`; potom API a obrazovky F2 (34 editor, 33 ponuky na karte obchodu, 39 výnimky / riziko / predĺženie, 28 výnimky z ponúk, percento provízie v Nastaveniach).
+
+## 21. F2 – krok 2: `0038_ponuky_doplnky` pred API (Peterove body 1–4, 15. 10. 2026)
+
+`0036` a `0037` už boli na `dev`, preto doplnky idú do novej migrácie (existujúce sa nemenia).
+
+**1. Skryté údaje (odhad portfólia, marža, riziková prirážka):**
+- `crm_sees_portfolio()` = admin, „vidieť maržu firmy“ / „schvaľuje ceny“ **alebo predajca typu manažér** (svoju hranicu potrebuje na nacenenie; odhad portfólia je pre rok rovnaký pre všetkých manažérov).
+- Hranica z odhadu portfólia (FIX manažéra, cenník) je pre ostatných `NULL` v `offer_variant_values` (`threshold_source` ostáva „odhad_portfolia“), v `offer_check` (`needs[].threshold_value`) a v `approval_price_detail`. Marža firmy ostáva iba s právom (0036).
+- `approval_price_item` dostala `threshold_source`; audit jej riadkov s hranicou z odhadu portfólia vidí iba `crm_sees_portfolio()` (neznámy zdroj = skryť). Aplikácia tabuľku nečíta vôbec (`REVOKE ALL`, iba funkcia), snímku `offer_year_basis` tiež nie.
+- `offer_item` obsahuje iba ceny (žiadna hranica, snímka ani marža) – overené testom stĺpcov; RLS podľa obchodu.
+- **Vedomé rozhodnutie (Peter, 15. 10.):** pridaná hodnota a odhad provízie ostávajú viditeľné každému, kto vidí obchod – rovnako ako PH zmluvy v module 4 –, hoci sa pri ponuke manažéra z PH, ceny a objemu dá odhad portfólia dopočítať. Riziko je iba interné (externí obchodníci obchody manažéra nevidia). Manažér svoju hranicu vidí (Peter potvrdil).
+
+**2. Výnimka pri novej verzii:** prejde, ak (a) je schválená a v 3-dňovej lehote (`valid_until > now()`), (b) ceny nie sú pod schválenou hranicou (inak výpočet „pod hranicou“ → nové schválenie), (c) rozsah variantu je rovnaký ako pri žiadosti – `approval_price_item.scope` = `offer_variant_scope()` (obdobie, plánovaný objem, OOM obchodu s napäťovou skupinou a objemami). Rozsah sa kontroluje iba pri **neodoslanej** verzii; odoslaná si výnimku ponechá (inak by zmena OOM na obchode zmenila už odoslanú alebo akceptovanú ponuku a prenos výnimky do zmluvy v F5). Prevzatá výnimka je kópia položky so žiadosťou pôvodnej verzie; „Prepočítať na dnešné ceny“ ju odpojí (vlastné výnimky verzie zruší ako doteraz), stará verzia ju má ďalej. Detail žiadosti (39) ukazuje iba položky pôvodnej ponuky. Časová os: „nová verzia“ s počtom prevzatých výnimiek.
+
+**3. Akceptácia starej verzie počas prípravy novej:** jadro `offer_accept_apply(ponuka, variant, čas)` – volá ho iba kód databázy (F3 doplní `offer_acceptance`, klik zákazníka a ručný záznam). Akceptovať sa dá odoslanú / otvorenú verziu v platnosti; ostatné odoslané verzie → Nahradená; obchod → Akceptácia s `accepted_variant_id`; upozornenie `ponuka_akceptovana`. Rozpracovaná nová verzia → koncept, čakajúce žiadosti zrušené, upozornenie `ponuka_zablokovana` (vlastník obchodu a autor verzie), udalosť v časovej osi; kontrola ponuky hlási chybu „Zákazník akceptoval ponuku …“, takže verzia sa nedá pripraviť, poslať na schválenie ani odoslať. Koncept sa dá zmazať.
+
+**4.** Schválená hranica ≤ žiadaná cena a jedna ponuka na obchod (ďalšie sú verzie) – potvrdené, bez zmeny.
+
+**Oprava chyby z `0036`:** koncept ponuky sa nedal zmazať (cudzí kľúč `deal_event.offer_id → NULL` narazil na zákaz zmien časovej osi). `deal_event_guard` povolí iba túto jednu zmenu; udalosť ostane s číslom a verziou v detaile.
+
+**Overenie (dočasný Postgres, `0001`–`0038`):** **195 kontrol OK** (+ C7 prenos výnimky a podmienky a–c, prepočet, detail bez kópií; C8 akceptácia a zablokovaná verzia; C9 interný obchodník: ponuka manažéra a jej audit áno, hranica z odhadu portfólia / marža / snímka nie – aj vo vlastnej žiadosti o výnimku na obchode manažéra, externý predajca nič; C4 upravená: platná výnimka prejde). Mutačná skúška – 9 zmien (skrytie v hodnotách, kontrole, detaile a audite; prenos; rozsah; zablokovanie; detail; prepočet), každú test zachytí. `0038` down = schéma `dev` pri `0037` (`db/schema.sql`), znova hore bez rozdielu.
+
+## 22. F2 – krok 3: obrazovka 31 dorovnaná, API a obrazovky F2 (lokálne overené 15. 10. 2026)
+
+`0036`–`0038` sú na `dev` (Peter). Rozhodnutia k bodu 21: manažér svoju hranicu vidí; PH ostáva viditeľná každému, kto vidí obchod (vedomé rozhodnutie – riziko iba interné).
+
+**31 Overenie firmy – dorovnanie s návrhom:** nadpis s podtitulom v riadku, vyhľadávanie s ikonou a obmedzenou šírkou (tlačidlo funguje aj pri hľadaní podľa názvu – overí prvú zhodu), štítok Aktívna / Zrušená s bodkou, dlaždice 4 v riadku na sivom podklade (tržby a zisk v celých eurách, zisk zelený / červený, zamestnanci „25–49“), Z-skóre na 2 desatinné miesta s farbou pásma a plnou trojfarebnou stupnicou, päta oddelená čiarou, karta V CRM s tučným vlastníkom, číslom zmluvy, výstrahou s ikonou a tlačidlami na celú šírku. **Príčina chýbajúcej zelenej:** generátor `web/scripts/tokens.ts` neprekladal odkaz na iný token z `tokens.json` (`{brand-tint}`, `{surface-card}`), takže `--positive-tint` a `--surface-sidebar` boli neplatné – generátor ich teraz prekladá na `var(--…)`; týka sa to zelených štítkov v celej aplikácii.
+
+**API (`api/src/routes/offers.ts`, rozšírené `approvals.ts`):**
+- `GET/POST /deals/:id/offers` – verzie ponuky a súhrn hlavného variantu (akceptovaný, inak A poslednej nenahradenej verzie); nová ponuka.
+- `GET/PATCH/DELETE /offers/:id` – editor (varianty, ceny, výpočet, kontrola, žiadosti, OOM, produkty, verzie); jazyk a kontaktná osoba; zmazanie konceptu.
+- `POST /offers/:id/variants`, `PATCH/DELETE /offer-variants/:id`, `PUT /offer-variants/:id/prices` (komodita OOM × rok; prázdna cena = zmazať).
+- `POST /offers/:id/reprice | prepare (bez potreby schválenia pripraví, inak žiadosť s dôvodom) | mark-sent | reject | new-version | shorten | extend`.
+- `GET /offer-exceptions` (obrazovka 28, cez `approval_price_detail`); `GET/POST /commission-rates`, `DELETE /commission-rates/:id`.
+- Schvaľovanie: záložky výnimky / konkurz-rating / predĺženie, súhrn žiadosti, `GET /approvals/:id` (položky, výstrahy, iná čakajúca žiadosť obchodu), rozhodnutie so schválenou hranicou po položkách.
+
+**Obrazovky:** 34 editor ponuky (`/ponuky/:id`: varianty A–E, typ ceny, obdobie, produkt, model po rokoch pri FIX + SPOT a pri výkupe, ceny OOM × rok s hranicou a PH, „Vyplniť NN“, podmienky, súhrn s odhadom provízie a maržou s právom, kontrola, žiadosti, panely Pripraviť / Označiť ako odoslanú / Zákazník odmietol / Skrátiť / Požiadať o predĺženie / Zmazať koncept, prepínač verzií); 33 sekcia Ponuky, PH a odhad provízie z ponuky v KPI, udalosti ponúk v časovej osi; 39 záložky a detail výnimky so schválenou hranicou („Schváliť na 3 dni“); 28 karta „Výnimky z ponúk“ (iba čítanie); Nastavenia → Používatelia: percento provízie s históriou (admin; obchodný riaditeľ cez API, obrazovku dostane s Províziami v F7). Zvonček: popisy upozornení obchodov presunuté zo zlej mapy (chyba F1) a nové druhy.
+
+**Overenie:** API celým tokom na dočasnej databáze s vymyslenými údajmi „TEST“ (ponuka, ceny, výnimka, schválenie inej hranice, odoslanie, nová verzia s prevzatou výnimkou, druhá výnimka), snímky obrazoviek porovnané s návrhmi 31, 33, 34, 39, 28; databázové testy 195 kontrol OK.
+
+**Mimo F2 (zámerne):** PDF, stránka ponuky a akceptácia (F3), e-mail z CRM (F4); ponuka VIWA sa dá založiť, ale ceny VIWA (účet, €/kW z cenníka) dopĺňa až F3 – variant VIWA zatiaľ hlási „chýba cena“; zoznam Ponuky v menu nie je v zadaní F2; PH v zozname obchodov ostáva odhad obchodníka (iba karta obchodu počíta z ponuky).

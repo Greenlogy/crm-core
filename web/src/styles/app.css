@@ -1846,19 +1846,32 @@ a.tab {
 }
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-  margin: 12px 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 20px;
+}
+@media (max-width: 900px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .tile {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  min-width: 0;
+}
+.tile .kl {
+  font-size: 13px;
+  color: var(--ink-muted);
 }
 .tile-value {
-  margin-top: 4px;
+  margin-top: 6px;
+  font-size: 20px;
+  line-height: 26px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .tone-negative {
   color: var(--negative);
@@ -1872,8 +1885,21 @@ a.tab {
 .zscale-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.zscale-title {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.zscale-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tone-warning {
+  color: var(--warning);
 }
 .zscale-bar {
   position: relative;
@@ -1889,13 +1915,13 @@ a.tab {
   border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
 }
 .zscale-red {
-  background: var(--negative-tint);
+  background: color-mix(in srgb, var(--negative) 40%, var(--surface-card));
 }
 .zscale-amber {
-  background: var(--warning-tint);
+  background: color-mix(in srgb, var(--warning) 35%, var(--surface-card));
 }
 .zscale-green {
-  background: var(--positive-tint);
+  background: color-mix(in srgb, var(--positive) 35%, var(--surface-card));
 }
 .zscale-mark {
   position: absolute;
@@ -1939,4 +1965,199 @@ a.tab {
 }
 .step-done::before {
   content: '✓ ';
+}
+
+/* --- Overenie firmy (obrazovka 31) --- */
+.check-title {
+  align-items: baseline;
+}
+.check-title-sub {
+  color: var(--ink-muted);
+  font-size: 15px;
+}
+.check-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.check-search-input {
+  flex: 1 1 320px;
+  max-width: 840px;
+}
+.check-search-btn {
+  gap: 8px;
+}
+.check-columns {
+  margin-top: 20px;
+  align-items: flex-start;
+}
+.check-foot {
+  margin: 16px -16px 0;
+  padding: 12px 16px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.check-request {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.check-warn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--warning);
+  line-height: 1.5;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+}
+.check-warn svg {
+  flex: none;
+  margin-top: 2px;
+}
+.check-cta {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+}
+.check-request .check-cta {
+  margin-top: 4px;
+}
+
+/* --- Editor ponuky (obrazovka 34) --- */
+.offer-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  margin-top: 2px;
+}
+.offer-title h1 {
+  font-size: 24px;
+}
+.inp-auto {
+  width: auto;
+}
+.ban-danger {
+  background: var(--negative-tint);
+  color: var(--negative);
+}
+.tab-add {
+  color: var(--brand-text);
+}
+.offer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.offer-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+.offer-check p {
+  margin: 0 0 6px;
+}
+.offer-check ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.approval-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.approval-row:last-child {
+  border-bottom: 0;
+}
+.price-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 16px 12px;
+}
+.price-toolbar .field {
+  min-width: 200px;
+}
+.price-grid td,
+.price-grid th {
+  white-space: nowrap;
+}
+.inp-num {
+  width: 92px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.price-grid .cell-below {
+  background: var(--warning-tint);
+}
+.price-grid .same-row td {
+  background: var(--surface-muted);
+}
+.same-cell {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.btn.btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.price-grid .total-row td {
+  font-weight: 600;
+}
+.form-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.form-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .form-grid-4,
+  .form-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* --- Schvaľovanie (obrazovka 39) --- */
+.approval-summary {
+  white-space: normal;
+  min-width: 180px;
+}
+.approval-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.approval-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.approval-item-head {
+  margin-bottom: 4px;
+}
+.decide-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.decide-actions .btn {
+  justify-content: center;
 }

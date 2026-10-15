@@ -79,6 +79,12 @@ GRANT UPDATE (read_at) ON notification TO crm_app;
 REVOKE INSERT, UPDATE ON deal_event, approval_request FROM crm_app;
 -- 0033: cache a počítadlo Finstatu iba cez funkcie (finstat_cache_get/put, finstat_request_allow)
 REVOKE ALL ON finstat_cache, finstat_usage FROM crm_app;
+-- 0036: ponuky – zakladá a mení stav iba funkcia (offer_create, _prepare, _mark_sent…); varianty a ceny priamo (RLS
+-- a spúšťače); zmazať koncept, variant a cenu. Snímku hraníc (odhad portfólia) a počítadlá čísel aplikácia nečíta.
+GRANT DELETE ON offer, offer_variant, offer_item, user_commission_rate TO crm_app;
+REVOKE ALL ON offer_year_basis, doc_counter FROM crm_app;
+-- 0038: položky výnimky (hranica môže byť odhad portfólia) aplikácia nečíta ani nemení – iba funkcia approval_price_detail
+REVOKE ALL ON approval_price_item FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)
