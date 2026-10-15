@@ -140,13 +140,13 @@ INSERT INTO company (id, name, ico, owner_id) VALUES
 INSERT INTO contact (id, first_name, last_name, email, is_household, owner_id) VALUES
   ('00000000-0000-4000-8000-000000002102', 'Odovzdaná', 'Domácnosť', 'odovzdana@example.test', true,
    '00000000-0000-4000-8000-000000002002');
-INSERT INTO deal (id, company_id, pipeline_id, stage_id, name, owner_id) VALUES
+INSERT INTO deal (id, company_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
   ('00000000-0000-4000-8000-000000002103', '00000000-0000-4000-8000-000000002101',
    '00000000-0000-4000-8000-000000000501', '00000000-0000-4000-8000-000000000511', 'Otvorený deal',
-   '00000000-0000-4000-8000-000000002002'),
+   '00000000-0000-4000-8000-000000002002', 'vlastny_kontakt'),
   ('00000000-0000-4000-8000-000000002104', '00000000-0000-4000-8000-000000002101',
    '00000000-0000-4000-8000-000000000501', '00000000-0000-4000-8000-000000000512', 'Vyhraný deal',
-   '00000000-0000-4000-8000-000000002002');
+   '00000000-0000-4000-8000-000000002002', 'vlastny_kontakt');
 
 DO $$
 DECLARE
@@ -301,7 +301,7 @@ BEGIN
   END;
 
   INSERT INTO lookup_value (list_code, label) VALUES ('rola_kontaktu', 'Energetik'), ('zdroj_kontaktu', 'Odporúčanie');
-  ASSERT (SELECT code FROM lookup_value WHERE label = 'Odporúčanie') = 'odporucanie', 'kód z názvu';
+  ASSERT (SELECT code FROM lookup_value WHERE list_code = 'zdroj_kontaktu' AND label = 'Odporúčanie') = 'odporucanie', 'kód z názvu';
   UPDATE company_contact SET roles = '{kontaktna_osoba,energetik}'
    WHERE company_id = '00000000-0000-4000-8000-000000000102' AND contact_id = '00000000-0000-4000-8000-000000000202';
   UPDATE lookup_value SET hidden_at = now() WHERE list_code = 'rola_kontaktu' AND code = 'technik';
@@ -313,7 +313,7 @@ BEGIN
     RAISE NOTICE 'OK: skrytú hodnotu nemožno nanovo vybrať';
   END;
   UPDATE contact SET source = 'odporucanie' WHERE id = '00000000-0000-4000-8000-000000000201';
-  UPDATE lookup_value SET hidden_at = now() WHERE code = 'odporucanie';
+  UPDATE lookup_value SET hidden_at = now() WHERE list_code = 'zdroj_kontaktu' AND code = 'odporucanie';
   UPDATE contact SET phone = '0905 000 111' WHERE id = '00000000-0000-4000-8000-000000000201';  -- skrytý zdroj ostáva
   BEGIN
     UPDATE contact SET source = 'neznamy' WHERE id = '00000000-0000-4000-8000-000000000201';

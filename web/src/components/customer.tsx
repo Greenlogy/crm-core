@@ -116,14 +116,14 @@ export function OomsCard(props: { ooms: OomRow[]; customer?: { kind: 'company' |
 
 export function DealsCard(props: { deals: DealRow[] }) {
   return (
-    <Card title={`Dealy (${props.deals.length})`}>
+    <Card title={`Obchody (${props.deals.length})`}>
       {props.deals.length === 0 ? (
-        <Empty>Zatiaľ žiadne dealy.</Empty>
+        <Empty>Zatiaľ žiadne obchody.</Empty>
       ) : (
         props.deals.map((d) => (
           <Item
             key={d.id}
-            title={d.contract_id ? <Link to={`/zmluvy/${d.contract_id}`}>{d.name}</Link> : d.name}
+            title={<Link to={`/obchody/${d.id}`}>{d.name}</Link>}
             meta={[d.pipeline, d.owner_name, d.closed_at ? `uzavretý ${date(d.closed_at)}` : null, `${d.oom_count ?? 0} OOM`]
               .filter(Boolean)
               .join(' · ')}

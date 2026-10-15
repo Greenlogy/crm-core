@@ -258,7 +258,9 @@ contentSettings.post('/custom-field-sections', async (c) => {
 const DEAL_KINDS = ['b2c_dodavka', 'b2b_dodavka', 'b2b_vykup', 'green_solar', 'green_viwa', 'efet'] as const;
 const OUTCOMES = ['otvoreny', 'vyhrany', 'prehrany'] as const;
 // Polia jadra dealu, ktoré môžu byť povinné pri prechode (zoznam v kóde; modul Obchod ho doplní).
-export const DEAL_CORE_FIELDS = ['expected_close', 'lost_reason', 'source', 'campaign', 'closed_at'] as const;
+// Polia jadra obchodu, ktoré môže admin vyžadovať pri vstupe do stage. Zákazník, vlastník, zdroj a dôvod prehry
+// vynucuje databáza vždy (0032), preto tu nie sú.
+export const DEAL_CORE_FIELDS = ['expected_close', 'supply_start', 'next_step', 'estimated_value_eur'] as const;
 
 contentSettings.get('/pipelines', async (c) => {
   const rows = await c.var.sql`
@@ -266,7 +268,7 @@ contentSettings.get('/pipelines', async (c) => {
            (SELECT count(*)::int FROM deal d WHERE d.pipeline_id = p.id) AS deals,
            coalesce((SELECT json_agg(json_build_object(
                        'id', s.id, 'name', s.name, 'sort_order', s.sort_order, 'probability', s.probability,
-                       'outcome', s.outcome, 'archived_at', s.archived_at,
+                       'outcome', s.outcome, 'code', s.code, 'archived_at', s.archived_at,
                        'deals', (SELECT count(*) FROM deal d WHERE d.stage_id = s.id),
                        'required', coalesce((SELECT json_agg(json_build_object(
                                      'core_field', r.core_field, 'custom_field_id', r.custom_field_id, 'label', cf.label))
@@ -293,12 +295,7 @@ contentSettings.post('/pipelines', async (c) => {
   const [row] = await sql<{ id: string }[]>`
     INSERT INTO pipeline (name, kind, org_id, sort_order) VALUES (${name}, ${kind}::deal_kind, ${orgId(b) ?? null}, ${n})
     RETURNING id`;
-  // Každá pipeline začína tromi stage: otvorený, vyhraný, prehraný (dajú sa premenovať a doplniť).
-  await sql`
-    INSERT INTO pipeline_stage (pipeline_id, name, sort_order, probability, outcome) VALUES
-      (${row.id}, 'Nový', 1, 0.10, 'otvoreny'),
-      (${row.id}, 'Vyhraný', 90, 1.00, 'vyhrany'),
-      (${row.id}, 'Prehraný', 91, 0.00, 'prehrany')`;
+  // 6 systémových štádií (Príležitosť … Vyhraté, Prehraté) založí databáza (0032); dajú sa premenovať.
   return c.json({ id: row.id }, 201);
 });
 
@@ -331,7 +328,9 @@ contentSettings.post('/pipelines/:id/stages', async (c) => {
   const pipelineId = id(c.req.param('id'));
   const b = await readBody(c.req);
   const name = str(b, 'name', 'Názov stage', { max: 80 })!;
+  // Vyhraté a Prehraté sú systémové štádiá (0032); pridať sa dá iba otvorený medzistupeň.
   const outcome = oneOf(b, 'outcome', 'Typ', OUTCOMES) ?? 'otvoreny';
+  if (outcome !== 'otvoreny') throw new BadRequest('Vyhraté a Prehraté sú systémové štádiá – pridať sa dá iba otvorené štádium.');
   const sql = c.var.sql;
   // nová otvorená stage ide pred uzavreté (vyhraný/prehraný)
   const [{ n }] = await sql`
@@ -350,13 +349,12 @@ contentSettings.patch('/stages/:id', async (c) => {
   const b = await readBody(c.req);
   const name = str(b, 'name', 'Názov stage', { max: 80, optional: true });
   if (name === '') throw new BadRequest('Chýba: Názov stage.');
-  const outcome = oneOf(b, 'outcome', 'Typ', OUTCOMES);
+  if (b.outcome !== undefined) throw new BadRequest('Typ štádia sa nemení (systémové štádiá určuje databáza).');
   const archived = bool(b, 'archived', 'Archivovať');
   const prob = probability(b);
   await c.var.sql`
     UPDATE pipeline_stage
        SET name = coalesce(${name ?? null}, name),
-           outcome = coalesce(${outcome ?? null}::stage_outcome, outcome),
            probability = CASE WHEN ${b.probability !== undefined} THEN ${prob ?? null}::numeric ELSE probability END,
            archived_at = CASE WHEN ${archived === undefined} THEN archived_at
                               WHEN ${archived ?? false} THEN coalesce(archived_at, now()) ELSE NULL END

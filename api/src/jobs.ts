@@ -66,7 +66,22 @@ export async function dailyContractRun(env: Env): Promise<void> {
   }
 }
 
-// Celý nočný beh: najprv OOM (plány, regulácia na OOM, aktivácia), potom zmluvy. Zlyhanie OOM nezastaví zmluvy;
+// Nočný beh obchodov (deal_daily_run, 0032): upozornenie v deň ďalšieho kroku (raz pre každý dátum kroku).
+export async function dailyDealRun(env: Env): Promise<void> {
+  const sql = connect(env);
+  try {
+    const [row] = await sql<{ r: { dalsi_krok?: number } }[]>`SELECT deal_daily_run() AS r`;
+    console.log(`Nočný beh obchodov: ďalší krok ${row?.r?.dalsi_krok ?? 0}`);
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? 'unknown';
+    console.error(`Nočný beh obchodov zlyhal: ${(err as Error).name} ${code}`);
+    throw err;
+  } finally {
+    await sql.end();
+  }
+}
+
+// Celý nočný beh: najprv OOM (plány, regulácia na OOM, aktivácia), potom zmluvy a obchody. Zlyhanie OOM nezastaví zmluvy;
 // ak niektorá časť zlyhá celá, handler skončí chybou (viditeľné vo Workers Observability).
 export async function nightlyRun(env: Env): Promise<void> {
   let failed = false;
@@ -77,6 +92,11 @@ export async function nightlyRun(env: Env): Promise<void> {
   }
   try {
     await dailyContractRun(env);
+  } catch {
+    failed = true;
+  }
+  try {
+    await dailyDealRun(env);
   } catch {
     failed = true;
   }

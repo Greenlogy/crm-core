@@ -74,31 +74,33 @@ INSERT INTO product (id, org_id, code, name, category, segment, vat_rate, price_
   ('00000000-0000-4000-8000-000000000402', crm_default_org(), 'test_poplatok_om_b2b', 'Test mesačná platba za OM – firmy',
    'poplatok', 'firma', 19.00, '{cennik}');
 
--- Pipelines a štádiá
+-- Pipelines a štádiá (od 0032 dostane každá pipeline 6 systémových štádií; testy používajú pevné id)
 INSERT INTO pipeline (id, name, kind) VALUES
   ('00000000-0000-4000-8000-000000000501', 'Test B2B elektrina', 'b2b_dodavka'),
   ('00000000-0000-4000-8000-000000000502', 'Test B2C elektrina', 'b2c_dodavka');
-INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, outcome) VALUES
-  ('00000000-0000-4000-8000-000000000511', '00000000-0000-4000-8000-000000000501', 'Príležitosť', 1, 0.10, 'otvoreny'),
-  ('00000000-0000-4000-8000-000000000512', '00000000-0000-4000-8000-000000000501', 'Vyhraté',     6, 1.00, 'vyhrany'),
-  ('00000000-0000-4000-8000-000000000521', '00000000-0000-4000-8000-000000000502', 'Vyhraté',     6, 1.00, 'vyhrany');
+UPDATE pipeline_stage SET id = '00000000-0000-4000-8000-000000000511'
+ WHERE pipeline_id = '00000000-0000-4000-8000-000000000501' AND code = 'prilezitost';
+UPDATE pipeline_stage SET id = '00000000-0000-4000-8000-000000000512'
+ WHERE pipeline_id = '00000000-0000-4000-8000-000000000501' AND code = 'vyhrane';
+UPDATE pipeline_stage SET id = '00000000-0000-4000-8000-000000000521'
+ WHERE pipeline_id = '00000000-0000-4000-8000-000000000502' AND code = 'vyhrane';
 
--- Dealy bez zadaného segmentu (prevezmú ho od zákazníka)
-INSERT INTO deal (id, company_id, person_id, pipeline_id, stage_id, name, closed_at, owner_id) VALUES
+-- Dealy bez zadaného segmentu (prevezmú ho od zákazníka); vyhraté zakladá kód databázy (testy bežia ako vlastník)
+INSERT INTO deal (id, company_id, person_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
   ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000101', NULL,
    '00000000-0000-4000-8000-000000000501', '00000000-0000-4000-8000-000000000512',
-   'Alfa – dodávka 2027', '2026-09-15 10:00+02', '00000000-0000-4000-8000-000000000011'),
+   'Alfa – dodávka 2027', '00000000-0000-4000-8000-000000000011', 'vlastny_kontakt'),
   ('00000000-0000-4000-8000-000000000602', NULL, '00000000-0000-4000-8000-000000000201',
    '00000000-0000-4000-8000-000000000502', '00000000-0000-4000-8000-000000000521',
-   'Testovací – výkup FVE', '2026-09-20 14:00+02', '00000000-0000-4000-8000-000000000011');
+   'Testovací – výkup FVE', '00000000-0000-4000-8000-000000000011', 'vlastny_kontakt');
 INSERT INTO deal_oom (deal_id, oom_id) VALUES
   ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000301'),
   ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000303'),
   ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000304'),
   ('00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000302');
-INSERT INTO deal_contact (deal_id, contact_id, role) VALUES
-  ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000202', 'rozhodovatel'),
-  ('00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000201', 'zakaznik');
+INSERT INTO deal_contact (deal_id, contact_id, roles) VALUES
+  ('00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000202', '{decision_maker}'),
+  ('00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000201', '{}');
 
 -- Zmluva so zmluvnými a nákupnými cenami
 -- (štruktúra zmluvy od 0025: typ, fáza z Office portálu, OOM v zmluve, ceny po zložkách)

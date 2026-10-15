@@ -1,6 +1,6 @@
 # Stav projektu
 
-Aktualizované: 14. 10. 2026
+Aktualizované: 15. 10. 2026
 
 ## Hotové
 
@@ -13,6 +13,7 @@ Aktualizované: 14. 10. 2026
 
 ## Prebieha
 
+- **Modul 5 Obchod a ponuky:** návrh v0.5. **F1:** `0032`–`0034` na `dev`, API a obrazovky 31, 32, 33, 39 na Teste (Peter skúša). `0035_audit_rls` overená nanečisto (181 kontrol) – čaká na `dev`. Po teste F1 commit a plán F2 (ponuky).
 - Modul 0 Nastavenia: návrh databázy schválený (v0.2). Test (`dev`) vyprázdnený, rola `crm_prototype_ro` zrušená, migrácie `0006_nastavenia_jadro`, `0007_nastavenia_obsah`, `0008_zakaznici_spolocnost` spustené na `dev` (Peter, 12. 10.), testy `db/test/run.sh` prešli (88 kontrol). Na Teste: 3 spoločnosti, 6 tímov, admini Peter a Eva, kalendár SK 2026–2028, žiadne dáta zákazníkov. Na `main` zatiaľ nie. Prototyp (Worker `crm-core`) po zrušení roly nefunguje – nahradí ho nové API.
 - **Modul 1 Zákazníci uzavretý** (Peter, 12. 10. 2026): F1–F4 na Teste (commity `7b40c4c`, `527992a`), zadanie v0.4 s časťou 15. Na `main` (Ostré) zatiaľ nie.
 - **Modul 2 Odberné miesta – databáza hotová na `dev`:** návrh v0.4 (`docs/moduly/02-odberne-miesta-navrh-db.md`), migrácie `0013`–`0015` (Peter, 12. 10.), testy prešli (108 kontrol), prepínač `customer_status_auto` na `dev` zapnutý (na `main` vypnutý do modulu Zmluvy), Cron dennej aktivácie na Teste. OOM má „iba svoje“ v databáze; externý tím ostáva zamknutý, kým RLS nemajú dealy a zmluvy.
@@ -24,7 +25,8 @@ Aktualizované: 14. 10. 2026
 
 ## Otvorené
 
-- **Podmienka odomknutia externého tímu** (`crm_external_ready`): okrem RLS na dealoch a zmluvách aj RLS na `audit_log` – dnes ho prihlásený používateľ vie čítať celý, vrátane zmien cudzích záznamov (Peter 12. 10.)
+- **Pred pilotom modulu 5:** RLS na `audit_log` je v `0035` (overená nanečisto); po jej spustení na `dev` (a neskôr `main`) sa dajú obchodníci priradiť do Sales_external.
+- **Podmienka odomknutia externého tímu** (`crm_external_ready`): RLS na dealoch, zmluvách, OOM aj audite – riešené v `0032` a `0035` (`0035` čaká na `dev`)
 - IČO PDS v číselníku (ZSD, SSD, VSD, SLOVNAFT, JAVYS) doplnené z pamäti – Peter overí vo FinState / ORSR; ostatné miestne DS bez IČO
 - C2-X3 pri miestnych DS (18 OOM) a X3-C2 pri miestnych DS (3 OOM): do číselníka nedané (pravidlo iba ZSD / iba VSD) – potvrdiť pri nahrávaní
 - **Pred Ostrým:** CRM pri pozvaní a deaktivácii externého používateľa samo pridá / odoberie e-mail v skupine Cloudflare Access „CRM externí“ (dovtedy ručne); treba API token s právom iba na skupiny a relácie Access

@@ -33,7 +33,10 @@ export function PipelinesPage() {
   return (
     <>
       <SettingsHead title="Pipelines a stage" sub="pre modul Obchod" />
-      <Notice tone="ok">Konkrétne pipelines a stage sa navrhnú v module Obchod. Tu sa dajú pripraviť a upraviť.</Notice>
+      <Notice tone="ok">
+        Každá pipeline má 6 systémových štádií (Príležitosť, Cenová ponuka, Vyjednávanie, Akceptácia, Vyhraté, Prehraté), na ktorých
+        stojí logika obchodu. Dajú sa premenovať a nastaviť ich pravdepodobnosť; pridať sa dá iba otvorený medzistupeň.
+      </Notice>
       {!data.data ? (
         <Skeleton lines={5} />
       ) : (
@@ -170,19 +173,8 @@ function PipelineDetail(props: { pipeline: Pipeline; data: PipelinesData; onChan
                   %
                 </td>
                 <td>
-                  <select
-                    className="inp outcome-select"
-                    aria-label={`${s.name} – typ`}
-                    value={s.outcome}
-                    onChange={(e) => void run(() => send('PATCH', `/api/settings/stages/${s.id}`, { outcome: e.target.value }))}
-                  >
-                    {OUTCOMES.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>{' '}
                   <Pill tone={OUTCOME_TONE[s.outcome]}>{OUTCOMES.find((o) => o.value === s.outcome)?.label}</Pill>
+                  {s.code ? <span className="caption"> · systémové</span> : null}
                 </td>
                 <td>
                   <button type="button" className="link-button name-link" onClick={() => setRequiredFor(s)}>
@@ -192,15 +184,17 @@ function PipelineDetail(props: { pipeline: Pipeline; data: PipelinesData; onChan
                   </button>
                 </td>
                 <td className="num">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={save.busy}
-                    title={s.deals ? `Na stage je ${s.deals} dealov; archivovaná stage sa pri nových dealoch neponúkne.` : undefined}
-                    onClick={() => void run(() => send('PATCH', `/api/settings/stages/${s.id}`, { archived: true }))}
-                  >
-                    Archivovať
-                  </button>
+                  {s.code ? null : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={save.busy}
+                      title={s.deals ? `Na stage je ${s.deals} dealov; archivovaná stage sa pri nových dealoch neponúkne.` : undefined}
+                      onClick={() => void run(() => send('PATCH', `/api/settings/stages/${s.id}`, { archived: true }))}
+                    >
+                      Archivovať
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

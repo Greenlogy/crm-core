@@ -126,9 +126,10 @@ export function UsersPage() {
                     </td>
                     <td>{u.all_orgs ? 'Všetky' : u.orgs.map((o) => o.name).join(', ') || EMPTY}</td>
                     <td>
-                      {u.is_admin || u.approves_prices ? (
+                      {u.is_admin || u.approves_prices || u.approves_assignments ? (
                         <>
-                          {u.is_admin && <Pill tone="info">Admin</Pill>} {u.approves_prices && <Pill tone="info">Schvaľuje ceny</Pill>}
+                          {u.is_admin && <Pill tone="info">Admin</Pill>} {u.approves_prices && <Pill tone="info">Schvaľuje ceny</Pill>}{' '}
+                          {u.approves_assignments && <Pill tone="info">Pridelenie firmy</Pill>}
                         </>
                       ) : (
                         EMPTY
@@ -187,6 +188,7 @@ function UserForm(props: {
   const [isAdmin, setIsAdmin] = useState(u?.is_admin ?? false);
   const [sellerType, setSellerType] = useState<SellerType | ''>(u?.seller_type ?? '');
   const [approves, setApproves] = useState(u?.approves_prices ?? false);
+  const [assigns, setAssigns] = useState(u?.approves_assignments ?? false);
   const [deactivate, setDeactivate] = useState(false);
   const save = useSave();
   const team = props.teams.find((t) => t.id === teamId);
@@ -204,6 +206,7 @@ function UserForm(props: {
       is_admin: team?.is_external ? false : isAdmin,
       seller_type: sellerType === '' ? null : sellerType,
       approves_prices: team?.is_external ? false : approves,
+      approves_assignments: team?.is_external ? false : assigns,
     };
     const ok = await save.run(() =>
       u ? send('PATCH', `/api/settings/users/${u.id}`, body) : send('POST', '/api/settings/users', { ...body, email }),
@@ -284,6 +287,11 @@ function UserForm(props: {
         <div className="fl-wide">
           <Check checked={approves && !team?.is_external} disabled={readOnly || team?.is_external} onChange={setApproves}>
             Schvaľuje ceny – výnimky z ceny a cenové parametre; vidí všetky zmluvy a maržu firmy bez ohľadu na tím
+          </Check>
+        </div>
+        <div className="fl-wide">
+          <Check checked={assigns && !team?.is_external} disabled={readOnly || team?.is_external} onChange={setAssigns}>
+            Schvaľuje pridelenie firmy – keď obchodník požiada o firmu iného obchodníka; vidí všetky obchody
           </Check>
         </div>
       </div>

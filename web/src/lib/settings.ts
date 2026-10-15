@@ -11,6 +11,7 @@ export type SettingsUser = {
   is_admin: boolean;
   seller_type: SellerType | null;
   approves_prices: boolean;
+  approves_assignments: boolean;
   status: UserStatus;
   last_login_at: string | null;
   invited_at: string;
@@ -228,6 +229,7 @@ export type Stage = {
   sort_order: number;
   probability: string | number | null;
   outcome: Outcome;
+  code: string | null;   // systémové štádium (0032): nedá sa archivovať ani zmeniť typ
   archived_at: string | null;
   deals: number;
   required: { core_field: string | null; custom_field_id: string | null; label: string | null }[];
@@ -259,10 +261,9 @@ export const OUTCOMES: { value: Outcome; label: string }[] = [
 ];
 export const DEAL_CORE_FIELD_LABEL: Record<string, string> = {
   expected_close: 'Očakávané uzavretie',
-  lost_reason: 'Dôvod prehry',
-  source: 'Zdroj',
-  campaign: 'Kampaň',
-  closed_at: 'Dátum uzavretia',
+  supply_start: 'Začiatok dodávky',
+  next_step: 'Ďalší krok',
+  estimated_value_eur: 'Odhad pridanej hodnoty',
 };
 
 // --- Audit (dizajn 16) ---

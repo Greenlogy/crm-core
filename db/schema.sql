@@ -57,6 +57,30 @@ CREATE TYPE public.activity_type AS ENUM (
 
 
 --
+-- Name: approval_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.approval_kind AS ENUM (
+    'vynimka_ceny',
+    'rizikovy_zakaznik',
+    'predlzenie_platnosti',
+    'pridelenie_firmy'
+);
+
+
+--
+-- Name: approval_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.approval_status AS ENUM (
+    'caka',
+    'schvalena',
+    'zamietnuta',
+    'zrusena'
+);
+
+
+--
 -- Name: audit_action; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -298,6 +322,20 @@ CREATE TYPE public.deal_kind AS ENUM (
     'green_solar',
     'green_viwa',
     'efet'
+);
+
+
+--
+-- Name: deal_stage_code; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.deal_stage_code AS ENUM (
+    'prilezitost',
+    'cenova_ponuka',
+    'vyjednavanie',
+    'akceptacia',
+    'vyhrane',
+    'prehrane'
 );
 
 
@@ -766,6 +804,9 @@ BEGIN
     IF v_external AND NEW.approves_prices THEN
       RAISE EXCEPTION 'Člen externého tímu nemôže schvaľovať ceny.' USING ERRCODE = 'check_violation';
     END IF;
+    IF v_external AND NEW.approves_assignments THEN
+      RAISE EXCEPTION 'Člen externého tímu nemôže schvaľovať pridelenie firmy.' USING ERRCODE = 'check_violation';
+    END IF;
     IF v_external AND NOT crm_external_ready()
        AND (TG_OP = 'INSERT' OR NEW.team_id IS DISTINCT FROM OLD.team_id) THEN
       RAISE EXCEPTION 'Do externého tímu zatiaľ nemožno priradiť používateľa: OOM, dealy, zmluvy a ponuky ešte nemajú obmedzenie „iba svoje“ v databáze.'
@@ -818,6 +859,166 @@ BEGIN
    WHERE u.id = v_user.id;
   RETURN QUERY SELECT v_user.id, 'aktivny'::user_status;
 END;
+$$;
+
+
+--
+-- Name: approval_cancel(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_cancel(p_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  UPDATE approval_request SET status = 'zrusena'
+   WHERE id = p_id AND status = 'caka' AND requested_by = crm_active_user_id();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Zrušiť môžete iba vlastnú čakajúcu žiadosť.' USING ERRCODE = 'check_violation';
+  END IF;
+END;
+$$;
+
+
+--
+-- Name: approval_decide(uuid, boolean, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_decide(p_id uuid, p_approve boolean, p_note text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  a      approval_request;
+  v_user uuid := crm_active_user_id();
+BEGIN
+  SELECT * INTO a FROM approval_request WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND OR NOT a.org_id = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Žiadosť neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF a.status <> 'caka' THEN
+    RAISE EXCEPTION 'Žiadosť už je vybavená.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_user IS NULL OR NOT (CASE WHEN a.kind = 'pridelenie_firmy' THEN crm_approves_assignments() ELSE crm_approves_prices() END) THEN
+    RAISE EXCEPTION 'Túto žiadosť nemôžete schváliť.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF a.requested_by = v_user THEN
+    RAISE EXCEPTION 'Vlastnú žiadosť schváliť nemožno.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_approve IS NULL THEN
+    RAISE EXCEPTION 'Chýba rozhodnutie.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT p_approve AND (p_note IS NULL OR btrim(p_note) = '') THEN
+    RAISE EXCEPTION 'Pri zamietnutí zadajte poznámku.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF a.kind <> 'pridelenie_firmy' THEN
+    RAISE EXCEPTION 'Tento druh žiadosti sa schvaľuje až s ponukami (F2).' USING ERRCODE = 'feature_not_supported';
+  END IF;
+
+  IF p_approve THEN
+    IF (SELECT owner_id FROM company WHERE id = a.company_id) IS DISTINCT FROM a.from_owner_id THEN
+      RAISE EXCEPTION 'Vlastník firmy sa medzitým zmenil – žiadosť zamietnite alebo nech žiadateľ požiada znova.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM set_config('app.owner_assign', 'on', true);
+    UPDATE company SET owner_id = a.requested_by WHERE id = a.company_id;
+    PERFORM set_config('app.owner_assign', '', true);
+  END IF;
+
+  UPDATE approval_request
+     SET status = CASE WHEN p_approve THEN 'schvalena' ELSE 'zamietnuta' END::approval_status,
+         decided_by = v_user, decided_at = now(), decision_note = nullif(btrim(p_note), '')
+   WHERE id = a.id;
+
+  PERFORM notification_add_deal(ARRAY[a.requested_by], 'schvalenie_rozhodnutie', NULL, a.id, NULL,
+          CASE WHEN p_approve THEN 'Pridelenie firmy schválené' ELSE 'Pridelenie firmy zamietnuté' END);
+  IF p_approve THEN
+    PERFORM notification_add_deal(ARRAY[a.from_owner_id], 'pridelenie_firmy', NULL, a.id, NULL,
+                                  'Firma bola pridelená inému obchodníkovi');
+  END IF;
+END;
+$$;
+
+
+--
+-- Name: approval_request_assign(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_request_assign(p_company_id uuid, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  c      company;
+  v_user uuid := crm_active_user_id();
+  v_id   uuid;
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Žiadosť zakladá prihlásený používateľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  SELECT * INTO c FROM company WHERE id = p_company_id;
+  IF NOT FOUND OR NOT c.org_id = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Firma neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF c.owner_id IS NULL THEN
+    RAISE EXCEPTION 'Firma nemá vlastníka – založte na nej obchod, stanete sa vlastníkom.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF c.owner_id = v_user THEN
+    RAISE EXCEPTION 'Firmu už vlastníte.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN
+    RAISE EXCEPTION 'Zadajte dôvod žiadosti.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM approval_request WHERE company_id = c.id AND requested_by = v_user
+                                              AND kind = 'pridelenie_firmy' AND status = 'caka') THEN
+    RAISE EXCEPTION 'Žiadosť o pridelenie tejto firmy už čaká na schválenie.' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO approval_request (org_id, kind, company_id, from_owner_id, reason, requested_by)
+  VALUES (c.org_id, 'pridelenie_firmy', c.id, c.owner_id, btrim(p_reason), v_user)
+  RETURNING id INTO v_id;
+  PERFORM notification_add_deal(array_remove(notification_assign_approvers(c.org_id), v_user),
+                                'schvalenie_nove', NULL, v_id, NULL, 'Žiadosť o pridelenie firmy');
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: approval_request_assign_ico(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.approval_request_assign_ico(p_ico text, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  v_ico text := regexp_replace(coalesce(p_ico, ''), '\s', '', 'g');
+  v_id  uuid;
+BEGIN
+  IF v_ico ~ '^[0-9]{1,8}$' THEN
+    v_ico := lpad(v_ico, 8, '0');
+  END IF;
+  SELECT id INTO v_id FROM company
+   WHERE ico = v_ico AND org_id = ANY (crm_user_orgs())
+   ORDER BY country = 'SK' DESC LIMIT 1;
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'Firma s týmto IČO v CRM nie je.' USING ERRCODE = 'no_data_found';
+  END IF;
+  RETURN approval_request_assign(v_id, p_reason);
+END;
+$_$;
+
+
+--
+-- Name: audit_diff_value(jsonb, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.audit_diff_value(p_diff jsonb, p_column text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN jsonb_typeof(p_diff -> p_column) = 'object'
+              THEN coalesce(p_diff -> p_column ->> 'new', p_diff -> p_column ->> 'old')
+              ELSE p_diff ->> p_column END
 $$;
 
 
@@ -904,6 +1105,93 @@ $$;
 
 
 --
+-- Name: audit_row_visible(text, uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.audit_row_visible(p_table text, p_record uuid, p_diff jsonb) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  v_id uuid;
+  d    deal;
+  k    contract;
+  a    approval_request;
+BEGIN
+  IF crm_is_service() OR crm_is_admin() THEN
+    RETURN true;
+  END IF;
+  IF crm_active_user_id() IS NULL THEN
+    RETURN false;
+  END IF;
+
+  CASE p_table
+    WHEN 'company' THEN
+      RETURN crm_company_access(p_record, 'view');
+    WHEN 'contact' THEN
+      RETURN crm_contact_access(p_record, 'view');
+    WHEN 'company_contact' THEN
+      v_id := coalesce((SELECT company_id FROM company_contact WHERE id = p_record), audit_diff_value(p_diff, 'company_id')::uuid);
+      RETURN v_id IS NOT NULL AND crm_company_access(v_id, 'view');
+    WHEN 'activity' THEN
+      v_id := coalesce((SELECT company_id FROM activity WHERE id = p_record), audit_diff_value(p_diff, 'company_id')::uuid);
+      IF v_id IS NOT NULL THEN
+        RETURN crm_company_access(v_id, 'view');
+      END IF;
+      v_id := coalesce((SELECT contact_id FROM activity WHERE id = p_record), audit_diff_value(p_diff, 'contact_id')::uuid);
+      RETURN v_id IS NOT NULL AND crm_contact_access(v_id, 'view');
+    WHEN 'oom' THEN
+      RETURN crm_oom_access(p_record, 'view');
+    WHEN 'oom_customer', 'oom_device', 'oom_contact', 'oom_planned_change', 'oom_price_regulation_change' THEN
+      v_id := audit_diff_value(p_diff, 'oom_id')::uuid;
+      IF v_id IS NULL THEN
+        EXECUTE format('SELECT oom_id FROM %I WHERE id = $1', p_table) INTO v_id USING p_record;
+      END IF;
+      RETURN v_id IS NOT NULL AND crm_oom_access(v_id, 'view');
+    WHEN 'deal', 'deal_oom', 'deal_contact' THEN
+      v_id := CASE WHEN p_table = 'deal' THEN p_record
+                   ELSE coalesce(audit_diff_value(p_diff, 'deal_id')::uuid,
+                                 (SELECT deal_id FROM deal_oom WHERE id = p_record),
+                                 (SELECT deal_id FROM deal_contact WHERE id = p_record)) END;
+      SELECT * INTO d FROM deal WHERE id = v_id;
+      RETURN FOUND AND d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id);
+    WHEN 'contract', 'contract_oom', 'contract_price', 'contract_flag' THEN
+      v_id := CASE WHEN p_table = 'contract' THEN p_record
+                   ELSE coalesce(audit_diff_value(p_diff, 'contract_id')::uuid,
+                                 (SELECT contract_id FROM contract_oom WHERE id = p_record),
+                                 (SELECT contract_id FROM contract_price WHERE id = p_record),
+                                 (SELECT contract_id FROM contract_flag WHERE id = p_record)) END;
+      SELECT * INTO k FROM contract WHERE id = v_id;
+      RETURN FOUND AND k.org_id = ANY (crm_user_orgs()) AND crm_contract_visible(k.company_id, k.person_id, k.owner_id);
+    WHEN 'price_exception' THEN
+      RETURN crm_sees_all_contracts()
+          OR coalesce((SELECT requested_by FROM price_exception WHERE id = p_record),
+                      audit_diff_value(p_diff, 'requested_by')::uuid) = crm_active_user_id();
+    WHEN 'approval_request' THEN
+      SELECT * INTO a FROM approval_request WHERE id = p_record;
+      RETURN FOUND AND a.org_id = ANY (crm_user_orgs())
+         AND (a.requested_by = crm_active_user_id() OR a.from_owner_id = crm_active_user_id()
+              OR (a.kind = 'pridelenie_firmy' AND crm_approves_assignments())
+              OR (a.kind <> 'pridelenie_firmy' AND crm_approves_prices()));
+    WHEN 'price_parameter', 'market_price_daily' THEN
+      RETURN crm_approves_prices() OR crm_can_see_margin();   -- kto smie čítať cenové parametre a trhové ceny (0023)
+    ELSE
+      RETURN false;   -- Nastavenia, používatelia, tímy, cenníky, importy: iba admin
+  END CASE;
+EXCEPTION WHEN invalid_text_representation THEN
+  RETURN false;     -- poškodené id v obsahu zmeny: radšej skryť
+END;
+$_$;
+
+
+--
+-- Name: FUNCTION audit_row_visible(p_table text, p_record uuid, p_diff jsonb); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.audit_row_visible(p_table text, p_record uuid, p_diff jsonb) IS 'RLS na audit_log: admin všetko, ostatní iba zmeny záznamov, ktoré smú vidieť (0035)';
+
+
+--
 -- Name: business_calendar_rebuild(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -930,6 +1218,101 @@ BEGIN
   RETURN NULL;
 END;
 $$;
+
+
+--
+-- Name: company_apply_finstat(uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_apply_finstat(p_company_id uuid, p_data jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_prev text;
+BEGIN
+  IF NOT crm_company_access(p_company_id, 'view') THEN
+    RAISE EXCEPTION 'Firma neexistuje alebo ju nevidíte.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF p_data IS NULL OR jsonb_typeof(p_data) <> 'object' THEN
+    RAISE EXCEPTION 'company_apply_finstat: očakávaný objekt údajov';
+  END IF;
+  v_prev := current_setting('app.change_source', true);
+  PERFORM set_config('app.change_source', 'synchronizacia', true);
+  UPDATE company SET
+    revenue_eur      = (p_data->>'revenue_eur')::numeric,
+    profit_eur       = (p_data->>'profit_eur')::numeric,
+    finance_year     = (p_data->>'finance_year')::smallint,
+    employees_range  = nullif(p_data->>'employees_range', ''),
+    founded_on       = (p_data->>'founded_on')::date,
+    z_score          = (p_data->>'z_score')::numeric,
+    has_debts        = (p_data->>'has_debts')::boolean,
+    debts            = coalesce(p_data->'debts', '[]'),
+    insolvency_kind  = nullif(p_data->>'insolvency_kind', ''),
+    insolvency_since = (p_data->>'insolvency_since')::date,
+    cancelled_on     = (p_data->>'cancelled_on')::date,
+    -- Finstat platobný rating A–E/X neposiela: bez kľúča ostáva hodnota na firme (z CRM / HubSpotu)
+    payment_rating   = CASE WHEN p_data ? 'payment_rating' THEN (nullif(p_data->>'payment_rating', ''))::payment_rating ELSE payment_rating END,
+    finstat_url      = coalesce(nullif(p_data->>'finstat_url', ''), finstat_url),
+    finstat_updated_at = now()
+  WHERE id = p_company_id;
+  PERFORM set_config('app.change_source', coalesce(v_prev, ''), true);
+END;
+$$;
+
+
+--
+-- Name: company_check(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_check(p_ico text) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  v_ico   text := regexp_replace(coalesce(p_ico, ''), '\s', '', 'g');
+  c       company;
+  v_sees  boolean;
+BEGIN
+  IF NOT crm_session_ok() THEN
+    RETURN NULL;
+  END IF;
+  IF v_ico ~ '^[0-9]{1,8}$' THEN
+    v_ico := lpad(v_ico, 8, '0');
+  END IF;
+  SELECT * INTO c FROM company
+   WHERE ico = v_ico AND org_id = ANY (crm_user_orgs())
+   ORDER BY country = 'SK' DESC LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('exists', false, 'ico', v_ico);
+  END IF;
+  v_sees := crm_company_access(c.id, 'view');
+  RETURN jsonb_strip_nulls(jsonb_build_object(
+    'exists', true,
+    'ico', c.ico,
+    -- id aj pri firme bez vlastníka: obchodník na nej založí obchod a stane sa vlastníkom (0032, odpoveď 4)
+    'company_id', CASE WHEN v_sees OR c.owner_id IS NULL THEN c.id END,
+    'visible', v_sees,
+    'name', c.name,
+    'is_customer', c.is_customer,
+    'status', c.status,
+    'owner_id', c.owner_id,
+    'owner_name', (SELECT name FROM app_user WHERE id = c.owner_id),
+    'owner_is_me', c.owner_id = crm_active_user_id(),
+    'contacts', CASE WHEN v_sees THEN (SELECT count(*) FROM company_contact WHERE company_id = c.id) END,
+    'contracts', CASE WHEN v_sees THEN (
+        SELECT coalesce(jsonb_agg(jsonb_build_object('number', k.number, 'state', contract_state(k),
+                                                     'effective_to', contract_effective_to(k)) ORDER BY k.valid_from DESC NULLS LAST), '[]')
+          FROM contract k WHERE k.company_id = c.id) END,
+    'open_deals', (
+        SELECT coalesce(jsonb_agg(jsonb_build_object(
+                 'deal_id', CASE WHEN v_sees AND crm_deal_visible(d.company_id, d.person_id, d.owner_id) THEN d.id END,
+                 'name', CASE WHEN v_sees AND crm_deal_visible(d.company_id, d.person_id, d.owner_id) THEN d.name END,
+                 'owner_name', (SELECT name FROM app_user WHERE id = d.owner_id)) ORDER BY d.created_at), '[]')
+          FROM deal d WHERE d.company_id = c.id AND d.closed_at IS NULL),
+    'risk', company_risk(c.id)));
+END;
+$_$;
 
 
 --
@@ -1047,7 +1430,21 @@ CREATE TABLE public.company (
     country public.country_code NOT NULL,
     op_person_id uuid,
     created_by_import uuid,
+    revenue_eur numeric(14,2),
+    profit_eur numeric(14,2),
+    finance_year smallint,
+    employees_range text,
+    founded_on date,
+    z_score numeric(6,2),
+    has_debts boolean,
+    debts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    insolvency_kind text,
+    insolvency_since date,
+    cancelled_on date,
+    CONSTRAINT company_debts_check CHECK ((jsonb_typeof(debts) = 'array'::text)),
+    CONSTRAINT company_finance_year_check CHECK (((finance_year >= 1990) AND (finance_year <= 2100))),
     CONSTRAINT company_ico_format_check CHECK ((((country = ANY (ARRAY['SK'::public.country_code, 'CZ'::public.country_code])) AND (ico ~ '^[0-9]{8}$'::text)) OR ((country = 'HR'::public.country_code) AND (ico ~ '^[0-9]{11}$'::text)))),
+    CONSTRAINT company_insolvency_kind_check CHECK ((insolvency_kind = ANY (ARRAY['konkurz'::text, 'restrukturalizacia'::text]))),
     CONSTRAINT company_kind_check CHECK ((is_customer OR is_partner OR is_supplier)),
     CONSTRAINT company_name_check CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT company_status_source_check CHECK (((status IS NULL) = (status_source IS NULL)))
@@ -1146,6 +1543,41 @@ COMMENT ON COLUMN public.company.created_by_import IS 'založený importom zmlú
 
 
 --
+-- Name: COLUMN company.revenue_eur; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.revenue_eur IS 'tržby za rok finance_year (Finstat)';
+
+
+--
+-- Name: COLUMN company.z_score; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.z_score IS 'Altmanovo Z-skóre (Finstat): pod 1,23 riziko úpadku, 1,23–2,90 šedá zóna, nad 2,90 stabilná';
+
+
+--
+-- Name: COLUMN company.debts; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.debts IS 'dlhy a nedoplatky z verejných zoznamov (Finstat): [{veritel, suma_eur, k_datumu}]';
+
+
+--
+-- Name: COLUMN company.insolvency_kind; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.insolvency_kind IS 'konkurz alebo reštrukturalizácia (Finstat); NULL = nie';
+
+
+--
+-- Name: COLUMN company.cancelled_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.company.cancelled_on IS 'firma zrušená / vymazaná z registra (Finstat)';
+
+
+--
 -- Name: company_is_archived(public.company); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1154,6 +1586,43 @@ CREATE FUNCTION public.company_is_archived(c public.company) RETURNS boolean
     AS $$
   SELECT c.status IS NOT DISTINCT FROM 'zruseny_zakaznik' AND NOT c.is_partner AND NOT c.is_supplier
 $$;
+
+
+--
+-- Name: company_risk(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.company_risk(p_company_id uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object(
+           'warnings', coalesce(jsonb_agg(w.code ORDER BY w.ord) FILTER (WHERE w.code IS NOT NULL), '[]'),
+           'needs_approval', bool_or(w.approval) IS TRUE,
+           'z_band', CASE WHEN c.z_score IS NULL THEN NULL
+                          WHEN c.z_score < 1.23 THEN 'riziko'
+                          WHEN c.z_score <= 2.90 THEN 'seda_zona'
+                          ELSE 'stabilna' END,
+           'finstat_updated_at', c.finstat_updated_at)
+    FROM company c
+    LEFT JOIN LATERAL (VALUES
+      (1, CASE WHEN c.has_debts OR jsonb_array_length(c.debts) > 0 THEN 'dlhy' END, false),
+      (2, CASE WHEN c.insolvency_kind IS NOT NULL THEN c.insolvency_kind END, true),
+      (3, CASE WHEN c.payment_rating IN ('E', 'X') THEN 'rating_' || lower(c.payment_rating::text) END,
+          c.payment_rating IN ('E', 'X')),
+      (4, CASE WHEN c.z_score < 1.23 THEN 'z_skore' END, false),
+      (5, CASE WHEN c.cancelled_on IS NOT NULL THEN 'zrusena' END, false)
+    ) AS w(ord, code, approval) ON w.code IS NOT NULL
+   WHERE c.id = p_company_id
+   GROUP BY c.id
+$$;
+
+
+--
+-- Name: FUNCTION company_risk(p_company_id uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.company_risk(p_company_id uuid) IS 'výstrahy Finstatu pre firmu, obchod a ponuku; needs_approval = konkurz/reštrukturalizácia alebo rating E/X (bez osobných údajov)';
 
 
 --
@@ -4506,6 +4975,18 @@ $$;
 
 
 --
+-- Name: crm_approves_assignments(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_approves_assignments() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM app_user u WHERE u.id = crm_active_user_id() AND u.approves_assignments)
+$$;
+
+
+--
 -- Name: crm_approves_prices(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -4800,6 +5281,62 @@ $$;
 
 
 --
+-- Name: crm_customer_owner(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_customer_owner(p_company_id uuid, p_person_id uuid) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE WHEN p_company_id IS NOT NULL THEN (SELECT owner_id FROM company WHERE id = p_company_id)
+              ELSE (SELECT owner_id FROM contact WHERE id = p_person_id) END
+$$;
+
+
+--
+-- Name: crm_deal_editable(uuid, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_deal_editable(p_company_id uuid, p_person_id uuid, p_owner_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_scope('obchod', 'edit') = 'vsetko'
+      OR crm_approves_prices() OR crm_approves_assignments()
+      OR (crm_scope('obchod', 'edit') = 'iba_svoje'
+          AND (p_owner_id = crm_active_user_id() OR crm_customer_owned(p_company_id, p_person_id)))
+$$;
+
+
+--
+-- Name: crm_deal_manager(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_deal_manager() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_can_change_owner() OR crm_scope('obchod', 'edit') = 'vsetko'
+      OR crm_approves_prices() OR crm_approves_assignments()
+$$;
+
+
+--
+-- Name: crm_deal_visible(uuid, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_deal_visible(p_company_id uuid, p_person_id uuid, p_owner_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_scope('obchod', 'view') = 'vsetko'
+      OR crm_approves_prices() OR crm_approves_assignments()
+      OR (crm_scope('obchod', 'view') = 'iba_svoje'
+          AND (p_owner_id = crm_active_user_id() OR crm_customer_owned(p_company_id, p_person_id)))
+$$;
+
+
+--
 -- Name: crm_entity_table(public.crm_entity); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -4818,8 +5355,26 @@ $$;
 CREATE FUNCTION public.crm_external_ready() RETURNS boolean
     LANGUAGE sql IMMUTABLE
     AS $$
-  SELECT false
+  SELECT true
 $$;
+
+
+--
+-- Name: crm_internal_call(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_internal_call() RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'deal'::regclass)
+$$;
+
+
+--
+-- Name: FUNCTION crm_internal_call(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_internal_call() IS 'true = beží kód databázy s právami vlastníka (funkcia / spúšťač SECURITY DEFINER, skript vlastníka), nie aplikácia ani iná rola';
 
 
 --
@@ -5020,6 +5575,18 @@ CREATE FUNCTION public.crm_slug(p text) RETURNS text
   SELECT nullif(btrim(regexp_replace(lower(translate(p,
            'áäčďéěíĺľňóôöŕřšťúůüýžÁÄČĎÉĚÍĹĽŇÓÔÖŔŘŠŤÚŮÜÝŽ',
            'aacdeeillnooorrstuuuyzAACDEEILLNOOORRSTUUUYZ')), '[^a-z0-9]+', '_', 'g'), '_'), '')
+$$;
+
+
+--
+-- Name: crm_user_name(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_user_name(p_user_id uuid) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT name FROM app_user WHERE id = p_user_id
 $$;
 
 
@@ -5554,6 +6121,72 @@ $$;
 
 
 --
+-- Name: deal_after_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_after_change() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_code  deal_stage_code;
+  v_oom   record;
+BEGIN
+  -- zákazník bez vlastníka → vlastník obchodu (odpoveď 4)
+  IF TG_OP = 'INSERT' OR (NEW.company_id, NEW.person_id, NEW.owner_id) IS DISTINCT FROM (OLD.company_id, OLD.person_id, OLD.owner_id) THEN
+    IF crm_customer_owner(NEW.company_id, NEW.person_id) IS NULL THEN
+      PERFORM set_config('app.owner_assign', 'on', true);
+      IF NEW.company_id IS NOT NULL THEN
+        UPDATE company SET owner_id = NEW.owner_id WHERE id = NEW.company_id AND owner_id IS NULL;
+      ELSE
+        UPDATE contact SET owner_id = NEW.owner_id WHERE id = NEW.person_id AND owner_id IS NULL;
+      END IF;
+      PERFORM set_config('app.owner_assign', '', true);
+      INSERT INTO deal_event (deal_id, org_id, kind, user_id, detail)
+      VALUES (NEW.id, NEW.org_id, 'zakaznik_vlastnik', crm_current_user_id(), jsonb_build_object('owner_id', NEW.owner_id));
+    END IF;
+  END IF;
+
+  -- prehra: OOM z tohto obchodu bez zmluvy a bez iného otvoreného obchodu → Zrušené (odpoveď 1)
+  IF TG_OP = 'UPDATE' AND NEW.stage_id <> OLD.stage_id THEN
+    SELECT code INTO v_code FROM pipeline_stage WHERE id = NEW.stage_id;
+    IF v_code = 'prehrane' THEN
+      FOR v_oom IN
+        SELECT o.id FROM oom o
+         WHERE o.created_from_deal_id = NEW.id AND o.status = 'pripravovane'
+           AND NOT EXISTS (SELECT 1 FROM contract_oom k WHERE k.oom_id = o.id)
+           AND NOT EXISTS (SELECT 1 FROM deal_oom x JOIN deal y ON y.id = x.deal_id
+                            WHERE x.oom_id = o.id AND y.id <> NEW.id AND y.closed_at IS NULL)
+      LOOP
+        BEGIN
+          PERFORM oom_set_status(v_oom.id, 'zrusene');
+          INSERT INTO deal_event (deal_id, org_id, kind, user_id, oom_id, detail)
+          VALUES (NEW.id, NEW.org_id, 'oom_zrusene', crm_current_user_id(), v_oom.id, '{"dovod": "obchod prehraný"}');
+        EXCEPTION WHEN check_violation THEN
+          -- napr. naplánovaná zmena OOM: OOM ostane, v časovej osi je dôvod
+          INSERT INTO deal_event (deal_id, org_id, kind, user_id, oom_id, detail)
+          VALUES (NEW.id, NEW.org_id, 'oom_nezrusene', crm_current_user_id(), v_oom.id,
+                  jsonb_build_object('dovod', SQLERRM));
+        END;
+      END LOOP;
+    END IF;
+  END IF;
+
+  -- stav zákazníka (Záujemca) podľa otvorených obchodov
+  IF crm_setting_on('customer_status_auto')
+     AND (TG_OP = 'INSERT' OR NEW.stage_id <> OLD.stage_id
+          OR (NEW.company_id, NEW.person_id) IS DISTINCT FROM (OLD.company_id, OLD.person_id)) THEN
+    PERFORM customer_refresh(NEW.company_id, NEW.person_id);
+    IF TG_OP = 'UPDATE' AND (NEW.company_id, NEW.person_id) IS DISTINCT FROM (OLD.company_id, OLD.person_id) THEN
+      PERFORM customer_refresh(OLD.company_id, OLD.person_id);
+    END IF;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
 -- Name: deal_contact_org_check(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -5567,6 +6200,470 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
+$$;
+
+
+--
+-- Name: deal_contact_roles_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_contact_roles_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  r     text;
+  v_org uuid := (SELECT org_id FROM deal WHERE id = NEW.deal_id);
+BEGIN
+  FOREACH r IN ARRAY NEW.roles LOOP
+    IF NOT lookup_code_ok('rola_kontaktu', r, v_org)
+       AND (TG_OP = 'INSERT' OR NOT r = ANY (OLD.roles)) THEN
+      RAISE EXCEPTION 'Neznáma rola kontaktu.' USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: deal_daily_run(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_daily_run() RETURNS jsonb
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT deal_daily_run_at(crm_today())
+$$;
+
+
+--
+-- Name: deal_daily_run_at(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_daily_run_at(p_today date) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_run  uuid;
+  v_n    integer := 0;
+  v_prev text := crm_as_system(true);
+  r      record;
+BEGIN
+  INSERT INTO job_run (job, run_date, test_date) VALUES ('obchody', p_today, p_today <> (now() AT TIME ZONE 'Europe/Bratislava')::date)
+  RETURNING id INTO v_run;
+  -- deň kroku (dobieha 7 dní, keby beh vypadol); raz pre každý dátum kroku
+  FOR r IN
+    SELECT d.id, d.owner_id, d.next_step_on FROM deal d
+     WHERE d.closed_at IS NULL AND d.next_step_on BETWEEN p_today - 7 AND p_today
+       AND d.next_step_notified_on IS DISTINCT FROM d.next_step_on
+     ORDER BY d.id
+  LOOP
+    PERFORM notification_add_deal(ARRAY[r.owner_id], 'dalsi_krok', r.id, NULL, r.next_step_on, 'Ďalší krok obchodu');
+    UPDATE deal SET next_step_notified_on = r.next_step_on WHERE id = r.id;
+    v_n := v_n + 1;
+  END LOOP;
+  UPDATE job_run SET finished_at = now(), result = jsonb_build_object('dalsi_krok', v_n) WHERE id = v_run;
+  PERFORM set_config('app.change_source', v_prev, true);
+  RETURN jsonb_build_object('dalsi_krok', v_n);
+END;
+$$;
+
+
+--
+-- Name: deal_event_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_event_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Udalosti časovej osi sa nemenia ani nemažú.' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+--
+-- Name: deal_events(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_events() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_user uuid := crm_current_user_id();
+  v_reason text := nullif(current_setting('app.deal_reopen_reason', true), '');
+  v_code deal_stage_code;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO deal_event (deal_id, org_id, kind, user_id, to_stage_id, detail)
+    VALUES (NEW.id, NEW.org_id, 'zalozenie', v_user, NEW.stage_id, jsonb_build_object('owner_id', NEW.owner_id));
+    RETURN NULL;
+  END IF;
+  IF NEW.stage_id <> OLD.stage_id THEN
+    INSERT INTO deal_event (deal_id, org_id, kind, user_id, from_stage_id, to_stage_id, detail, reason)
+    VALUES (NEW.id, NEW.org_id,
+            CASE WHEN current_setting('app.deal_reopen', true) = NEW.id::text THEN 'znovuotvorenie' ELSE 'stadium' END,
+            v_user, OLD.stage_id, NEW.stage_id,
+            jsonb_strip_nulls(jsonb_build_object('lost_reason_code', NEW.lost_reason_code)),
+            CASE WHEN current_setting('app.deal_reopen', true) = NEW.id::text THEN v_reason END);
+  END IF;
+  IF NEW.owner_id <> OLD.owner_id THEN
+    INSERT INTO deal_event (deal_id, org_id, kind, user_id, detail)
+    VALUES (NEW.id, NEW.org_id, 'vlastnik', v_user, jsonb_build_object('from', OLD.owner_id, 'to', NEW.owner_id));
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: deal_is_renewal_of(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_is_renewal_of(p_deal_id uuid, p_oom_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM deal d JOIN contract_oom k ON k.contract_id = d.previous_contract_id
+                  WHERE d.id = p_deal_id AND d.source_code = 'obnova' AND k.oom_id = p_oom_id)
+$$;
+
+
+--
+-- Name: deal_kind_group(public.deal_kind); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_kind_group(p_kind public.deal_kind) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE WHEN p_kind IN ('b2b_vykup', 'green_viwa') THEN 'vykup_viwa' ELSE 'dodavka' END
+$$;
+
+
+--
+-- Name: deal_link_events(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_link_events() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  r      record := coalesce(NEW, OLD);
+  v_org  uuid := (SELECT org_id FROM deal WHERE id = r.deal_id);
+BEGIN
+  IF v_org IS NULL THEN
+    RETURN NULL;   -- obchod sa práve maže (kaskáda)
+  END IF;
+  IF TG_TABLE_NAME = 'deal_oom' THEN
+    INSERT INTO deal_event (deal_id, org_id, kind, user_id, oom_id)
+    VALUES (r.deal_id, v_org, CASE TG_OP WHEN 'INSERT' THEN 'oom_pridane' ELSE 'oom_odobrane' END,
+            crm_current_user_id(), r.oom_id);
+  ELSE
+    INSERT INTO deal_event (deal_id, org_id, kind, user_id, contact_id)
+    VALUES (r.deal_id, v_org, CASE TG_OP WHEN 'INSERT' THEN 'kontakt_pridany' ELSE 'kontakt_odobrany' END,
+            crm_current_user_id(), r.contact_id);
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: deal_oom_conflict(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_oom_conflict(p_deal_id uuid, p_oom_id uuid) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT x.owner_id
+    FROM deal d JOIN pipeline p ON p.id = d.pipeline_id,
+         deal_oom dx JOIN deal x ON x.id = dx.deal_id JOIN pipeline px ON px.id = x.pipeline_id
+   WHERE d.id = p_deal_id AND dx.oom_id = p_oom_id AND x.id <> d.id AND x.closed_at IS NULL
+     AND deal_kind_group(px.kind) = deal_kind_group(p.kind)
+     AND NOT deal_is_renewal_of(x.id, p_oom_id)
+     AND NOT deal_is_renewal_of(d.id, p_oom_id)
+   LIMIT 1
+$$;
+
+
+--
+-- Name: deal_oom_ready(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_oom_ready(p_deal_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM deal_oom WHERE deal_id = p_deal_id)
+     AND NOT EXISTS (
+       SELECT 1 FROM deal_oom o
+         JOIN deal d ON d.id = o.deal_id
+         JOIN pipeline p ON p.id = d.pipeline_id
+        WHERE o.deal_id = p_deal_id
+          AND CASE deal_kind_group(p.kind)
+                WHEN 'dodavka' THEN coalesce(o.planned_vt_mwh, 0) + coalesce(o.planned_nt_mwh, 0) <= 0
+                ELSE coalesce(o.planned_feed_in_mwh, 0) <= 0 AND coalesce(o.source_power_kw, 0) <= 0
+              END)
+$$;
+
+
+--
+-- Name: deal_oom_ready_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_oom_ready_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_id   uuid := coalesce(NEW.deal_id, OLD.deal_id);
+  v_code deal_stage_code;
+BEGIN
+  SELECT s.code INTO v_code FROM deal d JOIN pipeline_stage s ON s.id = d.stage_id WHERE d.id = v_id AND d.closed_at IS NULL;
+  IF deal_stage_needs_oom(v_code) AND NOT deal_oom_ready(v_id) THEN
+    RAISE EXCEPTION 'Obchod v štádiu ponuky musí mať aspoň jedno OOM a pri každom plánovanú spotrebu (pri výkupe výrobu alebo výkon).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: deal_oom_rules(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_oom_rules() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  d        deal;
+  o        oom;
+  v_other  uuid;
+  v_app    boolean := NOT (crm_internal_call() OR current_user = 'crm_sync');
+BEGIN
+  SELECT * INTO d FROM deal WHERE id = coalesce(NEW.deal_id, OLD.deal_id);
+  IF v_app AND d.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'OOM uzavretého obchodu sa nemenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND (NEW.deal_id <> OLD.deal_id OR NEW.oom_id <> OLD.oom_id) THEN
+    RAISE EXCEPTION 'Väzba OOM na obchode sa nemení – odoberte ju a pridajte znova.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT * INTO o FROM oom WHERE id = NEW.oom_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'OOM neexistuje alebo ho nevidíte.' USING ERRCODE = 'no_data_found';
+  END IF;
+  NEW.org_id := d.org_id;
+  IF o.org_id <> d.org_id THEN
+    RAISE EXCEPTION 'OOM patrí inej spoločnosti ako obchod.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    IF v_app AND o.status NOT IN ('pripravovane', 'aktivne') THEN
+      RAISE EXCEPTION 'Do obchodu sa dá pridať iba Pripravované alebo Aktívne OOM.' USING ERRCODE = 'check_violation';
+    END IF;
+    NEW.planned_vt_mwh      := coalesce(NEW.planned_vt_mwh, o.planned_consumption_vt_mwh);
+    NEW.planned_nt_mwh      := coalesce(NEW.planned_nt_mwh, o.planned_consumption_nt_mwh);
+    NEW.planned_feed_in_mwh := coalesce(NEW.planned_feed_in_mwh, o.planned_feed_in_mwh);
+    NEW.source_power_kw     := coalesce(NEW.source_power_kw, o.source_power_kw);
+
+    -- jedno OOM najviac v jednom otvorenom obchode rovnakej skupiny; výnimka Obnova k zmluve, na ktorej OOM je
+    IF d.closed_at IS NULL THEN
+      v_other := deal_oom_conflict(d.id, NEW.oom_id);
+      IF v_other IS NOT NULL THEN
+        RAISE EXCEPTION 'OOM už je v inom otvorenom obchode (vlastník %).', crm_user_name(v_other)
+          USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: deal_reopen(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_reopen(p_deal_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d       deal;
+  v_code  deal_stage_code;
+BEGIN
+  SELECT * INTO d FROM deal WHERE id = p_deal_id FOR UPDATE;
+  IF NOT FOUND OR NOT (d.org_id = ANY (crm_user_orgs()) AND crm_deal_visible(d.company_id, d.person_id, d.owner_id)) THEN
+    RAISE EXCEPTION 'Obchod neexistuje alebo ho nevidíte.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN
+    RAISE EXCEPTION 'Zadajte dôvod znovuotvorenia.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT code INTO v_code FROM pipeline_stage WHERE id = d.stage_id;
+  IF v_code = 'prehrane' THEN
+    IF NOT (d.owner_id = crm_active_user_id() OR crm_is_admin()) THEN
+      RAISE EXCEPTION 'Prehratý obchod znova otvorí iba jeho vlastník alebo admin.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+  ELSIF v_code = 'vyhrane' THEN
+    IF NOT crm_is_admin() THEN
+      RAISE EXCEPTION 'Vyhratý obchod znova otvorí iba admin.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'Obchod je otvorený.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  PERFORM set_config('app.deal_reopen', d.id::text, true);
+  PERFORM set_config('app.deal_reopen_reason', btrim(p_reason), true);
+  UPDATE deal SET stage_id = (SELECT id FROM pipeline_stage WHERE pipeline_id = d.pipeline_id AND code = 'prilezitost')
+   WHERE id = d.id;
+  PERFORM set_config('app.deal_reopen', '', true);
+  PERFORM set_config('app.deal_reopen_reason', '', true);
+END;
+$$;
+
+
+--
+-- Name: deal_rules(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_rules() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_kind      deal_kind;
+  v_stage     pipeline_stage;
+  v_old_stage pipeline_stage;
+  v_cust_own  uuid;
+  v_internal  boolean := crm_internal_call() OR current_user = 'crm_sync';   -- kód databázy alebo prenos z HubSpotu
+BEGIN
+  SELECT p.kind INTO v_kind FROM pipeline p WHERE p.id = NEW.pipeline_id AND p.archived_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pipeline neexistuje alebo je archivovaná.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO v_stage FROM pipeline_stage s WHERE s.id = NEW.stage_id AND s.pipeline_id = NEW.pipeline_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Štádium nepatrí do pipeline obchodu.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- zákazník podľa druhu pipeline
+  IF v_kind IN ('b2c_dodavka', 'green_solar') AND NEW.person_id IS NULL THEN
+    RAISE EXCEPTION 'Obchod v pipeline B2C patrí domácnosti (osobe), nie firme.' USING ERRCODE = 'check_violation';
+  ELSIF v_kind NOT IN ('b2c_dodavka', 'green_solar') AND NEW.company_id IS NULL THEN
+    RAISE EXCEPTION 'Obchod v tejto pipeline patrí firme.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NOT lookup_code_ok('zdroj_obchodu', NEW.source_code, NEW.org_id)
+     AND (TG_OP = 'INSERT' OR NEW.source_code IS DISTINCT FROM OLD.source_code) THEN
+    RAISE EXCEPTION 'Neznámy zdroj obchodu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.source_code = 'obnova' AND (TG_OP = 'INSERT' OR OLD.source_code <> 'obnova') AND NOT v_internal THEN
+    RAISE EXCEPTION 'Zdroj „Obnova“ nastavuje iba nočný beh.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- vlastník obchodu: aktívny používateľ; zmena iba vedenie, „všetko“ v module Obchod, schvaľovatelia, kód databázy
+  IF TG_OP = 'INSERT' OR NEW.owner_id <> OLD.owner_id THEN
+    IF NOT EXISTS (SELECT 1 FROM app_user u WHERE u.id = NEW.owner_id AND u.status <> 'deaktivovany') THEN
+      RAISE EXCEPTION 'Vlastník obchodu musí byť aktívny používateľ.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.owner_id <> OLD.owner_id AND NOT v_internal AND current_user <> 'crm_sync'
+     AND NOT crm_deal_manager() THEN
+    RAISE EXCEPTION 'Vlastníka obchodu môže zmeniť iba vedenie alebo obchodný riaditeľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.owner_id <> crm_active_user_id() AND NOT v_internal AND NOT crm_deal_manager() THEN
+    RAISE EXCEPTION 'Obchod môžete založiť iba pre seba.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  -- konflikt vlastníka zákazníka (časť 4.1 zadania): iný vlastník → pridelenie firmy
+  IF TG_OP = 'INSERT' OR (NEW.company_id, NEW.person_id, NEW.owner_id) IS DISTINCT FROM (OLD.company_id, OLD.person_id, OLD.owner_id) THEN
+    v_cust_own := crm_customer_owner(NEW.company_id, NEW.person_id);
+    IF v_cust_own IS NOT NULL AND v_cust_own <> NEW.owner_id AND NOT v_internal AND current_user <> 'crm_sync'
+       AND NOT crm_deal_manager() THEN
+      RAISE EXCEPTION '% vlastní % – nový obchod nejde založiť. Požiadajte o pridelenie.',
+        CASE WHEN NEW.company_id IS NOT NULL THEN 'Firmu' ELSE 'Osobu' END, crm_user_name(v_cust_own)
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  -- štádium
+  IF TG_OP = 'INSERT' THEN
+    IF v_stage.code IS DISTINCT FROM 'prilezitost' AND NOT v_internal THEN
+      RAISE EXCEPTION 'Nový obchod začína v štádiu Príležitosť.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF NEW.stage_id <> OLD.stage_id THEN
+    SELECT * INTO v_old_stage FROM pipeline_stage WHERE id = OLD.stage_id;
+    IF v_stage.archived_at IS NOT NULL THEN
+      RAISE EXCEPTION 'Štádium je archivované.' USING ERRCODE = 'check_violation';
+    END IF;
+    -- z uzavretého štádia iba znovuotvorením (deal_reopen)
+    IF v_old_stage.outcome <> 'otvoreny'
+       AND NOT (v_internal AND current_setting('app.deal_reopen', true) = NEW.id::text) THEN
+      RAISE EXCEPTION 'Uzavretý obchod sa dá iba znova otvoriť (s dôvodom).' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_stage.code = 'akceptacia' AND NOT v_internal THEN
+      RAISE EXCEPTION 'Do Akceptácie sa obchod presunie sám pri akceptácii ponuky.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_stage.code = 'vyhrane' AND NOT v_internal AND NOT crm_is_admin() THEN
+      RAISE EXCEPTION 'Vyhraté nastaví spárovaná zmluva (alebo admin).' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  IF TG_OP = 'INSERT' OR NEW.stage_id <> OLD.stage_id THEN
+    IF deal_stage_needs_oom(v_stage.code) AND NOT v_internal AND NOT deal_oom_ready(NEW.id) THEN
+      RAISE EXCEPTION 'Pre štádium % treba aspoň jedno OOM a pri každom plánovanú spotrebu (pri výkupe výrobu alebo výkon).',
+        v_stage.name USING ERRCODE = 'check_violation';
+    END IF;
+    NEW.stage_changed_at := now();
+    NEW.closed_at := CASE WHEN v_stage.outcome <> 'otvoreny' THEN now() END;
+  ELSE
+    NEW.stage_changed_at := OLD.stage_changed_at;
+    NEW.closed_at := OLD.closed_at;
+  END IF;
+
+  -- dôvod prehry iba v Prehraté, pri „iné“ s poznámkou
+  IF v_stage.code = 'prehrane' THEN
+    IF NEW.lost_reason_code IS NULL OR NOT lookup_code_ok('dovod_prehry', NEW.lost_reason_code, NEW.org_id)
+       AND (TG_OP = 'INSERT' OR NEW.lost_reason_code IS DISTINCT FROM OLD.lost_reason_code) THEN
+      RAISE EXCEPTION 'Pri prehre vyberte dôvod prehry.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.lost_reason_code = 'ine' AND NEW.lost_note IS NULL THEN
+      RAISE EXCEPTION 'Pri dôvode „Iné“ doplňte poznámku.' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSE
+    NEW.lost_reason_code := NULL;
+    NEW.lost_note := NULL;
+  END IF;
+
+  -- upozornenie na ďalší krok: nové dátum = znova; stĺpec nastavuje iba nočný beh
+  IF TG_OP = 'INSERT' THEN
+    NEW.next_step_notified_on := CASE WHEN v_internal THEN NEW.next_step_notified_on END;
+  ELSIF NOT v_internal THEN
+    NEW.next_step_notified_on := CASE WHEN NEW.next_step_on IS NOT DISTINCT FROM OLD.next_step_on
+                                      THEN OLD.next_step_notified_on END;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: deal_stage_needs_oom(public.deal_stage_code); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.deal_stage_needs_oom(p_code public.deal_stage_code) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT p_code IN ('cenova_ponuka', 'vyjednavanie', 'akceptacia', 'vyhrane')
 $$;
 
 
@@ -5597,6 +6694,62 @@ $_$;
 --
 
 COMMENT ON FUNCTION public.eic_is_valid(p text) IS 'formát a kontrolná číslica EIC podľa ENTSO-E';
+
+
+--
+-- Name: finstat_cache_get(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.finstat_cache_get(p_kind text, p_key text) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT data FROM finstat_cache
+   WHERE crm_session_ok() AND kind = p_kind AND key = p_key AND fetched_at > now() - interval '24 hours'
+$$;
+
+
+--
+-- Name: finstat_cache_put(text, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.finstat_cache_put(p_kind text, p_key text, p_data jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT crm_session_ok() THEN
+    RAISE EXCEPTION 'Bez prihláseného používateľa.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  INSERT INTO finstat_cache (kind, key, data) VALUES (p_kind, p_key, p_data)
+  ON CONFLICT (kind, key) DO UPDATE SET data = EXCLUDED.data, fetched_at = now();
+  DELETE FROM finstat_cache WHERE fetched_at < now() - interval '7 days';
+END;
+$$;
+
+
+--
+-- Name: finstat_request_allow(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.finstat_request_allow() RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_limit integer := coalesce((SELECT (value #>> '{}')::integer FROM app_setting WHERE key = 'finstat_daily_limit'), 0);
+  v_n     integer;
+BEGIN
+  IF NOT crm_session_ok() THEN
+    RETURN false;
+  END IF;
+  INSERT INTO finstat_usage (day, requests) VALUES (crm_today(), 1)
+  ON CONFLICT (day) DO UPDATE SET requests = finstat_usage.requests + 1
+  WHERE finstat_usage.requests < v_limit
+  RETURNING requests INTO v_n;
+  RETURN v_n IS NOT NULL AND v_n <= v_limit;
+END;
+$$;
 
 
 --
@@ -5764,6 +6917,20 @@ CREATE FUNCTION public.job_error(p_contract_id uuid, p_step text, p_state text, 
     AS $$
   SELECT jsonb_build_object('zmluva', p_contract_id, 'krok', p_step, 'kod', p_state,
            'text', left(regexp_replace(coalesce(p_message, ''), '([0-9]{2}[A-Z])[0-9A-Z-]{13}', '\1…', 'g'), 300))
+$$;
+
+
+--
+-- Name: lookup_code_ok(text, text, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.lookup_code_ok(p_list text, p_code text, p_org uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM lookup_value v
+                  WHERE v.list_code = p_list AND v.code = p_code AND v.hidden_at IS NULL
+                    AND (v.org_id IS NULL OR v.org_id = p_org))
 $$;
 
 
@@ -5952,6 +7119,27 @@ $$;
 
 
 --
+-- Name: notification_add_deal(uuid[], text, uuid, uuid, date, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.notification_add_deal(p_users uuid[], p_kind text, p_deal_id uuid, p_approval_id uuid, p_ref_date date, p_detail text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_n integer;
+BEGIN
+  INSERT INTO notification (user_id, kind, deal_id, approval_id, ref_date, detail)
+  SELECT DISTINCT u, p_kind, p_deal_id, p_approval_id, p_ref_date, p_detail
+    FROM unnest(coalesce(p_users, '{}')) AS u
+   WHERE u IS NOT NULL AND EXISTS (SELECT 1 FROM app_user a WHERE a.id = u AND a.status <> 'deaktivovany');
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END;
+$$;
+
+
+--
 -- Name: notification_approvers(uuid, boolean); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -5964,6 +7152,20 @@ CREATE FUNCTION public.notification_approvers(p_org uuid, p_with_ceo boolean) RE
    WHERE u.status <> 'deaktivovany'
      AND (u.approves_prices OR (p_with_ceo AND t.code = 'ceo'))
      AND crm_user_sees_org(u.id, p_org)
+$$;
+
+
+--
+-- Name: notification_assign_approvers(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.notification_assign_approvers(p_org uuid) RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce(array_agg(u.id ORDER BY u.id), '{}')
+    FROM app_user u
+   WHERE u.status <> 'deaktivovany' AND u.approves_assignments AND crm_user_sees_org(u.id, p_org)
 $$;
 
 
@@ -6105,6 +7307,7 @@ CREATE TABLE public.oom (
     planned_feed_in_manual boolean DEFAULT false NOT NULL,
     public_lighting boolean DEFAULT false NOT NULL,
     tdo_class text,
+    created_from_deal_id uuid,
     CONSTRAINT oom_advance_payment_eur_check CHECK ((advance_payment_eur >= (0)::numeric)),
     CONSTRAINT oom_advance_pct_check CHECK (((advance_payment_pct >= (0)::numeric) AND (advance_payment_pct <= (100)::numeric))),
     CONSTRAINT oom_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
@@ -6271,6 +7474,13 @@ COMMENT ON COLUMN public.oom.tdo_class IS 'trieda TDO z XM Trade (napr. „TDO 4
 
 
 --
+-- Name: COLUMN oom.created_from_deal_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.oom.created_from_deal_id IS 'OOM vzniklo pri obchode (pri prehre sa zruší, ak nie je inde)';
+
+
+--
 -- Name: oom_activation_ready(public.oom, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -6414,6 +7624,31 @@ BEGIN
   END IF;
   PERFORM lookup_codes_check('rola_pri_oom', v_oom.org_id, NEW.roles,
                              CASE WHEN TG_OP = 'UPDATE' THEN OLD.roles END);
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: oom_created_from_deal_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.oom_created_from_deal_check() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d deal;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.created_from_deal_id IS DISTINCT FROM OLD.created_from_deal_id THEN
+    RAISE EXCEPTION 'Pôvod OOM (obchod) sa nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.created_from_deal_id IS NOT NULL THEN
+    SELECT * INTO d FROM deal WHERE id = NEW.created_from_deal_id;
+    IF d.closed_at IS NOT NULL OR (d.company_id, d.person_id) IS DISTINCT FROM (NEW.company_id, NEW.person_id) THEN
+      RAISE EXCEPTION 'OOM z obchodu musí patriť zákazníkovi otvoreného obchodu.' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -7620,7 +8855,8 @@ CREATE FUNCTION public.owner_change_guard() RETURNS trigger
     AS $$
 BEGIN
   IF NEW.owner_id IS DISTINCT FROM OLD.owner_id AND current_user <> 'crm_sync'
-     AND NOT crm_can_change_owner() THEN
+     AND NOT crm_can_change_owner()
+     AND NOT (crm_internal_call() AND coalesce(current_setting('app.owner_assign', true), '') = 'on') THEN
     RAISE EXCEPTION 'Vlastníka (obchodníka) môže zmeniť iba vedenie (tím CEO) alebo admin.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -7638,6 +8874,52 @@ CREATE FUNCTION public.pipeline_no_delete() RETURNS trigger
     AS $$
 BEGIN
   RAISE EXCEPTION 'Pipeline ani stage sa nemažú, iba archivujú.' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+--
+-- Name: pipeline_seed_stages(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pipeline_seed_stages() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  INSERT INTO pipeline_stage (pipeline_id, name, sort_order, probability, outcome, code) VALUES
+    (NEW.id, 'Príležitosť',   1,  0.10, 'otvoreny', 'prilezitost'),
+    (NEW.id, 'Cenová ponuka', 2,  0.30, 'otvoreny', 'cenova_ponuka'),
+    (NEW.id, 'Vyjednávanie',  3,  0.50, 'otvoreny', 'vyjednavanie'),
+    (NEW.id, 'Akceptácia',    4,  0.90, 'otvoreny', 'akceptacia'),
+    (NEW.id, 'Vyhraté',       90, 1.00, 'vyhrany',  'vyhrane'),
+    (NEW.id, 'Prehraté',      91, 0.00, 'prehrany', 'prehrane');
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: pipeline_stage_code_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.pipeline_stage_code_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.code IS NOT NULL AND NOT crm_internal_call() THEN
+      RAISE EXCEPTION 'Systémové štádiá zakladá iba databáza pri novej pipeline.' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.code IS DISTINCT FROM OLD.code OR NEW.pipeline_id <> OLD.pipeline_id THEN
+    RAISE EXCEPTION 'Kód štádia ani pipeline štádia sa nemení.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.code IS NOT NULL AND NEW.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Systémové štádium sa nedá archivovať (dá sa iba premenovať).' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
@@ -8709,6 +9991,7 @@ CREATE TABLE public.app_user (
     deactivated_at timestamp with time zone,
     seller_type public.seller_type,
     approves_prices boolean DEFAULT false NOT NULL,
+    approves_assignments boolean DEFAULT false NOT NULL,
     CONSTRAINT app_user_deactivated_check CHECK (((status = 'deaktivovany'::public.user_status) = (deactivated_at IS NOT NULL))),
     CONSTRAINT app_user_email_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
     CONSTRAINT app_user_name_check CHECK ((btrim(name) <> ''::text))
@@ -8751,6 +10034,13 @@ COMMENT ON COLUMN public.app_user.approves_prices IS '„schvaľuje ceny“ (CEO
 
 
 --
+-- Name: COLUMN app_user.approves_assignments; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.approves_assignments IS 'schvaľuje pridelenie firmy (Peter Kalman, Daniel Dérer, Denis Kalman)';
+
+
+--
 -- Name: app_user_org; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -8768,6 +10058,39 @@ CREATE TABLE public.app_user_org (
 --
 
 COMMENT ON TABLE public.app_user_org IS 'prístup používateľa k spoločnostiam; tím s all_orgs vidí všetky bez ohľadu na túto tabuľku';
+
+
+--
+-- Name: approval_request; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.approval_request (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    kind public.approval_kind NOT NULL,
+    deal_id uuid,
+    company_id uuid,
+    from_owner_id uuid,
+    reason text NOT NULL,
+    requested_by uuid NOT NULL,
+    status public.approval_status DEFAULT 'caka'::public.approval_status NOT NULL,
+    decided_by uuid,
+    decided_at timestamp with time zone,
+    decision_note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT approval_request_assign_check CHECK (((kind <> 'pridelenie_firmy'::public.approval_kind) OR ((company_id IS NOT NULL) AND (from_owner_id IS NOT NULL)))),
+    CONSTRAINT approval_request_decided_check CHECK (((status = ANY (ARRAY['schvalena'::public.approval_status, 'zamietnuta'::public.approval_status])) = (decided_at IS NOT NULL))),
+    CONSTRAINT approval_request_reason_check CHECK ((btrim(reason) <> ''::text)),
+    CONSTRAINT approval_request_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by)))
+);
+
+
+--
+-- Name: TABLE approval_request; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.approval_request IS 'schvaľovanie: výnimka z ceny, rizikový zákazník, predĺženie platnosti, pridelenie firmy (obrazovka 39)';
 
 
 --
@@ -9092,10 +10415,25 @@ CREATE TABLE public.deal_contact (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     deal_id uuid NOT NULL,
     contact_id uuid NOT NULL,
-    role text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    roles text[] DEFAULT '{}'::text[] NOT NULL,
+    is_primary boolean DEFAULT false NOT NULL
 );
+
+
+--
+-- Name: COLUMN deal_contact.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal_contact.roles IS 'kódy z číselníka rola_kontaktu';
+
+
+--
+-- Name: COLUMN deal_contact.is_primary; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal_contact.is_primary IS 'primárny kontakt = predvolená kontaktná osoba ponuky';
 
 
 --
@@ -9107,8 +10445,24 @@ CREATE TABLE public.deal_oom (
     deal_id uuid NOT NULL,
     oom_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    planned_vt_mwh numeric(12,3),
+    planned_nt_mwh numeric(12,3),
+    planned_feed_in_mwh numeric(12,3),
+    source_power_kw numeric(12,3),
+    org_id uuid NOT NULL,
+    CONSTRAINT deal_oom_planned_feed_in_mwh_check CHECK ((planned_feed_in_mwh >= (0)::numeric)),
+    CONSTRAINT deal_oom_planned_nt_mwh_check CHECK ((planned_nt_mwh >= (0)::numeric)),
+    CONSTRAINT deal_oom_planned_vt_mwh_check CHECK ((planned_vt_mwh >= (0)::numeric)),
+    CONSTRAINT deal_oom_source_power_kw_check CHECK ((source_power_kw >= (0)::numeric))
 );
+
+
+--
+-- Name: COLUMN deal_oom.planned_vt_mwh; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal_oom.planned_vt_mwh IS 'odhad ročnej spotreby VT pre ponuku (predvyplní sa z OOM, XM Trade neprepisuje)';
 
 
 --
@@ -9737,18 +11091,30 @@ CREATE TABLE public.deal (
     stage_id uuid NOT NULL,
     name text NOT NULL,
     segment public.customer_segment,
-    campaign text,
-    source text,
     expected_close date,
     closed_at timestamp with time zone,
-    lost_reason text,
-    owner_id uuid,
+    owner_id uuid NOT NULL,
     hubspot_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     custom jsonb DEFAULT '{}'::jsonb NOT NULL,
     org_id uuid NOT NULL,
-    CONSTRAINT deal_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1))
+    source_code text NOT NULL,
+    lost_reason_code text,
+    lost_note text,
+    supply_start date,
+    next_step text,
+    next_step_on date,
+    next_step_notified_on date,
+    previous_contract_id uuid,
+    estimated_value_eur numeric(12,2),
+    stage_changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    note text,
+    CONSTRAINT deal_customer_check CHECK ((num_nonnulls(company_id, person_id) = 1)),
+    CONSTRAINT deal_estimated_value_check CHECK ((estimated_value_eur >= (0)::numeric)),
+    CONSTRAINT deal_lost_note_check CHECK (((lost_note IS NULL) OR (btrim(lost_note) <> ''::text))),
+    CONSTRAINT deal_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT deal_next_step_check CHECK (((next_step IS NULL) OR (btrim(next_step) <> ''::text)))
 );
 
 
@@ -9763,7 +11129,7 @@ COMMENT ON COLUMN public.deal.segment IS 'preberá sa od zákazníka pri vzniku,
 -- Name: COLUMN deal.closed_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.deal.closed_at IS 'skutočné uzavretie dealu (nie dátum nákupu)';
+COMMENT ON COLUMN public.deal.closed_at IS 'vstup do Vyhraté / Prehraté; NULL = otvorený obchod (nastavuje databáza)';
 
 
 --
@@ -9778,6 +11144,69 @@ COMMENT ON COLUMN public.deal.custom IS 'vlastné polia z Nastavení: {kľúč p
 --
 
 COMMENT ON COLUMN public.deal.org_id IS 'preberá sa od zákazníka';
+
+
+--
+-- Name: COLUMN deal.source_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.source_code IS 'zdroj obchodu (číselník zdroj_obchodu)';
+
+
+--
+-- Name: COLUMN deal.lost_reason_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.lost_reason_code IS 'dôvod prehry (číselník dovod_prehry), iba v štádiu Prehraté';
+
+
+--
+-- Name: COLUMN deal.next_step_notified_on; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.next_step_notified_on IS 'deň kroku, za ktorý už odišlo upozornenie (nočný beh)';
+
+
+--
+-- Name: COLUMN deal.previous_contract_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.previous_contract_id IS 'predošlá zmluva (obnova)';
+
+
+--
+-- Name: COLUMN deal.estimated_value_eur; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.deal.estimated_value_eur IS 'odhad pridanej hodnoty pred prvou ponukou';
+
+
+--
+-- Name: deal_event; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deal_event (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deal_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    kind text NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    user_id uuid,
+    from_stage_id uuid,
+    to_stage_id uuid,
+    oom_id uuid,
+    contact_id uuid,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    reason text,
+    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text])))
+);
+
+
+--
+-- Name: TABLE deal_event; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.deal_event IS 'časová os obchodu: udalosti, ktoré nie sú poznámka ani e-mail; zapisujú ich iba spúšťače, nemení sa';
 
 
 --
@@ -9814,6 +11243,45 @@ ALTER TABLE public.export_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     NO MAXVALUE
     CACHE 1
 );
+
+
+--
+-- Name: finstat_cache; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.finstat_cache (
+    kind text NOT NULL,
+    key text NOT NULL,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    data jsonb NOT NULL,
+    CONSTRAINT finstat_cache_key_check CHECK (((length(key) >= 1) AND (length(key) <= 200))),
+    CONSTRAINT finstat_cache_kind_check CHECK ((kind = ANY (ARRAY['detail'::text, 'autocomplete'::text])))
+);
+
+
+--
+-- Name: TABLE finstat_cache; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.finstat_cache IS 'odpovede Finstatu 24 h (môžu obsahovať mená štatutárov); záznamy staršie ako 7 dní sa mažú pri zápise';
+
+
+--
+-- Name: finstat_usage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.finstat_usage (
+    day date NOT NULL,
+    requests integer DEFAULT 0 NOT NULL,
+    CONSTRAINT finstat_usage_requests_check CHECK ((requests >= 0))
+);
+
+
+--
+-- Name: TABLE finstat_usage; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.finstat_usage IS 'počet požiadaviek na Finstat za deň (Europe/Bratislava)';
 
 
 --
@@ -9888,7 +11356,7 @@ CREATE TABLE public.job_run (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT job_run_errors_check CHECK ((jsonb_typeof(errors) = 'array'::text)),
-    CONSTRAINT job_run_job_check CHECK ((job = 'zmluvy'::text))
+    CONSTRAINT job_run_job_check CHECK ((job = ANY (ARRAY['zmluvy'::text, 'obchody'::text])))
 );
 
 
@@ -10095,7 +11563,9 @@ CREATE TABLE public.notification (
     detail text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     read_at timestamp with time zone,
-    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text])))
+    deal_id uuid,
+    approval_id uuid,
+    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text])))
 );
 
 
@@ -10602,6 +12072,13 @@ CREATE TABLE public.pipeline_stage (
     archived_at timestamp with time zone,
     is_closed boolean GENERATED ALWAYS AS ((outcome <> 'otvoreny'::public.stage_outcome)) STORED,
     is_won boolean GENERATED ALWAYS AS ((outcome = 'vyhrany'::public.stage_outcome)) STORED,
+    code public.deal_stage_code,
+    CONSTRAINT pipeline_stage_code_outcome_check CHECK (
+CASE code
+    WHEN 'vyhrane'::public.deal_stage_code THEN (outcome = 'vyhrany'::public.stage_outcome)
+    WHEN 'prehrane'::public.deal_stage_code THEN (outcome = 'prehrany'::public.stage_outcome)
+    ELSE (outcome = 'otvoreny'::public.stage_outcome)
+END),
     CONSTRAINT pipeline_stage_probability_check CHECK (((probability >= (0)::numeric) AND (probability <= (1)::numeric)))
 );
 
@@ -10618,6 +12095,13 @@ COMMENT ON COLUMN public.pipeline_stage.outcome IS 'typ stage: otvorený / vyhra
 --
 
 COMMENT ON COLUMN public.pipeline_stage.is_closed IS 'vypočítané z outcome (pre staršie dopyty)';
+
+
+--
+-- Name: COLUMN pipeline_stage.code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pipeline_stage.code IS 'systémový kód štádia (logika obchodu); NULL = medzistupeň pridaný adminom';
 
 
 --
@@ -11478,6 +12962,14 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: approval_request approval_request_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -11830,6 +13322,14 @@ ALTER TABLE ONLY public.deal_contact
 
 
 --
+-- Name: deal_event deal_event_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: deal deal_hubspot_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -11867,6 +13367,22 @@ ALTER TABLE ONLY public.deal
 
 ALTER TABLE ONLY public.export_log
     ADD CONSTRAINT export_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: finstat_cache finstat_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.finstat_cache
+    ADD CONSTRAINT finstat_cache_pkey PRIMARY KEY (kind, key);
+
+
+--
+-- Name: finstat_usage finstat_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.finstat_usage
+    ADD CONSTRAINT finstat_usage_pkey PRIMARY KEY (day);
 
 
 --
@@ -12556,6 +14072,13 @@ CREATE INDEX app_user_team_id_idx ON public.app_user USING btree (team_id);
 
 
 --
+-- Name: approval_request_pending_assign_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX approval_request_pending_assign_key ON public.approval_request USING btree (company_id, requested_by) WHERE ((kind = 'pridelenie_firmy'::public.approval_kind) AND (status = 'caka'::public.approval_status));
+
+
+--
 -- Name: audit_log_changed_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12927,10 +14450,24 @@ CREATE INDEX deal_company_id_idx ON public.deal USING btree (company_id);
 
 
 --
+-- Name: deal_company_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_company_idx ON public.deal USING btree (company_id) WHERE (company_id IS NOT NULL);
+
+
+--
 -- Name: deal_contact_contact_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX deal_contact_contact_id_idx ON public.deal_contact USING btree (contact_id);
+
+
+--
+-- Name: deal_contact_primary_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_contact_primary_key ON public.deal_contact USING btree (deal_id) WHERE is_primary;
 
 
 --
@@ -12941,10 +14478,38 @@ CREATE INDEX deal_custom_idx ON public.deal USING gin (custom jsonb_path_ops);
 
 
 --
+-- Name: deal_event_deal_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_event_deal_idx ON public.deal_event USING btree (deal_id, occurred_at);
+
+
+--
+-- Name: deal_next_step_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_next_step_idx ON public.deal USING btree (next_step_on) WHERE (closed_at IS NULL);
+
+
+--
 -- Name: deal_oom_oom_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX deal_oom_oom_id_idx ON public.deal_oom USING btree (oom_id);
+
+
+--
+-- Name: deal_oom_oom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_oom_oom_idx ON public.deal_oom USING btree (oom_id);
+
+
+--
+-- Name: deal_open_renewal_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_open_renewal_key ON public.deal USING btree (previous_contract_id) WHERE ((closed_at IS NULL) AND (source_code = 'obnova'::text));
 
 
 --
@@ -12962,10 +14527,24 @@ CREATE INDEX deal_owner_id_idx ON public.deal USING btree (owner_id);
 
 
 --
+-- Name: deal_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_owner_idx ON public.deal USING btree (owner_id);
+
+
+--
 -- Name: deal_person_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX deal_person_id_idx ON public.deal USING btree (person_id);
+
+
+--
+-- Name: deal_person_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_person_idx ON public.deal USING btree (person_id) WHERE (person_id IS NOT NULL);
 
 
 --
@@ -12987,6 +14566,13 @@ CREATE INDEX deal_stage_id_idx ON public.deal USING btree (stage_id, pipeline_id
 --
 
 CREATE INDEX export_log_created_at_idx ON public.export_log USING btree (created_at);
+
+
+--
+-- Name: finstat_cache_fetched_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX finstat_cache_fetched_idx ON public.finstat_cache USING btree (fetched_at);
 
 
 --
@@ -13214,6 +14800,13 @@ CREATE UNIQUE INDEX pipeline_org_name_key ON public.pipeline USING btree (org_id
 
 
 --
+-- Name: pipeline_stage_code_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX pipeline_stage_code_key ON public.pipeline_stage USING btree (pipeline_id, code) WHERE (code IS NOT NULL);
+
+
+--
 -- Name: price_exception_company_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13375,6 +14968,13 @@ CREATE TRIGGER trg_active_guard BEFORE INSERT OR DELETE OR UPDATE ON public.oom_
 
 
 --
+-- Name: deal trg_after_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_after_change AFTER INSERT OR UPDATE ON public.deal FOR EACH ROW EXECUTE FUNCTION public.deal_after_change();
+
+
+--
 -- Name: app_user trg_app_user_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -13414,6 +15014,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user FOR
 --
 
 CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.app_user_org FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: approval_request trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.approval_request FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -13879,10 +15486,24 @@ CREATE TRIGGER trg_check BEFORE INSERT OR UPDATE ON public.tariff_scope FOR EACH
 
 
 --
+-- Name: pipeline_stage trg_code_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_code_guard BEFORE INSERT OR UPDATE ON public.pipeline_stage FOR EACH ROW EXECUTE FUNCTION public.pipeline_stage_code_guard();
+
+
+--
 -- Name: company trg_country_default; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_country_default BEFORE INSERT ON public.company FOR EACH ROW EXECUTE FUNCTION public.company_country_default();
+
+
+--
+-- Name: oom trg_created_from_deal; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_created_from_deal BEFORE INSERT OR UPDATE OF created_from_deal_id ON public.oom FOR EACH ROW EXECUTE FUNCTION public.oom_created_from_deal_check();
 
 
 --
@@ -13970,6 +15591,41 @@ CREATE TRIGGER trg_customer_status BEFORE INSERT OR UPDATE ON public.contact FOR
 
 
 --
+-- Name: deal_oom trg_deal_oom_ready; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_deal_oom_ready AFTER INSERT OR DELETE OR UPDATE ON public.deal_oom FOR EACH ROW EXECUTE FUNCTION public.deal_oom_ready_check();
+
+
+--
+-- Name: deal_oom trg_deal_oom_rules; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_deal_oom_rules BEFORE INSERT OR DELETE OR UPDATE ON public.deal_oom FOR EACH ROW EXECUTE FUNCTION public.deal_oom_rules();
+
+
+--
+-- Name: deal trg_events; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_events AFTER INSERT OR UPDATE ON public.deal FOR EACH ROW EXECUTE FUNCTION public.deal_events();
+
+
+--
+-- Name: deal_contact trg_events; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_events AFTER INSERT OR DELETE ON public.deal_contact FOR EACH ROW EXECUTE FUNCTION public.deal_link_events();
+
+
+--
+-- Name: deal_oom trg_events; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_events AFTER INSERT OR DELETE ON public.deal_oom FOR EACH ROW EXECUTE FUNCTION public.deal_link_events();
+
+
+--
 -- Name: oom trg_feed_in_plan; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -14023,6 +15679,13 @@ CREATE TRIGGER trg_guard BEFORE INSERT OR DELETE OR UPDATE ON public.custom_fiel
 --
 
 CREATE TRIGGER trg_guard BEFORE DELETE ON public.custom_field_option FOR EACH ROW EXECUTE FUNCTION public.custom_field_option_guard();
+
+
+--
+-- Name: deal_event trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE UPDATE ON public.deal_event FOR EACH ROW EXECUTE FUNCTION public.deal_event_guard();
 
 
 --
@@ -14313,10 +15976,31 @@ CREATE TRIGGER trg_resolve_guard BEFORE UPDATE ON public.contract_flag FOR EACH 
 
 
 --
+-- Name: deal_contact trg_roles_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_roles_check BEFORE INSERT OR UPDATE OF roles ON public.deal_contact FOR EACH ROW EXECUTE FUNCTION public.deal_contact_roles_check();
+
+
+--
 -- Name: oom_planned_change trg_row_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_row_guard BEFORE UPDATE ON public.oom_planned_change FOR EACH ROW EXECUTE FUNCTION public.oom_plan_row_guard();
+
+
+--
+-- Name: deal trg_rules; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_rules BEFORE INSERT OR UPDATE ON public.deal FOR EACH ROW EXECUTE FUNCTION public.deal_rules();
+
+
+--
+-- Name: pipeline trg_seed_stages; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_seed_stages AFTER INSERT ON public.pipeline FOR EACH ROW EXECUTE FUNCTION public.pipeline_seed_stages();
 
 
 --
@@ -14345,6 +16029,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.app_user FOR EACH ROW 
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.app_user_org FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: approval_request trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.approval_request FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -14903,6 +16594,54 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: approval_request approval_request_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+
+--
+-- Name: approval_request approval_request_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: approval_request approval_request_decided_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: approval_request approval_request_from_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_from_owner_id_fkey FOREIGN KEY (from_owner_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: approval_request approval_request_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: approval_request approval_request_requested_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_request
+    ADD CONSTRAINT approval_request_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.app_user(id);
+
+
+--
 -- Name: audit_log audit_log_contract_import_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -15367,6 +17106,62 @@ ALTER TABLE ONLY public.deal_contact
 
 
 --
+-- Name: deal_event deal_event_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contact(id);
+
+
+--
+-- Name: deal_event deal_event_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id) ON DELETE CASCADE;
+
+
+--
+-- Name: deal_event deal_event_from_stage_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_from_stage_id_fkey FOREIGN KEY (from_stage_id) REFERENCES public.pipeline_stage(id);
+
+
+--
+-- Name: deal_event deal_event_oom_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id);
+
+
+--
+-- Name: deal_event deal_event_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: deal_event deal_event_to_stage_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_to_stage_id_fkey FOREIGN KEY (to_stage_id) REFERENCES public.pipeline_stage(id);
+
+
+--
+-- Name: deal_event deal_event_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_event
+    ADD CONSTRAINT deal_event_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
 -- Name: deal_oom deal_oom_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -15380,6 +17175,14 @@ ALTER TABLE ONLY public.deal_oom
 
 ALTER TABLE ONLY public.deal_oom
     ADD CONSTRAINT deal_oom_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id) ON DELETE CASCADE;
+
+
+--
+-- Name: deal_oom deal_oom_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_oom
+    ADD CONSTRAINT deal_oom_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
 
 
 --
@@ -15412,6 +17215,14 @@ ALTER TABLE ONLY public.deal
 
 ALTER TABLE ONLY public.deal
     ADD CONSTRAINT deal_pipeline_id_fkey FOREIGN KEY (pipeline_id) REFERENCES public.pipeline(id);
+
+
+--
+-- Name: deal deal_previous_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal
+    ADD CONSTRAINT deal_previous_contract_id_fkey FOREIGN KEY (previous_contract_id) REFERENCES public.contract(id);
 
 
 --
@@ -15503,11 +17314,27 @@ ALTER TABLE ONLY public.market_price_daily
 
 
 --
+-- Name: notification notification_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification
+    ADD CONSTRAINT notification_approval_id_fkey FOREIGN KEY (approval_id) REFERENCES public.approval_request(id) ON DELETE CASCADE;
+
+
+--
 -- Name: notification notification_contract_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.notification
     ADD CONSTRAINT notification_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.contract(id) ON DELETE CASCADE;
+
+
+--
+-- Name: notification notification_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification
+    ADD CONSTRAINT notification_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id) ON DELETE CASCADE;
 
 
 --
@@ -15596,6 +17423,14 @@ ALTER TABLE ONLY public.oom_contact
 
 ALTER TABLE ONLY public.oom_contact
     ADD CONSTRAINT oom_contact_oom_id_fkey FOREIGN KEY (oom_id) REFERENCES public.oom(id) ON DELETE CASCADE;
+
+
+--
+-- Name: oom oom_created_from_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oom
+    ADD CONSTRAINT oom_created_from_deal_id_fkey FOREIGN KEY (created_from_deal_id) REFERENCES public.deal(id);
 
 
 --
@@ -16033,6 +17868,53 @@ ALTER TABLE public.app_user ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_user_org ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: approval_request; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.approval_request ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: approval_request approval_request_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY approval_request_select ON public.approval_request FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND (public.crm_is_service() OR public.crm_is_admin() OR (requested_by = public.crm_active_user_id()) OR (from_owner_id = public.crm_active_user_id()) OR ((kind = 'pridelenie_firmy'::public.approval_kind) AND public.crm_approves_assignments()) OR ((kind <> 'pridelenie_firmy'::public.approval_kind) AND public.crm_approves_prices()))));
+
+
+--
+-- Name: audit_log; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: audit_log audit_log_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY audit_log_insert ON public.audit_log FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: audit_log audit_log_protect_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY audit_log_protect_delete ON public.audit_log FOR DELETE USING (true);
+
+
+--
+-- Name: audit_log audit_log_protect_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY audit_log_protect_update ON public.audit_log FOR UPDATE USING (true);
+
+
+--
+-- Name: audit_log audit_log_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY audit_log_select ON public.audit_log FOR SELECT USING (public.audit_row_visible(table_name, record_id, diff));
+
+
+--
 -- Name: company; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -16252,6 +18134,100 @@ CREATE POLICY customer_update ON public.company_contact FOR UPDATE USING (public
 --
 
 CREATE POLICY customer_update ON public.contact FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND ((owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR public.crm_contact_on_own_company(id)))))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'vsetko'::public.access_scope) OR ((( SELECT public.crm_scope('zakaznici'::public.crm_module, 'edit'::text) AS crm_scope) = 'iba_svoje'::public.access_scope) AND ((owner_id = ( SELECT public.crm_active_user_id() AS crm_active_user_id)) OR public.crm_contact_on_own_company(id))))));
+
+
+--
+-- Name: deal; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.deal ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: deal_contact; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.deal_contact ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: deal_contact deal_contact_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_contact_select ON public.deal_contact FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE (d.id = deal_contact.deal_id))));
+
+
+--
+-- Name: deal_contact deal_contact_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_contact_write ON public.deal_contact USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = deal_contact.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = deal_contact.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id)))));
+
+
+--
+-- Name: deal_event; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.deal_event ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: deal_event deal_event_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_event_select ON public.deal_event FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE (d.id = deal_event.deal_id))));
+
+
+--
+-- Name: deal deal_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_insert ON public.deal FOR INSERT WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_deal_editable(company_id, person_id, owner_id)));
+
+
+--
+-- Name: deal_oom; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.deal_oom ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: deal_oom deal_oom_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_oom_select ON public.deal_oom FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE (d.id = deal_oom.deal_id))));
+
+
+--
+-- Name: deal_oom deal_oom_write; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_oom_write ON public.deal_oom USING ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = deal_oom.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.deal d
+  WHERE ((d.id = deal_oom.deal_id) AND public.crm_deal_editable(d.company_id, d.person_id, d.owner_id)))));
+
+
+--
+-- Name: deal deal_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_select ON public.deal FOR SELECT USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_deal_visible(company_id, person_id, owner_id)));
+
+
+--
+-- Name: deal deal_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY deal_update ON public.deal FOR UPDATE USING (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_deal_editable(company_id, person_id, owner_id))) WITH CHECK (((org_id = ANY (( SELECT public.crm_user_orgs() AS crm_user_orgs)::uuid[])) AND public.crm_deal_editable(company_id, person_id, owner_id)));
 
 
 --
@@ -17367,4 +19343,8 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0027'),
     ('0028'),
     ('0029'),
-    ('0030');
+    ('0030'),
+    ('0032'),
+    ('0033'),
+    ('0034'),
+    ('0035');

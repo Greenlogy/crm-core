@@ -3,8 +3,9 @@
 
 import postgres from 'postgres';
 import type { AuthEnv } from './auth';
+import type { FinstatEnv } from './finstat';
 
-export type Env = AuthEnv & {
+export type Env = AuthEnv & FinstatEnv & {
   HYPERDRIVE: Hyperdrive;
 };
 

@@ -47,6 +47,7 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   pipeline_org_name_key: 'Pipeline s týmto názvom už existuje.',
   pipeline_stage_pipeline_id_name_key: 'Stage s týmto názvom už v pipeline je.',
   pipeline_stage_probability_check: 'Pravdepodobnosť: 0 až 100 %.',
+  pipeline_stage_code_outcome_check: 'Vyhraté a Prehraté sú systémové štádiá – pridať sa dá iba otvorené štádium.',
   oom_eic_key: 'Odberné miesto s týmto EIC už v CRM je.',
   oom_eic_check: 'Neplatný formát alebo kontrolná číslica EIC.',
   oom_phases_check: 'Počet fáz: 1 alebo 3.',

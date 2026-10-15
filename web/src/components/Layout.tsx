@@ -46,9 +46,11 @@ export function Layout() {
   // Zvonček: počet neprečítaných upozornení – obnoví sa pri zmene stránky a každých 5 minút
   const location = useLocation();
   const { data: bell, reload: reloadBell } = useApi<{ unread: number }>('/api/notifications/count');
+  const { data: approvals, reload: reloadApprovals } = useApi<{ pending: number }>('/api/approvals/count');
   useEffect(() => {
     reloadBell();
-  }, [location.pathname, reloadBell]);
+    reloadApprovals();
+  }, [location.pathname, reloadBell, reloadApprovals]);
   useEffect(() => {
     const t = window.setInterval(reloadBell, 5 * 60_000);
     return () => window.clearInterval(t);
@@ -68,13 +70,6 @@ export function Layout() {
       // úložisko nemusí byť dostupné
     }
   }, [theme]);
-
-  const disabled = (label: string, icon: string) => (
-    <span className="nav" aria-disabled="true" title="Pripravuje sa">
-      <Icon d={icon} />
-      {label}
-    </span>
-  );
 
   return (
     <div className="app">
@@ -109,7 +104,23 @@ export function Layout() {
           <Icon d={ICONS.oom} />
           Odberné miesta
         </NavLink>
-        {disabled('Dealy', ICONS.deals)}
+        <NavLink to="/obchody" end={false} className={navClass}>
+          <Icon d={ICONS.deals} />
+          Obchody
+        </NavLink>
+        <NavLink to="/overenie-firmy" className={navClass}>
+          <Icon d={ICONS.company} />
+          Overenie firmy
+        </NavLink>
+        <NavLink to="/schvalovanie" className={navClass}>
+          <Icon d={ICONS.bell} />
+          Schvaľovanie
+          {approvals && approvals.pending > 0 && (
+            <span className="nav-count nav-count-alert" aria-label={`${approvals.pending} na schválenie`}>
+              {num(approvals.pending, 0)}
+            </span>
+          )}
+        </NavLink>
         <NavLink to="/zmluvy" end={false} className={navClass}>
           <Icon d={ICONS.contracts} />
           Zmluvy

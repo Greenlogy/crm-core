@@ -89,7 +89,7 @@ BEGIN
   VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000501',
           '00000000-0000-4000-8000-000000000521', 'Cudzie štádium');
   RAISE EXCEPTION 'CHYBA: štádium z inej pipeline prešlo';
-EXCEPTION WHEN foreign_key_violation THEN
+EXCEPTION WHEN foreign_key_violation OR check_violation THEN   -- od 0032 kontrola spúšťača deal_rules
   RAISE NOTICE 'OK: štádium z inej pipeline odmietnuté';
 END;
 $$;

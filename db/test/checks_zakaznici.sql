@@ -19,10 +19,11 @@ INSERT INTO app_user_org (user_id, org_id)
 SELECT u.id, crm_default_org() FROM app_user u
  WHERE u.id IN ('00000000-0000-4000-8000-000000001002', '00000000-0000-4000-8000-000000001003');
 
--- Štádiá B2C pipeline: otvorené a prehraté
-INSERT INTO pipeline_stage (id, pipeline_id, name, sort_order, probability, outcome) VALUES
-  ('00000000-0000-4000-8000-000000001021', '00000000-0000-4000-8000-000000000502', 'Ponuka',    2, 0.50, 'otvoreny'),
-  ('00000000-0000-4000-8000-000000001022', '00000000-0000-4000-8000-000000000502', 'Prehraté',  7, 0.00, 'prehrany');
+-- Štádiá B2C pipeline: otvorené a prehraté (systémové štádiá od 0032, pevné id pre testy)
+UPDATE pipeline_stage SET id = '00000000-0000-4000-8000-000000001021'
+ WHERE pipeline_id = '00000000-0000-4000-8000-000000000502' AND code = 'cenova_ponuka';
+UPDATE pipeline_stage SET id = '00000000-0000-4000-8000-000000001022'
+ WHERE pipeline_id = '00000000-0000-4000-8000-000000000502' AND code = 'prehrane';
 
 -- Z1. Firma: povinný názov, aspoň jedno označenie, viac označení naraz
 DO $$
@@ -153,9 +154,9 @@ DO $$
 BEGIN
   ASSERT (SELECT status FROM contact WHERE id = '00000000-0000-4000-8000-000000000202') IS NULL,
          'kontakt vo firme nemá stav';
-  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name) VALUES
+  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
     ('00000000-0000-4000-8000-000000001301', '00000000-0000-4000-8000-000000000202',
-     '00000000-0000-4000-8000-000000000502', '00000000-0000-4000-8000-000000001021', 'Eva – dom');
+     '00000000-0000-4000-8000-000000000502', '00000000-0000-4000-8000-000000001021', 'Eva – dom', '00000000-0000-4000-8000-000000000011', 'web');
   ASSERT (SELECT is_household FROM contact WHERE id = '00000000-0000-4000-8000-000000000202'),
          'Eva má byť domácnosť';
   ASSERT (SELECT status::text || '/' || status_source::text FROM contact
@@ -178,9 +179,9 @@ BEGIN
     (n, 'Anna', 'Nováková', 'anna.novakova@example.test', true);
   ASSERT customer_status_calc(NULL, n, t) = 'marketingovy_kontakt', 'bez dealu';
 
-  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name) VALUES
+  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
     ('00000000-0000-4000-8000-000000001411', n, '00000000-0000-4000-8000-000000000502',
-     '00000000-0000-4000-8000-000000001021', 'Nováková – dodávka');
+     '00000000-0000-4000-8000-000000001021', 'Nováková – dodávka', '00000000-0000-4000-8000-000000000011', 'web');
   ASSERT customer_status_calc(NULL, n, t) = 'zaujemca', 'otvorený deal';
 
   INSERT INTO offer (id, deal_id) VALUES ('00000000-0000-4000-8000-000000001412', '00000000-0000-4000-8000-000000001411');
@@ -224,9 +225,9 @@ BEGIN
   ASSERT customer_is_former_calc(NULL, h), 'Horváth je bývalý';
 
   -- bývalý s novou ponukou → Ponuka s príznakom bývalý (čl. 12)
-  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name) VALUES
+  INSERT INTO deal (id, person_id, pipeline_id, stage_id, name, owner_id, source_code) VALUES
     ('00000000-0000-4000-8000-000000001511', h, '00000000-0000-4000-8000-000000000502',
-     '00000000-0000-4000-8000-000000001021', 'Horváth – návrat');
+     '00000000-0000-4000-8000-000000001021', 'Horváth – návrat', '00000000-0000-4000-8000-000000000011', 'web');
   INSERT INTO offer (deal_id, status, sent_at) VALUES ('00000000-0000-4000-8000-000000001511', 'odoslana', now());
   ASSERT customer_status_calc(NULL, h, t) = 'ponuka', 'bývalý s ponukou';
 
@@ -237,8 +238,8 @@ BEGIN
   ASSERT customer_is_former_calc(NULL, h), 'vracajúci sa ostáva bývalý';
 
   -- prepadnutý záujemca, nikdy nebol zákazník → marketingový kontakt (čl. 12)
-  INSERT INTO deal (person_id, pipeline_id, stage_id, name) VALUES
-    (l, '00000000-0000-4000-8000-000000000502', '00000000-0000-4000-8000-000000001022', 'Lukáč – prehraté');
+  INSERT INTO deal (person_id, pipeline_id, stage_id, name, owner_id, source_code, lost_reason_code) VALUES
+    (l, '00000000-0000-4000-8000-000000000502', '00000000-0000-4000-8000-000000001022', 'Lukáč – prehraté', '00000000-0000-4000-8000-000000000011', 'web', 'cena');
   ASSERT customer_status_calc(NULL, l, t) = 'marketingovy_kontakt', 'prepadnutý deal';
 
   -- zrušený: všetky OOM zrušené alebo prepísané

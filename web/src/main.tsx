@@ -2,7 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { ApprovalsPage } from './pages/ApprovalsPage';
+import { CompanyCheckPage } from './pages/CompanyCheckPage';
 import { ContactsPage } from './pages/ContactsPage';
+import { DealPage } from './pages/DealPage';
+import { DealsPage } from './pages/DealsPage';
 import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
 import { ContractsPage } from './pages/ContractsPage';
@@ -54,6 +58,10 @@ const router = createBrowserRouter([
       { path: 'oom', element: <OomListPage /> },
       { path: 'oom/import', element: <OomImportPage /> },
       { path: 'oom/:id', element: <OomPage /> },
+      { path: 'obchody', element: <DealsPage /> },
+      { path: 'obchody/:id', element: <DealPage /> },
+      { path: 'overenie-firmy', element: <CompanyCheckPage /> },
+      { path: 'schvalovanie', element: <ApprovalsPage /> },
       { path: 'zmluvy', element: <ContractsPage /> },
       { path: 'zmluvy/import', element: <ContractImportPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },

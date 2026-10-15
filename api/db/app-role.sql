@@ -74,6 +74,11 @@ REVOKE ALL ON contract_year_basis FROM crm_app;
 -- Záznam nočných behov iba číta admin (RLS).
 REVOKE INSERT, UPDATE ON notification, job_run FROM crm_app;
 GRANT UPDATE (read_at) ON notification TO crm_app;
+-- 0032: časovú os obchodu zapisujú iba spúšťače; žiadosti o schválenie iba funkcie (approval_request_assign,
+-- approval_decide, approval_cancel). Obchod sa nemaže (iba väzby OOM a kontaktov – vyššie).
+REVOKE INSERT, UPDATE ON deal_event, approval_request FROM crm_app;
+-- 0033: cache a počítadlo Finstatu iba cez funkcie (finstat_cache_get/put, finstat_request_allow)
+REVOKE ALL ON finstat_cache, finstat_usage FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

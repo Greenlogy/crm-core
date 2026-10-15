@@ -19,6 +19,9 @@ import { priceExceptions } from './routes/price-exceptions';
 import { pricing } from './routes/pricing';
 import { productsWrite } from './routes/products-write';
 import { settings } from './routes/settings';
+import { approvals } from './routes/approvals';
+import { companyCheck } from './routes/company-check';
+import { deals } from './routes/deals';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTER } from './queries/contacts';
@@ -104,7 +107,8 @@ app.get('/me', async (c) => {
   const [me] = await c.var.sql`
     SELECT u.id, u.name, u.email, u.is_admin, t.code AS team_code, t.name AS team_name,
            t.can_change_owner OR u.is_admin AS can_change_owner,
-           u.seller_type, u.approves_prices, crm_can_see_margin() AS can_see_margin,
+           u.seller_type, u.approves_prices, u.approves_assignments, crm_deal_manager() AS deal_manager,
+           crm_can_see_margin() AS can_see_margin,
            crm_can_see_job_runs() AS can_see_job_runs,
            ${c.env.ENVIRONMENT ?? 'test'}::text AS environment,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
@@ -136,6 +140,9 @@ app.route('/', pricing);
 app.route('/', priceExceptions);
 app.route('/', notifications);
 app.route('/', jobRuns);
+app.route('/', deals);
+app.route('/', approvals);
+app.route('/', companyCheck);
 
 // Filtre: status ('' = bez marketingových kontaktov a archívu, 'leady', 'vsetky', alebo jeden stav),
 // segment (domacnost, firma, vyrobca), owner (uuid obchodníka).

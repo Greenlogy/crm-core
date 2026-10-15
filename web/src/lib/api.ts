@@ -620,6 +620,9 @@ export type NotificationRow = {
   contract_number: string | null;
   price_exception_id: string | null;
   job_run_id: string | null;
+  deal_id: string | null;
+  deal_name: string | null;
+  approval_id: string | null;
 };
 export type JobRunError = { zmluva: string | null; cislo: string | null; krok: string; kod: string; text: string };
 export type JobRun = {
@@ -716,6 +719,10 @@ export type Me = {
   seller_type: SellerType | null;
   /** „schvaľuje ceny“ – cenové parametre, výnimky; vidí všetky zmluvy a maržu firmy */
   approves_prices: boolean;
+  /** „schvaľuje pridelenie firmy“ (0032) */
+  approves_assignments: boolean;
+  /** mení vlastníka obchodu a zakladá obchody pre iných (CEO, admin, „všetko“ v module Obchod, schvaľovatelia) */
+  deal_manager: boolean;
   can_see_margin: boolean;
   /** denník nočných behov (admin, Nákup – 0028) */
   can_see_job_runs: boolean;

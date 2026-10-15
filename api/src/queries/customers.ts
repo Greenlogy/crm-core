@@ -249,11 +249,11 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
       SELECT d.id, d.name, pl.name AS pipeline, st.name AS stage, st.is_closed, st.is_won,
              d.closed_at, d.created_at, d.hubspot_id, u.name AS owner_name,
              (SELECT count(*)::int FROM deal_oom x WHERE x.deal_id = d.id) AS oom_count,
-             k.id AS contract_id
+             -- obchod : zmluva = 1 : n (0032) – prvá spárovaná zmluva
+             (SELECT k.id FROM contract k WHERE k.deal_id = d.id ORDER BY k.signed_on NULLS LAST, k.number LIMIT 1) AS contract_id
         FROM deal d
         JOIN pipeline pl ON pl.id = d.pipeline_id
         JOIN pipeline_stage st ON st.id = d.stage_id
-        LEFT JOIN contract k ON k.deal_id = d.id
         LEFT JOIN app_user u ON u.id = d.owner_id
        WHERE d.${sql(kind === 'company' ? 'company_id' : 'person_id')} = ${id}
        ORDER BY d.closed_at DESC NULLS LAST, d.created_at DESC`,

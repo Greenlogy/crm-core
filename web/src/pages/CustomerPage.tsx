@@ -7,6 +7,7 @@ import { CompanyContactsCard, TimelineCard } from '../components/customer-f2';
 import { RegulationNotice } from '../components/regulation';
 import { CompanyFormPanel } from '../components/customer-forms';
 import { CustomFieldsCard } from '../components/custom-fields';
+import { FinstatCompanyCard } from '../components/deal-forms';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -16,7 +17,6 @@ import {
   HubSpotLink,
   Item,
   Kpi,
-  NotInPrototype,
   PageSkeleton,
   Pill,
   Rows,
@@ -25,7 +25,7 @@ import {
 import { useApi, type CompanyCard } from '../lib/api';
 import { useMe } from '../lib/me';
 import { kw, mwh, num, text } from '../lib/format';
-import { label, PAYMENT_RATING, rolesText, yesNo } from '../lib/labels';
+import { label, PAYMENT_RATING, rolesText } from '../lib/labels';
 
 export function CustomerPage() {
   const { id = '' } = useParams();
@@ -107,16 +107,7 @@ export function CustomerPage() {
             />
           </Card>
 
-          <Card title="FinStat" aside={c.finstat_url ? <a href={c.finstat_url} target="_blank" rel="noreferrer">Otvoriť ↗</a> : undefined}>
-            <Rows
-              stacked
-              rows={[
-                ['Dlhy a nedoplatky', text(yesNo(c.debts_note))],
-                ['Konkurzy a reštrukturalizácie', text(yesNo(c.insolvency_note))],
-              ]}
-            />
-            <NotInPrototype what="platobné hodnotenie a dáta z FinStatu sa nenačítavajú." />
-          </Card>
+          <FinstatCompanyCard companyId={c.id} canRefresh={c.country === 'SK' && !!c.ico} />
 
           <CustomFieldsCard
             entity="firma"

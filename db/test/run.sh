@@ -3,7 +3,7 @@
 # + checks_zakaznici_zapis.sql + checks_oom.sql + checks_produkty.sql
 # + checks_cenniky.sql + checks_zmluvy_priprava.sql + checks_zmluvy.sql + checks_zmluvy_import.sql
 # + checks_zmluvy_bilancia.sql + checks_zmluvy_nocny_beh.sql + checks_male_podniky.sql
-# + checks_objem_xm.sql
+# + checks_objem_xm.sql + checks_obchod.sql + checks_audit_rls.sql
 # v jednej transakcii, ktorá sa na konci vráti (na dev neostanú testovacie dáta).
 # Testy počítajú iba vlastné záznamy (pevné id 00000000-0000-4000-8000-…, východiskové tímy) – prejdú aj na databáze
 # s inými dátami (testovacie OOM, cenníky 2026, zmeny admina v Nastaveniach).
@@ -63,6 +63,8 @@ BEGIN;
 \i $ROOT/db/test/checks_zmluvy_nocny_beh.sql
 \i $ROOT/db/test/checks_male_podniky.sql
 \i $ROOT/db/test/checks_objem_xm.sql
+\i $ROOT/db/test/checks_obchod.sql
+\i $ROOT/db/test/checks_audit_rls.sql
 ROLLBACK;
 \echo 'Všetky kontroly prešli. Transakcia vrátená, neostali testovacie dáta.'
 SQL

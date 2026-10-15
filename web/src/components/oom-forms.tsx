@@ -12,8 +12,9 @@ import { CustomerPicker, type CustomerHit } from './oom-actions';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from './form';
 
 type Opt = { code: string; label: string; parent: string | null; hidden: boolean };
-type Options = Partial<Record<'pds' | 'sadzba_distribucie' | 'typ_merania' | 'fakturacne_obdobie' | 'sposob_zaloh' | 'typ_vykupnej_zmluvy' | 'predchadzajuci_dodavatel', Opt[]>>;
-type Values = Record<string, string | boolean>;
+export type OomOptions = Partial<Record<'pds' | 'sadzba_distribucie' | 'typ_merania' | 'fakturacne_obdobie' | 'sposob_zaloh' | 'typ_vykupnej_zmluvy' | 'predchadzajuci_dodavatel', Opt[]>>;
+export type OomFormValues = Record<string, string | boolean>;
+type Values = OomFormValues;
 
 /** Smie zakladať OOM (právo upravovať v module Odberné miesta). */
 export function useCanCreateOom(): boolean {
@@ -36,7 +37,7 @@ const TEXT_FIELDS = [
 // Číslo do poľa po slovensky (desatinná čiarka), bez zbytočných núl
 const numText = (v: unknown) => (v === null || v === undefined || v === '' ? '' : String(Number(v)).replace('.', ','));
 
-function initialValues(o?: OomCard): Values {
+export function initialValues(o?: OomCard): Values {
   const v: Values = { switch_notice_required: o ? o.switch_notice_required : true };
   for (const k of TEXT_FIELDS) v[k] = o ? String((o as unknown as Record<string, unknown>)[k] ?? '') : '';
   for (const k of NUM_FIELDS) v[k] = o ? numText((o as unknown as Record<string, unknown>)[k]) : '';
@@ -46,7 +47,7 @@ function initialValues(o?: OomCard): Values {
 }
 
 /** Iba zmenené polia; prázdne pole = vymazať (null). Čísla s čiarkou prevedie API. */
-function changed(initial: Values, now: Values): Record<string, unknown> {
+export function changed(initial: Values, now: Values): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(now)) {
     if (v === initial[k]) continue;
@@ -108,10 +109,10 @@ function EicField(props: { value: string; onChange: (v: string) => void; selfId?
 }
 
 /** Všetky skupiny údajov OOM (rovnaké pri založení aj úprave). */
-function OomFields(props: {
+export function OomFields(props: {
   v: Values;
   set: (k: string, val: string | boolean) => void;
-  options?: Options;
+  options?: OomOptions;
   selfId?: string;
   withSwitch: boolean;
   /** úprava existujúceho OOM: plán výkupu lokálneho zdroja zadaný ručne (0023) */
@@ -268,7 +269,7 @@ export function OomCreatePanel(props: { customer?: CustomerHit & { org_id: strin
   const navigate = useNavigate();
   const [target, setTarget] = useState<CustomerHit | null>(props.customer ?? null);
   const [orgId, setOrgId] = useState(props.customer?.org_id ?? me.orgs.find((o) => o.default)?.id ?? me.orgs[0]?.id ?? '');
-  const options = useApi<Options>(`/api/oom-options?org=${orgId}`).data;
+  const options = useApi<OomOptions>(`/api/oom-options?org=${orgId}`).data;
   const [initial] = useState(() => initialValues());
   const [v, setV] = useState<Values>(initial);
   const save = useSave();
@@ -324,7 +325,7 @@ export function OomCreatePanel(props: { customer?: CustomerHit & { org_id: strin
 
 /** Úprava údajov OOM (všetky skupiny). Pri Aktívnom OOM iba s právom „upravovať Aktívne OOM“. */
 export function OomEditPanel(props: { o: OomCard; onClose: () => void; onSaved: () => void }) {
-  const options = useApi<Options>(`/api/oom-options?org=${props.o.org_id}`).data;
+  const options = useApi<OomOptions>(`/api/oom-options?org=${props.o.org_id}`).data;
   const [initial] = useState(() => initialValues(props.o));
   const [v, setV] = useState<Values>(initial);
   const save = useSave();

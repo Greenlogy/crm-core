@@ -68,6 +68,10 @@ export const CONTRACT_FLAG: Record<string, { label: string; tone: Tone }> = {
   pod_hranicou_bez_vynimky: { label: 'Pod hranicou bez výnimky', tone: 'negative' },
   nad_30_mwh: { label: 'Nad 30 MWh v regulácii', tone: 'warning' },
   objem_xm: { label: 'Objem ≠ XM Trade', tone: 'warning' },
+  dalsi_krok: { label: 'Ďalší krok', tone: 'info' },
+  schvalenie_nove: { label: 'Na schválenie', tone: 'info' },
+  schvalenie_rozhodnutie: { label: 'Rozhodnutie', tone: 'info' },
+  pridelenie_firmy: { label: 'Pridelenie firmy', tone: 'warning' },
 };
 
 // Upozornenia (zvonček, 0028)

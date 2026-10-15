@@ -107,8 +107,8 @@ oomWrite.get('/oom-customers', async (c) => {
 // Polia OOM, ktoré smie meniť formulár (zákazník, stav a spoločnosť nie – tie idú cez väzby).
 // Typ určuje kontrolu v API a pretypovanie v SQL; pravidlá CRM (povinné pre Aktívne, číselníky,
 // sadzba k PDS, poradie krokov, právo upravovať Aktívne OOM) stráži databáza.
-type FieldKind = 'text' | 'num' | 'int' | 'date' | 'bool' | 'code' | 'enum';
-const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cast?: string; values?: readonly string[] }> = {
+export type FieldKind = 'text' | 'num' | 'int' | 'date' | 'bool' | 'code' | 'enum';
+export const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cast?: string; values?: readonly string[] }> = {
   eic: { kind: 'text', label: 'EIC', max: 20 },
   type: { kind: 'enum', label: 'Typ', cast: 'oom_type', values: ['spotreba', 'vyroba', 'sharing'] },
   name: { kind: 'text', label: 'Názov', max: 120 },
@@ -157,10 +157,10 @@ const FIELDS: Record<string, { kind: FieldKind; label: string; max?: number; cas
   switch_notice_accepted_on: { kind: 'date', label: 'Výpoveď akceptovaná' },
   switch_confirmed_on: { kind: 'date', label: 'Zmena dodávateľa potvrdená' },
 };
-const CAST: Record<FieldKind, string> = { text: 'text', num: 'numeric', int: 'smallint', date: 'date', bool: 'boolean', code: 'text', enum: '' };
+export const CAST: Record<FieldKind, string> = { text: 'text', num: 'numeric', int: 'smallint', date: 'date', bool: 'boolean', code: 'text', enum: '' };
 
 /** Hodnoty polí z tela požiadavky (iba známe polia; prázdne = NULL). */
-function oomValues(b: Body): Record<string, string | number | boolean | null> {
+export function oomValues(b: Body): Record<string, string | number | boolean | null> {
   const out: Record<string, string | number | boolean | null> = {};
   for (const [key, f] of Object.entries(FIELDS)) {
     if (!(key in b)) continue;

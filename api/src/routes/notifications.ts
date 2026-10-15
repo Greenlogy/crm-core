@@ -18,9 +18,11 @@ notifications.get('/notifications/count', async (c) => {
 notifications.get('/notifications', async (c) => {
   const items = await c.var.sql`
     SELECT n.id, n.kind, n.detail, n.created_at, n.read_at, n.ref_date,
-           k.id AS contract_id, k.number AS contract_number, n.price_exception_id, n.job_run_id
+           k.id AS contract_id, k.number AS contract_number, n.price_exception_id, n.job_run_id,
+           d.id AS deal_id, d.name AS deal_name, n.approval_id
       FROM notification n
       LEFT JOIN contract k ON k.id = n.contract_id
+      LEFT JOIN deal d ON d.id = n.deal_id
      ORDER BY n.read_at IS NOT NULL, n.created_at DESC
      LIMIT 100`;
   const unread = items.filter((n) => n.read_at === null).length;

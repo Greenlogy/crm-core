@@ -13,6 +13,8 @@ const time = (v: string) =>
   new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', hour: 'numeric', minute: '2-digit' }).format(new Date(v));
 
 function target(n: NotificationRow): { to: string; label: string } | null {
+  if (n.deal_id) return { to: `/obchody/${n.deal_id}`, label: `Obchod ${n.deal_name ?? ''}`.trim() };
+  if (n.approval_id) return { to: '/schvalovanie', label: 'Schvaľovanie' };
   if (n.contract_id) return { to: `/zmluvy/${n.contract_id}`, label: `Zmluva ${n.contract_number ?? ''}`.trim() };
   if (n.price_exception_id) return { to: '/vynimky', label: 'Výnimky z ceny' };
   if (n.job_run_id) return { to: '/nastavenia/nocny-beh', label: 'Denník nočného behu' };

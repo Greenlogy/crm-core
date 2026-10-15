@@ -1,7 +1,20 @@
 # Changelog
 
+## 2026-10-15
+
+- `0035_audit_rls` (overená nanečisto, 181 kontrol; nenasadené): RLS na audite podľa toho, čo používateľ vidí; externý tím odomknutý. `0034` na `dev` a F1 na Teste (Peter).
+- Modul 5, F1 – API a obrazovky (lokálne overené, nenasadené): Obchody (kanban a zoznam), karta obchodu, Overenie firmy (CRM + Finstat), Schvaľovanie (pridelenie firmy), FinStat na karte firmy, príznak „schvaľuje pridelenie firmy“ v Nastaveniach, odkazy v upozorneniach; klient Finstatu (cache 24 h, denný limit, overené polia Ultimate). Migrácia `0034_obchod_f1_doplnky` (overená nanečisto, 179 kontrol). Plán `0035` RLS na audite.
+- Modul 5, F1: `0032` a `0033` na `dev` (Peter).
+- Modul 5, F1 (overené nanečisto, na `dev` nespustené):
+  - `0032_obchod_jadro`: 6 systémových štádií v každej pipeline, 4 pipelines (B2B dodávka, B2B výkup, Green VIWA B2B, B2C), číselníky dôvod prehry a zdroj obchodu; obchod so zdrojom, ďalším krokom, odhadom PH, predošlou zmluvou; pravidlá štádií, znovuotvorenie s dôvodom, konflikt vlastníka zákazníka a zákazník bez vlastníka; OOM na obchode s objemami, jedno OOM v jednom otvorenom obchode (výnimka Obnova), OOM z prehratého obchodu → Zrušené; časová os `deal_event`; pridelenie firmy (`approval_request`, príznak „schvaľuje pridelenie firmy“); upozornenie na ďalší krok v nočnom behu; RLS obchodov.
+  - `0033_finstat`: údaje Finstatu na firme, cache 24 h, denný limit, výstrahy `company_risk`, overenie firmy `company_check`.
+  - Testy `checks_obchod.sql` (B0–B7), úpravy existujúcich testov na nový model obchodu; 178 kontrol OK; down/up overené.
+  - Kód, ktorý ide spolu s migráciou: Nastavenia → Pipelines (systémové štádiá), nočný beh obchodov, práva `app-role.sql`.
+- Modul 5: návrh `05-obchod-navrh-db.md` v0.2 – Petrove odpovede 1–21 a poistky Gmailu, odhad ceny R2 a Browser Rendering, plán F1 (`0032_obchod_jadro`, `0033_finstat`). Iba dokument.
+
 ## 2026-10-14
 
+- Modul 5 Obchod a ponuky, krok 0: návrh `docs/moduly/05-obchod-navrh-db.md` v0.1 (dátový model, väzby na modul 4, Gmail, PDF, verejná stránka ponuky, pracovné dni, ceny z Montel Workera, Finstat, fázy F1–F7, 21 otázok). Iba dokument, bez kódu a migrácií.
 - Modul 4, F4 uzavretá: `0028`–`0030` na `dev` (`db/schema.sql` z `dev`), kód nasadený na Test, Peter otestoval.
 - Modul 4, `0030_objem_xm` (overená nanečisto, 167 kontrol; nenasadené): upozornenie, ak sa objem zmluvy (Office portal) líši od plánovanej spotreby z XM Trade o viac ako 5 % – nočný beh (denník, upozornenie obchodníkovi a schvaľovateľom cien, znova iba po zmene objemu), import, karta zmluvy (stĺpec XM Trade s rozdielom), filter „Objem ≠ XM Trade“. Bilancia a provízia ostávajú na zmluvnom množstve. Testy `checks_objem_xm.sql` (Z6); skript `zmluvy-test.sh` s TEST-NB-11. Cockpit → `0031`.
 - Modul 4, `0029_male_podniky` (overená nanečisto, 165 kontrol; nenasadené):

@@ -24,5 +24,13 @@ CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$(DB_URL="$URL" node -
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
 unset URL
 
-exec "$ROOT/api/node_modules/.bin/wrangler" dev --port 8787 \
+# Kľúče Finstatu (modul 5): iba riadky FINSTAT_* z ../.dev.vars cez dočasný súbor (nie argumenty – neboli by
+# vidieť v zozname procesov); ostatné tajomstvá (HubSpot, pripojenia) sa do lokálneho Workera neodovzdávajú.
+FIN_ENV="$(mktemp)"
+chmod 600 "$FIN_ENV"
+trap 'rm -f "$FIN_ENV"' EXIT
+grep -E '^FINSTAT_(API_KEY|PRIVATE_KEY|LEVEL)=' "$ROOT/.dev.vars" > "$FIN_ENV" || true
+
+"$ROOT/api/node_modules/.bin/wrangler" dev --port 8787 \
+  --env-file "$FIN_ENV" \
   --var "DEV_USER_EMAIL:${CRM_DEV_EMAIL:-peter@greenlogy.com}" "$@"
