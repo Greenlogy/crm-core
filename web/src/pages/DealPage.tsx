@@ -358,6 +358,9 @@ function eventText(t: TimelineItem): string {
     case 'ponuka_odkaz': return `Nový odkaz na stránku ponuky ${offerNo(t)} (starý neplatí)`;
     case 'akceptacia_zrusena': return `Akceptácia ponuky ${offerNo(t)} zrušená${t.detail?.reason ? ` – ${String(t.detail.reason)}` : ''}`;
     case 'ponuka_odblokovana': return `Verzia ${offerNo(t)} odblokovaná`;
+    case 'zmluva_sparovana': return `Zmluva ${String(t.detail?.number ?? '')} spárovaná ${t.detail?.method === 'rucne' ? 'ručne' : 'pri importe'}${t.detail?.bez_ponuky ? ' – spárované bez akceptovanej ponuky' : ''}`;
+    case 'zmluva_odparovana': return `Zrušené spárovanie zmluvy ${String(t.detail?.number ?? '')}${t.detail?.reason ? ` – ${String(t.detail.reason)}` : ''}`;
+    case 'predosla_zmluva': return `Predošlá zmluva ${String(t.detail?.number ?? '')} doplnená nočným behom`;
     case 'potvrdenie_neodoslane': return `Potvrdenie akceptácie ponuky ${offerNo(t)} sa zákazníkovi neposlalo (vypnuté pri zázname)`;
     case 'schvalenie_ziadost': return `Žiadosť o schválenie (${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? ''}) – ponuka ${offerNo(t)}`;
     case 'schvalenie_rozhodnutie': return `${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? 'Žiadosť'} ${t.detail?.approved ? 'schválená' : 'zamietnutá'} – ponuka ${offerNo(t)}`;

@@ -33,6 +33,7 @@ type ContractRun = {
   prolongovane?: number;
   ukoncene?: number;
   konci_4_mesiace?: number;
+  obnova?: number;
   zakaznici?: number;
   chyby?: number;
 };
@@ -54,7 +55,7 @@ export async function dailyContractRun(env: Env): Promise<void> {
     }
     console.log(
       `Nočný beh zmlúv: regulácia ${r?.regulacia ?? 0}, cenník ${r?.cennik ?? 0} (spätne ${r?.cennik_spatne?.pocet ?? 0}), ` +
-        `prolongované ${r?.prolongovane ?? 0}, ukončené ${r?.ukoncene ?? 0}, upozornenia 4 mesiace ${r?.konci_4_mesiace ?? 0}, ` +
+        `prolongované ${r?.prolongovane ?? 0}, ukončené ${r?.ukoncene ?? 0}, upozornenia 4 mesiace ${r?.konci_4_mesiace ?? 0}, obnovy ${r?.obnova ?? 0}, ` +
         `zákazníci ${r?.zakaznici ?? 0}, chyby ${r?.chyby ?? 0}`,
     );
   } catch (err) {
@@ -70,8 +71,8 @@ export async function dailyContractRun(env: Env): Promise<void> {
 export async function dailyDealRun(env: Env): Promise<void> {
   const sql = connect(env);
   try {
-    const [row] = await sql<{ r: { dalsi_krok?: number } }[]>`SELECT deal_daily_run() AS r`;
-    console.log(`Nočný beh obchodov: ďalší krok ${row?.r?.dalsi_krok ?? 0}`);
+    const [row] = await sql<{ r: { dalsi_krok?: number; pripomienky?: number; chyba_oom_na_zmluve?: number } }[]>`SELECT deal_daily_run() AS r`;
+    console.log(`Nočný beh obchodov: ďalší krok ${row?.r?.dalsi_krok ?? 0}, pripomienky ${row?.r?.pripomienky ?? 0}, OOM bez zmluvy ${row?.r?.chyba_oom_na_zmluve ?? 0}`);
   } catch (err) {
     const code = (err as { code?: string }).code ?? 'unknown';
     console.error(`Nočný beh obchodov zlyhal: ${(err as Error).name} ${code}`);

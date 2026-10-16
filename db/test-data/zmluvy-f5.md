@@ -1,7 +1,7 @@
 # Skúška párovania zmlúv s obchodmi (modul 5, F5) na Teste
 
-Vymyslené údaje bez osobných údajov: firmy „Testovacia Epsilon / Zeta / Théta“ (IČO 99999905–07), domácnosť „Eva Pokusná“,
-EIC `24ZZS99TESTF…`, zmluvy `1129995001`–`06`. Súbory sú v presnom formáte exportov (hárok „HEO - Web Zmluvy - prehlad EE +“
+Vymyslené údaje bez osobných údajov: firmy „Testovacia Epsilon / Zeta / Théta / Ióta“ (IČO 99999905–08), domácnosť „Eva Pokusná“,
+EIC `24ZZS99TESTF…`, zmluvy `1129995001`–`08`. Súbory sú v presnom formáte exportov (hárok „HEO - Web Zmluvy - prehlad EE +“
 a XM Trade „Prehľad“). Znova ich vytvorí `node db/test-data/zmluvy-f5-vytvor.cjs` (aj SQL na založenie a zmazanie).
 
 ## Postup
@@ -28,6 +28,19 @@ a XM Trade „Prehľad“). Znova ich vytvorí `node db/test-data/zmluvy-f5-vytv
 
 5. Vyskúšať: na karte 1129995004 „Bez obchodu“ alebo „Vybrať obchod“, na 1129995001 „Zrušiť spárovanie“ (obchod ostane
    Vyhraté – má VN), uzavretie príznaku 1129995003 schvaľovateľom s poznámkou, Podklady pre zmluvu na obchode Epsilon.
+
+## Obnova (krok 2, `0046`)
+
+Skript založí aj firmu **Testovacia Ióta** a dve podpísané zmluvy s koncom **o 60 dní** od založenia (v okne 4 mesiacov),
+priamo – neprídu importom, preto sa nepárujú ani nezobrazia v Nespárovaných:
+
+| Zmluva | Situácia | Po nočnom behu zmlúv (0:05) |
+| --- | --- | --- |
+| 1129995007 | OOM `…A078` nie je v žiadnom obchode | nový obchod **„Obnova – 1129995007“** (Príležitosť, OOM 35 MWh, predošlá zmluva, uzavretie = koniec − 1 mesiac); upozornenie „Obnova zmluvy“ |
+| 1129995008 | OOM `…A086` je v otvorenom obchode „TEST F5 Ióta – bežný obchod“ | Obnova sa nezaloží; obchodu sa doplní predošlá zmluva (časová os „Predošlá zmluva … doplnená nočným behom“); upozornenie „Obnova zmluvy“ |
+
+Výsledok je vidieť ráno po nočnom behu. Hneď sa dá spustiť nočný beh k dnešku cez `./db/test-data/zmluvy-test.sh dev nanecisto RRRR-MM-DD`
+(iba výpis, vráti sa) alebo `… dev beh RRRR-MM-DD` (uloží sa) – beh sa týka všetkých zmlúv a OOM na Teste.
 
 Zmazanie všetkého vrátane importovaných zmlúv: `./db/test-data/zmluvy-f5.sh dev zmaz`. Ceny pod hranicou cien dňa na Teste
 môžu pridať aj príznak modulu 4 „Pod hranicou bez výnimky“ – s párovaním nesúvisí.

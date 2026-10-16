@@ -98,6 +98,8 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
   email_chyba: { label: 'Chyba e-mailu', tone: 'negative' },
   nesparovana_zmluva: { label: 'Nespárovaná zmluva', tone: 'warning' },
   cena_ina_ako_v_ponuke: { label: 'Cena iná ako v ponuke', tone: 'negative' },
+  obnova: { label: 'Obnova zmluvy', tone: 'info' },
+  chyba_oom_na_zmluve: { label: 'OOM chýba na zmluve', tone: 'warning' },
 };
 
 // Kroky nočného behu zmlúv (denník, 0028)

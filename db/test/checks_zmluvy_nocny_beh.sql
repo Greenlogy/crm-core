@@ -127,21 +127,26 @@ BEGIN
   PERFORM pg_temp.z4_ko(5, 5, 'green_dd2_nie');
 
   r := contract_daily_run_at('2026-12-29');   -- 30. 4. 2027 − 4 mesiace = 30. 12. 2026 → ešte nie
-  ASSERT pg_temp.z4_notes(1, 'konci_4_mesiace') = 0, '29. 12. bez upozornenia';
+  ASSERT pg_temp.z4_notes(1, 'konci_4_mesiace') = 0 AND pg_temp.z4_notes(1, 'obnova') = 0, '29. 12. bez upozornenia';
   r := contract_daily_run_at('2026-12-30');
-  ASSERT (SELECT array_agg(user_id) FROM notification WHERE contract_id = pg_temp.z4_id('k', 1) AND kind = 'konci_4_mesiace')
+  -- 0046 (F5): pri zmluve firmy nočný beh založí obchod Obnova a obchodník dostane namiesto „Končí do 4 mesiacov“ upozornenie „Obnova“
+  ASSERT (SELECT array_agg(user_id) FROM notification WHERE contract_id = pg_temp.z4_id('k', 1) AND kind = 'obnova')
          = ARRAY['00000000-0000-4000-8000-000000007501'::uuid]
-     AND (SELECT ref_date FROM notification WHERE contract_id = pg_temp.z4_id('k', 1) AND kind = 'konci_4_mesiace') = '2027-04-30',
-         'upozornenie obchodníkovi zmluvy s koncom 30. 4. 2027';
+     AND (SELECT ref_date FROM notification WHERE contract_id = pg_temp.z4_id('k', 1) AND kind = 'obnova') = '2027-04-30'
+     AND pg_temp.z4_notes(1, 'konci_4_mesiace') = 0,
+         'upozornenie Obnova obchodníkovi zmluvy s koncom 30. 4. 2027';
+  ASSERT EXISTS (SELECT 1 FROM deal WHERE previous_contract_id = pg_temp.z4_id('k', 1) AND source_code = 'obnova'
+                   AND owner_id = '00000000-0000-4000-8000-000000007501' AND closed_at IS NULL), 'obchod Obnova založený';
   ASSERT pg_temp.z4_notes(2, 'konci_4_mesiace') = 0, 'na OOM nadväzuje podpísaná zmluva → bez upozornenia';
-  ASSERT (SELECT array_agg(user_id) FROM notification WHERE contract_id = pg_temp.z4_id('k', 4) AND kind = 'konci_4_mesiace')
-         = ARRAY['00000000-0000-4000-8000-000000007501'::uuid], 'zmluva bez obchodníka → vlastník zákazníka (odpoveď 35)';
+  ASSERT (SELECT array_agg(user_id) FROM notification WHERE contract_id = pg_temp.z4_id('k', 4) AND kind = 'obnova')
+         = ARRAY['00000000-0000-4000-8000-000000007501'::uuid], 'zmluva bez obchodníka → Obnova vlastníkovi zákazníka (odpoveď 35)';
   ASSERT pg_temp.z4_notes(5, 'konci_4_mesiace') = 0, 'domácnosť bez upozornenia (odpoveď 34)';
   ASSERT pg_temp.z4_notes(6, 'konci_4_mesiace') = 0, 'zmluva bez Aktívneho / Pripravovaného OOM bez upozornenia';
   r := contract_daily_run_at('2026-12-31');
-  ASSERT pg_temp.z4_notes(1, 'konci_4_mesiace') = 1, 'upozornenie iba raz';
+  ASSERT pg_temp.z4_notes(1, 'obnova') = 1 AND (SELECT count(*) FROM deal WHERE previous_contract_id = pg_temp.z4_id('k', 1)) = 1,
+         'upozornenie aj Obnova iba raz';
   ASSERT crm_today() = (now() AT TIME ZONE 'Europe/Bratislava')::date, 'po behu platí znova skutočný dnešok';
-  RAISE NOTICE 'OK: Z4-1 upozornenie 4 mesiace pred koncom raz, obchodník alebo vlastník zákazníka, nie pri nadväzujúcej zmluve, domácnosti ani bez aktívneho OOM';
+  RAISE NOTICE 'OK: Z4-1 4 mesiace pred koncom raz: Obnova a upozornenie obchodníkovi alebo vlastníkovi zákazníka (0046), nie pri nadväzujúcej zmluve, domácnosti ani bez aktívneho OOM';
 END;
 $$;
 

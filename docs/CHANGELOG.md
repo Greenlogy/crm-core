@@ -2,6 +2,8 @@
 
 ## 2026-10-16
 
+- Modul 5: **F5 uzavretá** – `0045`, `0046` na `dev`, Peter otestoval; testovacie zmluvy pre Obnovu v `db/test-data/zmluvy-f5*`.
+- Modul 5, F5 krok 2 (nenasadené): `0046_obnova_nocny_beh` overená nanečisto, 243 kontrol – nočný beh zmlúv zakladá obchod Obnova (alebo doplní predošlú zmluvu otvorenému obchodu), upozornenie „Obnova“ namiesto „Končí do 4 mesiacov“; nočný beh obchodov upozorní 14 dní po akceptácii na OOM bez zmluvy. Test modulu 4 Z4-1 upravený (firmy dostanú Obnovu).
 - Modul 5: **F5 krok 1 uzavretý** – `0045` na `dev`, API a obrazovky 38, 40 na Teste, Peter otestoval; vymyslené testovacie exporty a skript `db/test-data/zmluvy-f5.sh`.
 - Modul 5, F5 krok 1 – kód (lokálne overené, nenasadené): `0045` na `dev`; API podkladov pre zmluvu, prehľadu Zmluvy k obchodom a ručných rozhodnutí pri zmluve; obrazovky 38, 40, úprava zoznamu a karty zmluvy, tlačidlo „Podklady pre zmluvu“ na obchode, menu „Zmluvy k obchodom“.
 - Modul 5, F5 krok 1 (nenasadené): `0045_zmluvy_k_obchodom` overená nanečisto, 241 kontrol – podklady pre zmluvu (firma, zástupca, OOM, obchod; NN / VN; úplnosť; IBAN), párovanie zmlúv z importu (Akceptácia, Vyjednávanie bez kontroly cien, ďalšia zmluva VN, nejednoznačná zhoda, domácnosť bez obchodu; iba po zapnutí `deal_matching`), príznak „Cena iná ako v ponuke“, výnimka z ponuky → zmluva, ručné rozhodnutia a zrušenie spárovania; číselníky vzťah k nehnuteľnosti a model výpočtu výkupu.

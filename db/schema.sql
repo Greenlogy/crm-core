@@ -2515,6 +2515,8 @@ DECLARE
   v_vol     text[] := '{}';
   v_prev_today  text := coalesce(current_setting('crm.today', true), '');
   v_prev_source text;
+  v_renew   jsonb;
+  v_renewed integer := 0;
 BEGIN
   IF p_today IS NULL THEN
     RAISE EXCEPTION 'contract_daily_run_at: chýba dátum' USING ERRCODE = 'check_violation';
@@ -2666,14 +2668,16 @@ BEGIN
   v_n := v_n || jsonb_build_object('chyba_cena_kontrola', v_cnt);
 
   -- 5. Upozornenie 4 mesiace pred koncom (firmy a výkup, odpoveď 34): raz na koniec zmluvy, iba ak niektoré
-  --    Aktívne alebo Pripravované OOM ešte nemá nadväzujúcu podpísanú zmluvu
+  --    Aktívne alebo Pripravované OOM ešte nemá nadväzujúcu podpísanú zmluvu.
+  --    0046 (F5): pri zmluve firmy nočný beh založí obchod Obnova (alebo bežnému otvorenému obchodu s OOM zmluvy doplní
+  --    predošlú zmluvu); obchodník dostane namiesto „Končí do 4 mesiacov“ jedno upozornenie „Obnova“ s odkazom na obchod
   v_cnt := 0;
   BEGIN
     FOR r IN SELECT k.id, k.number, k.auto_prolong, contract_effective_to(k) AS end_on FROM contract k
               WHERE k.phase = 'podpisana' AND k.type IN ('dodavka_firma_nn', 'dodavka_firma_vn', 'vykup')
                 AND contract_effective_to(k) BETWEEN p_today AND (p_today + interval '4 months')::date
                 AND NOT EXISTS (SELECT 1 FROM notification n
-                                 WHERE n.contract_id = k.id AND n.kind = 'konci_4_mesiace' AND n.ref_date = contract_effective_to(k))
+                                 WHERE n.contract_id = k.id AND n.kind IN ('konci_4_mesiace', 'obnova') AND n.ref_date = contract_effective_to(k))
                 AND EXISTS (SELECT 1 FROM contract_oom x JOIN oom o ON o.id = x.oom_id
                              WHERE x.contract_id = k.id AND x.is_binding AND x.successor_id IS NULL
                                AND x.valid_to = contract_effective_to(k)
@@ -2684,10 +2688,29 @@ BEGIN
                                                   AND y.contract_id <> k.id AND y.valid_from > x.valid_to))
               ORDER BY k.id LOOP
       BEGIN
-        IF notification_add(notification_contract_users(r.id), 'konci_4_mesiace', r.id, NULL, NULL, r.end_on,
-                            format('Zmluva %s končí %s – dojednaj novú zmluvu%s', r.number, to_char(r.end_on, 'FMDD. FMMM. YYYY'),
-                                   CASE WHEN r.auto_prolong THEN ' (inak sa automaticky predĺži s cenníkom)' ELSE '' END)) > 0 THEN
+        v_renew := contract_renewal(r.id);
+        IF v_renew->>'deal_id' IS NOT NULL THEN
+          -- obchodník obchodu Obnova (alebo doplneného obchodu): jedno upozornenie „Obnova“ s odkazom na obchod
+          INSERT INTO notification (user_id, kind, contract_id, deal_id, ref_date, detail)
+          SELECT d.owner_id, 'obnova', r.id, d.id, r.end_on,
+                 format('Zmluva %s končí %s – %s', r.number, to_char(r.end_on, 'FMDD. FMMM. YYYY'),
+                        CASE v_renew->>'action' WHEN 'zalozena' THEN 'založený obchod Obnova' ELSE 'predošlá zmluva doplnená k otvorenému obchodu' END)
+            FROM deal d WHERE d.id = (v_renew->>'deal_id')::uuid;
+          IF v_renew->>'action' = 'zalozena' THEN
+            v_renewed := v_renewed + 1;
+          END IF;
           v_cnt := v_cnt + 1;
+        ELSE
+          IF v_renew->>'action' = 'bez_vlastnika' THEN
+            PERFORM notification_add(ARRAY(SELECT id FROM app_user WHERE is_admin AND status = 'aktivny'), 'obnova', r.id, NULL, NULL, r.end_on,
+                                     format('Zmluva %s končí %s – obchod Obnova sa nezaložil: zmluva nemá aktívneho obchodníka ani vlastníka zákazníka',
+                                            r.number, to_char(r.end_on, 'FMDD. FMMM. YYYY')));
+          END IF;
+          IF notification_add(notification_contract_users(r.id), 'konci_4_mesiace', r.id, NULL, NULL, r.end_on,
+                              format('Zmluva %s končí %s – dojednaj novú zmluvu%s', r.number, to_char(r.end_on, 'FMDD. FMMM. YYYY'),
+                                     CASE WHEN r.auto_prolong THEN ' (inak sa automaticky predĺži s cenníkom)' ELSE '' END)) > 0 THEN
+            v_cnt := v_cnt + 1;
+          END IF;
         END IF;
       EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
@@ -2699,7 +2722,7 @@ BEGIN
     v_err := v_err || job_error(NULL, 'upozornenia', v_state, v_msg);
     v_cnt := 0;
   END;
-  v_n := v_n || jsonb_build_object('konci_4_mesiace', v_cnt);
+  v_n := v_n || jsonb_build_object('konci_4_mesiace', v_cnt, 'obnova', v_renewed);
 
   -- 5b. Malý podnik nad 30 MWh (0029): regulovaní zákazníci s objemom nad 30 MWh alebo nesúladom zmluvy / XM Trade.
   --     Zmluvy do denníka; obchodník dostane upozornenie raz za rok.
@@ -5411,6 +5434,106 @@ $$;
 
 
 --
+-- Name: contract_renewal(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_renewal(p_contract uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  c        contract;
+  d        deal;
+  v_kind   deal_kind;
+  v_owner  uuid;
+  v_end    date;
+  v_pipe   uuid;
+  v_stage  uuid;
+  v_deal   uuid;
+  r        record;
+  v_n      integer := 0;
+BEGIN
+  SELECT * INTO c FROM contract WHERE id = p_contract;
+  IF c.company_id IS NULL THEN
+    RETURN jsonb_build_object('action', 'domacnost');
+  END IF;
+  v_kind := contract_deal_kind(c.type);
+  -- už otvorená Obnova k tejto zmluve
+  SELECT * INTO d FROM deal WHERE previous_contract_id = c.id AND closed_at IS NULL AND source_code = 'obnova';
+  IF FOUND THEN
+    RETURN jsonb_build_object('deal_id', d.id, 'action', 'existuje');
+  END IF;
+  -- bežný otvorený obchod rovnakého druhu s niektorým OOM zmluvy: iba doplniť predošlú zmluvu
+  SELECT dd.* INTO d FROM deal dd JOIN pipeline p ON p.id = dd.pipeline_id
+   WHERE dd.company_id = c.company_id AND dd.closed_at IS NULL AND p.kind = v_kind
+     AND EXISTS (SELECT 1 FROM deal_oom x JOIN contract_oom co ON co.oom_id = x.oom_id WHERE x.deal_id = dd.id AND co.contract_id = c.id)
+   ORDER BY dd.created_at
+   LIMIT 1;
+  IF FOUND THEN
+    IF d.previous_contract_id IS NULL THEN
+      UPDATE deal SET previous_contract_id = c.id WHERE id = d.id;
+      INSERT INTO deal_event (deal_id, org_id, kind, user_id, detail)
+      VALUES (d.id, d.org_id, 'predosla_zmluva', NULL,
+              jsonb_build_object('contract_id', c.id, 'number', c.number, 'text', 'predošlá zmluva doplnená nočným behom'));
+    END IF;
+    RETURN jsonb_build_object('deal_id', d.id, 'action', 'doplnena');
+  END IF;
+  -- vlastník: obchodník zmluvy, inak vlastník zákazníka (aktívny, v nearchivovanom tíme)
+  SELECT u.id INTO v_owner FROM app_user u JOIN team t ON t.id = u.team_id
+   WHERE u.id IN (c.owner_id, (SELECT owner_id FROM company WHERE id = c.company_id)) AND u.status = 'aktivny' AND t.archived_at IS NULL
+   ORDER BY (u.id = c.owner_id) DESC NULLS LAST
+   LIMIT 1;
+  IF v_owner IS NULL THEN
+    RETURN jsonb_build_object('action', 'bez_vlastnika');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM contract_oom co JOIN oom o ON o.id = co.oom_id
+                  WHERE co.contract_id = c.id AND o.status IN ('aktivne', 'pripravovane')) THEN
+    RETURN jsonb_build_object('action', 'bez_oom');
+  END IF;
+  v_end := contract_effective_to(c);
+  SELECT p.id INTO v_pipe FROM pipeline p
+   WHERE p.kind = v_kind AND p.archived_at IS NULL AND (p.org_id IS NULL OR p.org_id = c.org_id)
+   ORDER BY (p.org_id IS NOT DISTINCT FROM c.org_id) DESC, p.sort_order
+   LIMIT 1;
+  SELECT s.id INTO v_stage FROM pipeline_stage s WHERE s.pipeline_id = v_pipe AND s.code = 'prilezitost';
+  INSERT INTO deal (company_id, pipeline_id, stage_id, name, owner_id, source_code, previous_contract_id, expected_close,
+                    supply_start, org_id)
+  VALUES (c.company_id, v_pipe, v_stage, 'Obnova – ' || c.number, v_owner, 'obnova', c.id,
+          (v_end - interval '1 month')::date, v_end + 1, c.org_id)
+  RETURNING id INTO v_deal;
+  -- OOM zmluvy (Aktívne / Pripravované) s objemami zo zmluvy; OOM v inom otvorenom obchode rovnakého druhu sa preskočí
+  FOR r IN
+    SELECT co.oom_id, sum(co.qty_vt_mwh) AS vt, sum(co.qty_nt_mwh) AS nt, max(co.source_power_kw) AS kw, max(o.planned_feed_in_mwh) AS feed
+      FROM contract_oom co JOIN oom o ON o.id = co.oom_id
+     WHERE co.contract_id = c.id AND o.status IN ('aktivne', 'pripravovane')
+     GROUP BY co.oom_id
+     ORDER BY co.oom_id
+  LOOP
+    BEGIN
+      INSERT INTO deal_oom (deal_id, oom_id, planned_vt_mwh, planned_nt_mwh, planned_feed_in_mwh, source_power_kw)
+      VALUES (v_deal, r.oom_id,
+              CASE WHEN v_kind IN ('b2b_vykup', 'green_viwa') THEN NULL ELSE nullif(r.vt, 0) END,
+              CASE WHEN v_kind IN ('b2b_vykup', 'green_viwa') THEN NULL ELSE nullif(r.nt, 0) END,
+              CASE WHEN v_kind IN ('b2b_vykup', 'green_viwa') THEN r.feed END,
+              CASE WHEN v_kind IN ('b2b_vykup', 'green_viwa') THEN r.kw END);
+      v_n := v_n + 1;
+    EXCEPTION WHEN check_violation OR unique_violation THEN
+      NULL;
+    END;
+  END LOOP;
+  -- kontakty: z predošlého obchodu zmluvy, inak hlavný kontakt firmy
+  INSERT INTO deal_contact (deal_id, contact_id, roles, is_primary)
+  SELECT v_deal, x.contact_id, x.roles, x.is_primary FROM deal_contact x WHERE x.deal_id = c.deal_id;
+  IF NOT FOUND THEN
+    INSERT INTO deal_contact (deal_id, contact_id, is_primary)
+    SELECT v_deal, cc.contact_id, true FROM company_contact cc WHERE cc.company_id = c.company_id AND cc.is_main_contact;
+  END IF;
+  RETURN jsonb_build_object('deal_id', v_deal, 'action', 'zalozena', 'ooms', v_n);
+END;
+$$;
+
+
+--
 -- Name: contract_small_business_over(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -7504,6 +7627,7 @@ DECLARE
   v_run  uuid;
   v_n    integer := 0;
   v_rem  integer := 0;
+  v_miss integer := 0;
   v_prev text := crm_as_system(true);
   r      record;
 BEGIN
@@ -7535,9 +7659,34 @@ BEGIN
       v_rem := v_rem + 1;
     END IF;
   END LOOP;
-  UPDATE job_run SET finished_at = now(), result = jsonb_build_object('dalsi_krok', v_n, 'pripomienky', v_rem) WHERE id = v_run;
+  -- 0046 (F5): 14 dní po akceptácii niektoré OOM akceptovaného variantu nie je na žiadnej zmluve obchodu – upozornenie
+  -- obchodníkovi raz (iba pri zapnutom párovaní zmlúv s obchodmi)
+  IF crm_setting_on('deal_matching') THEN
+    FOR r IN
+      SELECT d.id, d.owner_id, d.name,
+             (SELECT count(DISTINCT i.oom_id) FROM offer_item i
+               WHERE i.variant_id = d.accepted_variant_id AND i.oom_id IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM contract_oom ko JOIN contract k ON k.id = ko.contract_id
+                                  WHERE k.deal_id = d.id AND ko.oom_id = i.oom_id)) AS missing
+        FROM deal d
+        JOIN pipeline_stage s ON s.id = d.stage_id
+        JOIN LATERAL (SELECT max(a.accepted_at) AS accepted_at FROM offer_acceptance a JOIN offer o ON o.id = a.offer_id
+                       WHERE o.deal_id = d.id AND a.variant_id = d.accepted_variant_id AND a.revoked_at IS NULL) a ON true
+       WHERE d.accepted_variant_id IS NOT NULL AND s.code IN ('akceptacia', 'vyhrane')
+         AND a.accepted_at IS NOT NULL AND (a.accepted_at AT TIME ZONE 'Europe/Bratislava')::date + 14 <= p_today
+         AND NOT EXISTS (SELECT 1 FROM notification n WHERE n.deal_id = d.id AND n.kind = 'chyba_oom_na_zmluve')
+       ORDER BY d.id
+    LOOP
+      IF r.missing > 0 THEN
+        PERFORM notification_add_deal(ARRAY[r.owner_id], 'chyba_oom_na_zmluve', r.id, NULL, p_today,
+          format('Obchod %s: %s OOM z akceptovanej ponuky nie je ani 14 dní po akceptácii na zmluve', r.name, r.missing));
+        v_miss := v_miss + 1;
+      END IF;
+    END LOOP;
+  END IF;
+  UPDATE job_run SET finished_at = now(), result = jsonb_build_object('dalsi_krok', v_n, 'pripomienky', v_rem, 'chyba_oom_na_zmluve', v_miss) WHERE id = v_run;
   PERFORM set_config('app.change_source', v_prev, true);
-  RETURN jsonb_build_object('dalsi_krok', v_n, 'pripomienky', v_rem);
+  RETURN jsonb_build_object('dalsi_krok', v_n, 'pripomienky', v_rem, 'chyba_oom_na_zmluve', v_miss);
 END;
 $$;
 
@@ -16733,7 +16882,7 @@ CREATE TABLE public.deal_event (
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
     reason text,
     offer_id uuid,
-    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text, 'ponuka_nova'::text, 'ponuka_verzia'::text, 'ponuka_prepocitana'::text, 'ponuka_odoslana'::text, 'ponuka_zamietnuta'::text, 'ponuka_platnost'::text, 'schvalenie_ziadost'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'ponuka_otvorena'::text, 'ponuka_odkaz'::text, 'akceptacia_zrusena'::text, 'ponuka_odblokovana'::text, 'potvrdenie_neodoslane'::text, 'zmluva_sparovana'::text, 'zmluva_odparovana'::text])))
+    CONSTRAINT deal_event_kind_check CHECK ((kind = ANY (ARRAY['zalozenie'::text, 'stadium'::text, 'vlastnik'::text, 'znovuotvorenie'::text, 'oom_pridane'::text, 'oom_odobrane'::text, 'oom_zrusene'::text, 'oom_nezrusene'::text, 'kontakt_pridany'::text, 'kontakt_odobrany'::text, 'zakaznik_vlastnik'::text, 'ponuka_nova'::text, 'ponuka_verzia'::text, 'ponuka_prepocitana'::text, 'ponuka_odoslana'::text, 'ponuka_zamietnuta'::text, 'ponuka_platnost'::text, 'schvalenie_ziadost'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'ponuka_otvorena'::text, 'ponuka_odkaz'::text, 'akceptacia_zrusena'::text, 'ponuka_odblokovana'::text, 'potvrdenie_neodoslane'::text, 'zmluva_sparovana'::text, 'zmluva_odparovana'::text, 'predosla_zmluva'::text])))
 );
 
 
@@ -17252,7 +17401,7 @@ CREATE TABLE public.notification (
     read_at timestamp with time zone,
     deal_id uuid,
     approval_id uuid,
-    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'akceptacia_zrusena'::text, 'ponuka_odpoved'::text, 'ponuka_pripomienka'::text, 'gmail_chyba'::text, 'email_chyba'::text, 'nesparovana_zmluva'::text, 'cena_ina_ako_v_ponuke'::text])))
+    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'akceptacia_zrusena'::text, 'ponuka_odpoved'::text, 'ponuka_pripomienka'::text, 'gmail_chyba'::text, 'email_chyba'::text, 'nesparovana_zmluva'::text, 'cena_ina_ako_v_ponuke'::text, 'obnova'::text, 'chyba_oom_na_zmluve'::text])))
 );
 
 
@@ -26834,4 +26983,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0042'),
     ('0043'),
     ('0044'),
-    ('0045');
+    ('0045'),
+    ('0046');

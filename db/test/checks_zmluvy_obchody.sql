@@ -505,3 +505,98 @@ BEGIN
   RAISE NOTICE 'OK: F7 párovanie a prenos výnimiek spúšťa iba import (interné funkcie nie sú pre aplikáciu)';
 END;
 $$;
+
+-- ============================================================================
+-- F8. Obnova (0046): nočný beh 4 mesiace pred koncom zmluvy firmy založí obchod Obnova (OOM s objemami zo zmluvy,
+--     kontakty z predošlého obchodu), pri bežnom otvorenom obchode s OOM zmluvy iba doplní predošlú zmluvu;
+--     bez obchodníka a vlastníka zákazníka upozorní adminov
+-- ============================================================================
+INSERT INTO company (id, name, ico, address, is_customer, owner_id) VALUES
+  (pg_temp.f_id('f', 4), 'Zmluvy Test F4 s.r.o.', '88880064', 'Hlavná 8, 010 01 Žilina', true, pg_temp.f_id('u', 1)),
+  (pg_temp.f_id('f', 5), 'Zmluvy Test F5 s.r.o.', '88880065', 'Hlavná 9, 010 01 Žilina', true, NULL);
+INSERT INTO contact (id, first_name, last_name, email, is_household) VALUES (pg_temp.f_id('k', 3), 'Karol', 'Kontaktný', 'karol.f@example.test', false);
+INSERT INTO company_contact (company_id, contact_id) VALUES (pg_temp.f_id('f', 4), pg_temp.f_id('k', 3));
+INSERT INTO oom (id, company_id, eic, type, status, voltage_level, planned_consumption_vt_mwh)
+SELECT pg_temp.f_id('oom', n), pg_temp.f_id('f', CASE WHEN n = 11 THEN 5 ELSE 4 END), pg_temp.f_eic(n), 'spotreba', 'pripravovane', 'nn', 30
+  FROM generate_series(9, 11) n;
+-- predošlý obchod zmluvy 10 (s kontaktom) a bežný otvorený obchod s OOM 10
+SELECT pg_temp.f_deal(6, 4, 'prilezitost', ARRAY[]::integer[]);
+INSERT INTO deal_contact (deal_id, contact_id, is_primary) VALUES (pg_temp.f_id('d', 6), pg_temp.f_id('k', 3), true);
+SELECT pg_temp.f_deal(7, 4, 'prilezitost', ARRAY[10]);
+DO $$
+DECLARE
+  v_end date := crm_today() + 60;
+  n     integer;
+BEGIN
+  PERFORM set_config('app.contract_import_id', '', true);
+  INSERT INTO contract (id, number, company_id, type, phase, valid_from, valid_to, signed_on, owner_id, deal_id) VALUES
+    (pg_temp.f_id('z', 10), 'F5-10', pg_temp.f_id('f', 4), 'dodavka_firma_nn', 'podpisana', crm_today() - 300, v_end, crm_today() - 320, pg_temp.f_id('u', 1), pg_temp.f_id('d', 6)),
+    (pg_temp.f_id('z', 11), 'F5-11', pg_temp.f_id('f', 4), 'dodavka_firma_nn', 'podpisana', crm_today() - 300, v_end, crm_today() - 320, pg_temp.f_id('u', 1), NULL),
+    (pg_temp.f_id('z', 12), 'F5-12', pg_temp.f_id('f', 5), 'dodavka_firma_nn', 'podpisana', crm_today() - 300, v_end, crm_today() - 320, NULL, NULL);
+  FOREACH n IN ARRAY ARRAY[9, 10, 11] LOOP
+    INSERT INTO contract_oom (contract_id, oom_id, qty_vt_mwh, qty_nt_mwh, product_id)
+    VALUES (pg_temp.f_id('z', n + 1), pg_temp.f_id('oom', n), 42, 0, (SELECT id FROM product WHERE code = 'green_1t'));
+  END LOOP;
+END;
+$$;
+DO $$
+DECLARE
+  r     jsonb;
+  d     deal;
+  v_end date := crm_today() + 60;
+BEGIN
+  r := contract_daily_run_at(crm_today());
+  -- a) Obnova pre zmluvu 10
+  SELECT * INTO d FROM deal WHERE previous_contract_id = pg_temp.f_id('z', 10) AND source_code = 'obnova';
+  ASSERT d.id IS NOT NULL AND d.name = 'Obnova – F5-10' AND d.owner_id = pg_temp.f_id('u', 1) AND d.closed_at IS NULL
+     AND d.expected_close = (v_end - interval '1 month')::date AND d.supply_start = v_end + 1, 'obchod Obnova: ' || row_to_json(d)::text;
+  ASSERT (SELECT s.code FROM pipeline_stage s WHERE s.id = d.stage_id) = 'prilezitost'
+     AND (SELECT kind FROM pipeline WHERE id = d.pipeline_id) = 'b2b_dodavka', 'Príležitosť v B2B dodávke';
+  ASSERT (SELECT planned_vt_mwh FROM deal_oom WHERE deal_id = d.id AND oom_id = pg_temp.f_id('oom', 9)) = 42, 'OOM s objemom zo zmluvy';
+  ASSERT EXISTS (SELECT 1 FROM deal_contact WHERE deal_id = d.id AND contact_id = pg_temp.f_id('k', 3)), 'kontakt z predošlého obchodu';
+  ASSERT EXISTS (SELECT 1 FROM notification WHERE kind = 'obnova' AND deal_id = d.id AND user_id = pg_temp.f_id('u', 1) AND ref_date = v_end)
+     AND NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'konci_4_mesiace' AND contract_id = pg_temp.f_id('z', 10)),
+         'Obnova namiesto Končí do 4 mesiacov';
+  -- b) bežný otvorený obchod s OOM zmluvy 11: Obnova sa nezaloží, doplní sa predošlá zmluva
+  ASSERT NOT EXISTS (SELECT 1 FROM deal WHERE previous_contract_id = pg_temp.f_id('z', 11) AND source_code = 'obnova'), 'bez Obnovy';
+  ASSERT (SELECT previous_contract_id FROM deal WHERE id = pg_temp.f_id('d', 7)) = pg_temp.f_id('z', 11), 'predošlá zmluva doplnená';
+  ASSERT EXISTS (SELECT 1 FROM deal_event WHERE deal_id = pg_temp.f_id('d', 7) AND kind = 'predosla_zmluva'
+                   AND detail->>'text' = 'predošlá zmluva doplnená nočným behom'), 'časová os';
+  ASSERT EXISTS (SELECT 1 FROM notification WHERE kind = 'obnova' AND deal_id = pg_temp.f_id('d', 7) AND contract_id = pg_temp.f_id('z', 11)), 'upozornenie s odkazom na obchod';
+  -- c) bez obchodníka a vlastníka zákazníka: Obnova sa nezaloží, upozornenie adminom
+  ASSERT NOT EXISTS (SELECT 1 FROM deal WHERE previous_contract_id = pg_temp.f_id('z', 12)), 'bez vlastníka bez Obnovy';
+  ASSERT EXISTS (SELECT 1 FROM notification WHERE kind = 'obnova' AND contract_id = pg_temp.f_id('z', 12) AND user_id = pg_temp.f_id('u', 2)), 'admin upozornený';
+  -- druhý beh nič nové
+  r := contract_daily_run_at(crm_today());
+  ASSERT (SELECT count(*) FROM deal WHERE previous_contract_id = pg_temp.f_id('z', 10)) = 1
+     AND (SELECT count(*) FROM notification WHERE kind = 'obnova' AND contract_id = pg_temp.f_id('z', 10)) = 1, 'raz';
+  RAISE NOTICE 'OK: F8 Obnova: obchod v Príležitosti (OOM s objemom, kontakty z predošlého obchodu, termíny), upozornenie „Obnova“ namiesto „Končí do 4 mesiacov“; bežný otvorený obchod dostane predošlú zmluvu; bez vlastníka admini; raz';
+END;
+$$;
+
+-- ============================================================================
+-- F9. 14 dní po akceptácii: OOM akceptovaného variantu, ktoré nie je na žiadnej zmluve obchodu → upozornenie obchodníkovi raz
+--     (iba pri zapnutom párovaní; obchod, ktorého OOM sú na zmluvách, bez upozornenia)
+-- ============================================================================
+-- akceptácia obchodu 2 (bez zmluvy po zrušení spárovania) pred 15 dňami a obchodu 4 (OOM na zmluve F5-6)
+INSERT INTO offer_acceptance (offer_id, variant_id, org_id, method, channel, recorded_by, accepted_at, signer_name, signer_function, terms_text, terms_sha256)
+SELECT v.offer_id, v.id, crm_default_org(), 'rucne', 'telefon', pg_temp.f_id('u', 1), now() - interval '15 days', 'Test F9', 'konateľ', 'text', repeat('a', 64)
+  FROM deal d JOIN offer_variant v ON v.id = d.accepted_variant_id
+ WHERE d.id IN (pg_temp.f_id('d', 2), pg_temp.f_id('d', 4));
+DO $$
+BEGIN
+  UPDATE app_setting SET value = 'false' WHERE key = 'deal_matching';
+  PERFORM deal_daily_run_at(crm_today());
+  ASSERT NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'chyba_oom_na_zmluve' AND deal_id = pg_temp.f_id('d', 2)), 'pri vypnutom párovaní nič';
+  UPDATE app_setting SET value = 'true' WHERE key = 'deal_matching';
+  PERFORM deal_daily_run_at(crm_today() - 2);   -- 13 dní po akceptácii ešte nie
+  ASSERT NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'chyba_oom_na_zmluve' AND deal_id = pg_temp.f_id('d', 2)), '13. deň nie';
+  PERFORM deal_daily_run_at(crm_today());
+  ASSERT (SELECT user_id FROM notification WHERE kind = 'chyba_oom_na_zmluve' AND deal_id = pg_temp.f_id('d', 2)) = pg_temp.f_id('u', 1),
+         'upozornenie obchodníkovi';
+  ASSERT NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'chyba_oom_na_zmluve' AND deal_id = pg_temp.f_id('d', 4)), 'OOM na zmluve – bez upozornenia';
+  PERFORM deal_daily_run_at(crm_today() + 1);
+  ASSERT (SELECT count(*) FROM notification WHERE kind = 'chyba_oom_na_zmluve' AND deal_id = pg_temp.f_id('d', 2)) = 1, 'raz';
+  RAISE NOTICE 'OK: F9 14 dní po akceptácii: OOM bez zmluvy → upozornenie obchodníkovi raz; nie pred 14. dňom, nie pri OOM na zmluve, nie pri vypnutom párovaní';
+END;
+$$;

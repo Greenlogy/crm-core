@@ -1612,3 +1612,10 @@ Podľa zadania 9 a 10, návrhu časti 2 a obrazoviek 38, 40 (úprava 25, 26). Dv
 - **Obrazovky:** 38 `/obchody/:id/podklady` (záložky zmlúv NN / VN, sekcie v poradí Office portálu s „Kopírovať“, chýbajúce polia zvýraznené, „Kopírovať všetko“, „Doplniť údaje“ v paneli, stav podkladov), 40 `/zmluvy-k-obchodom` (menu), karta zmluvy – karta „Obchod“, „Cena iná ako v ponuke“ uzatvára schvaľovateľ s poznámkou. Na obchode v Akceptácii / Vyhraté tlačidlo „Podklady pre zmluvu“.
 - Lokálne overené: párovanie po simulovanom importe (automaticky, príznak ceny), nespárovaná zmluva s kandidátmi, uloženie podkladov (zlý IBAN odmietnutý), zrušenie spárovania, výber obchodu, „Bez obchodu“, filtre zoznamu.
 
+## 35. F5 – krok 2: `0046_obnova_nocny_beh` (overená nanečisto 16. 10. 2026)
+
+- **`contract_renewal(zmluva)`** (volá krok 5 nočného behu zmlúv – zmluvy firiem a výkupu 4 mesiace pred koncom): ak je otvorená Obnova k zmluve, nič; ak existuje bežný otvorený obchod rovnakého druhu s niektorým OOM zmluvy, iba mu doplní predošlú zmluvu (časová os `predosla_zmluva` „predošlá zmluva doplnená nočným behom“); inak založí obchod „Obnova – {číslo}“ (pipeline podľa typu zmluvy, Príležitosť, zdroj Obnova, predošlá zmluva, očakávané uzavretie = koniec − 1 mesiac, začiatok dodávky = deň po konci, vlastník = obchodník zmluvy, inak vlastník zákazníka), OOM zmluvy Aktívne / Pripravované s objemami zo zmluvy (výkup a VIWA plán výkupu a výkon; OOM v inom otvorenom obchode sa preskočí), kontakty z predošlého obchodu, inak hlavný kontakt firmy. Bez aktívneho obchodníka aj vlastníka zákazníka sa nezaloží – upozornenie `obnova` adminom.
+- Obchodník dostane namiesto `konci_4_mesiace` jedno upozornenie **`obnova`** s odkazom na obchod (raz na koniec zmluvy). Log nočného behu: počet založených obnov.
+- **Nočný beh obchodov:** pri zapnutom `deal_matching` obchod v Akceptácii / Vyhraté, ktorého akceptovaný variant má OOM bez zmluvy obchodu aj 14 dní po akceptácii → upozornenie **`chyba_oom_na_zmluve`** obchodníkovi raz.
+- Testy F8, F9; test modulu 4 Z4-1 upravený (pri firme Obnova namiesto „Končí do 4 mesiacov“). Mutácie zachytené; `down` vráti schému z `dev` (0045).
+

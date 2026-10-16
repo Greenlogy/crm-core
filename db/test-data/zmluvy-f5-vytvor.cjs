@@ -22,7 +22,7 @@ function makeEic(n) {
   }
 }
 const E = {};
-for (let n = 1; n <= 6; n++) E[n] = makeEic(n);
+for (let n = 1; n <= 8; n++) E[n] = makeEic(n);
 for (const [k, v] of Object.entries(E)) if (!v || v.length !== 16) throw new Error('EIC ' + k);
 
 const uuid = (n) => `00000000-0000-4000-9000-${String(n).padStart(12, '0')}`;
@@ -63,6 +63,8 @@ const C = {
   epsilon: { firma: 'Testovacia Epsilon s.r.o.', ico: '99999905', osoba: uuid(105), id: uuid(5101) },
   zeta: { firma: 'Testovacia Zeta s.r.o.', ico: '99999906', osoba: uuid(106), id: uuid(5102) },
   theta: { firma: 'Testovacia Théta s.r.o.', ico: '99999907', osoba: uuid(107), id: uuid(5103) },
+  // Obnova (krok 2, 0046): zmluvy založí skript priamo – neprídu importom, nepárujú sa
+  iota: { firma: 'Testovacia Ióta s.r.o.', ico: '99999908', osoba: uuid(108), id: uuid(5104) },
 };
 // OOM: 1 NN a 2 VN (Epsilon, obchod v Akceptácii), 3 NN (Zeta, Akceptácia, iná cena), 4 NN (Epsilon, bez obchodu),
 // 5 NN (Théta, obchod vo Vyjednávaní), 6 domácnosť (bez obchodu)
@@ -72,6 +74,8 @@ const O = [
   { n: 3, eic: E[3], c: 'zeta', vn: false, mwh: 25, offer: 125 },
   { n: 4, eic: E[4], c: 'epsilon', vn: false, mwh: 15, offer: null },
   { n: 5, eic: E[5], c: 'theta', vn: false, mwh: 20, offer: null },
+  { n: 7, eic: E[7], c: 'iota', vn: false, mwh: 35, offer: null },
+  { n: 8, eic: E[8], c: 'iota', vn: false, mwh: 18, offer: null },
 ];
 
 const opRows = [
@@ -135,7 +139,7 @@ write('zmluvy-f5-xm-trade.xlsx', 'Prehľad', XM_HEAD, xmRows);
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const sql = `-- Vygenerované z db/test-data/zmluvy-f5-vytvor.cjs – NEUPRAVOVAŤ RUČNE. Spúšťa ./db/test-data/zmluvy-f5.sh dev vytvor.
 -- Testovacie obchody a ponuky pre skúšku párovania zmlúv (F5) so zhodnými EIC a cenami ako zmluvy-f5-office-portal.xlsx.
--- Vymyslené firmy (IČO 99999905–07) a OOM (EIC 24ZZS99TESTF…). Obchodník = e-mail v premennej psql owner.
+-- Vymyslené firmy (IČO 99999905–08) a OOM (EIC 24ZZS99TESTF…). Obchodník = e-mail v premennej psql owner.
 \\set ON_ERROR_STOP on
 BEGIN;
 SELECT set_config('f5.owner', :'owner', true) \\gset
@@ -189,7 +193,27 @@ ${O.map((o) => `    (${q(uuid(5200 + o.n))}, ${q(C[o.c].id)}, ${q(o.eic)}, 'spot
     PERFORM offer_accept_manual(v_offer, v_var, 'Ján Skúšobný', 'konateľ', now(), 'telefon', 'test F5', NULL);
     PERFORM set_config('app.user_id', '', true);
   END LOOP;
-  RAISE NOTICE 'Založené: 3 firmy, 5 OOM, 3 obchody (2 v Akceptácii s ponukou, 1 vo Vyjednávaní).';
+
+  -- Obnova (krok 2): zmluvy 1129995007 (OOM 7 → nočný beh založí obchod Obnova) a 1129995008 (OOM 8 je v bežnom otvorenom
+  -- obchode „TEST F5 Ióta – bežný obchod“ → nočný beh mu iba doplní predošlú zmluvu); koniec o 60 dní (okno 4 mesiacov)
+  INSERT INTO deal (id, company_id, pipeline_id, stage_id, name, owner_id, source_code, supply_start, org_id)
+  SELECT ${q(uuid(5304))}::uuid, ${q(C.iota.id)}::uuid, p.id, s.id, 'TEST F5 Ióta – bežný obchod', v_user, 'vlastny_kontakt', crm_today() + 61, v_org
+    FROM pipeline p JOIN pipeline_stage s ON s.pipeline_id = p.id AND s.code = 'prilezitost'
+   WHERE p.kind = 'b2b_dodavka' AND p.archived_at IS NULL AND (p.org_id IS NULL OR p.org_id = v_org)
+   LIMIT 1;
+  INSERT INTO deal_oom (deal_id, oom_id) VALUES (${q(uuid(5304))}, ${q(uuid(5208))});
+  PERFORM set_config('app.contract_import_id', '', true);
+  INSERT INTO contract (id, number, company_id, type, phase, valid_from, valid_to, signed_on, owner_id, auto_prolong, org_id) VALUES
+    (${q(uuid(5007))}, '1129995007', ${q(C.iota.id)}, 'dodavka_firma_nn', 'podpisana', '2026-01-01', crm_today() + 60, '2025-12-01', v_user, false, v_org),
+    (${q(uuid(5008))}, '1129995008', ${q(C.iota.id)}, 'dodavka_firma_nn', 'podpisana', '2026-01-01', crm_today() + 60, '2025-12-01', v_user, false, v_org);
+  INSERT INTO contract_oom (contract_id, oom_id, qty_vt_mwh, qty_nt_mwh, product_id) VALUES
+    (${q(uuid(5007))}, ${q(uuid(5207))}, 35, 0, (SELECT id FROM product WHERE code = 'green_1t')),
+    (${q(uuid(5008))}, ${q(uuid(5208))}, 18, 0, (SELECT id FROM product WHERE code = 'green_1t'));
+  INSERT INTO contract_price (contract_id, oom_id, slot, product_id, price_model, valid_from, valid_to, price_vt_eur_mwh)
+  SELECT co.contract_id, co.oom_id, 'komodita', co.product_id, 'fix', '2026-01-01', crm_today() + 60, 118
+    FROM contract_oom co WHERE co.contract_id IN (${q(uuid(5007))}, ${q(uuid(5008))});
+  RAISE NOTICE 'Založené: 4 firmy, 7 OOM, 4 obchody (2 v Akceptácii s ponukou, 1 vo Vyjednávaní, 1 bežný) a 2 zmluvy na Obnovu (koniec %).',
+    to_char(crm_today() + 60, 'DD. MM. YYYY');
 END;
 $f5$;
 COMMIT;
@@ -197,13 +221,15 @@ COMMIT;
 fs.writeFileSync(path.join(__dirname, 'zmluvy-f5.sql'), sql);
 
 const del = `-- Vygenerované z db/test-data/zmluvy-f5-vytvor.cjs – NEUPRAVOVAŤ RUČNE. Spúšťa ./db/test-data/zmluvy-f5.sh dev zmaz.
--- Zmaže iba testovacie dáta F5: zmluvy 1129995001–06 (z importu), obchody, ponuky, OOM, firmy a domácnosť „Eva Pokusná“.
+-- Zmaže iba testovacie dáta F5: zmluvy 1129995001–08, obchody (aj Obnova k zmluvám 07, 08), ponuky, OOM, firmy a domácnosť „Eva Pokusná“.
 \\set ON_ERROR_STOP on
 BEGIN;
 DO $f5$
 DECLARE
-  v_k uuid[] := ARRAY(SELECT id FROM contract WHERE number IN (${[1, 2, 3, 4, 5, 6].map((n) => q('112999500' + n)).join(', ')}));
-  v_d uuid[] := ARRAY[${[5301, 5302, 5303].map((n) => q(uuid(n)) + '::uuid').join(', ')}];
+  v_k uuid[] := ARRAY(SELECT id FROM contract WHERE number IN (${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => q('112999500' + n)).join(', ')}));
+  v_d uuid[] := ARRAY[${[5301, 5302, 5303, 5304].map((n) => q(uuid(n)) + '::uuid').join(', ')}]
+                || ARRAY(SELECT d.id FROM deal d JOIN contract k ON k.id = d.previous_contract_id
+                          WHERE k.number IN (${[7, 8].map((n) => q('112999500' + n)).join(', ')}) AND d.source_code = 'obnova');
   v_o uuid[] := ARRAY(SELECT id FROM oom WHERE eic IN (${Object.values(E).map(q).join(', ')}));
   v_c uuid[] := ARRAY[${Object.values(C).map((c) => q(c.id) + '::uuid').join(', ')}];
   v_p uuid[] := ARRAY(SELECT o.person_id FROM oom o WHERE o.eic = ${q(E[6])} AND o.person_id IS NOT NULL);
@@ -211,6 +237,7 @@ DECLARE
 BEGIN
   v_f := ARRAY(SELECT id FROM offer WHERE deal_id = ANY (v_d));
   DELETE FROM notification WHERE contract_id = ANY (v_k) OR deal_id = ANY (v_d);
+  UPDATE deal SET previous_contract_id = NULL WHERE previous_contract_id = ANY (v_k);
   DELETE FROM contract_flag WHERE contract_id = ANY (v_k);
   DELETE FROM contract_year_basis WHERE contract_id = ANY (v_k);
   DELETE FROM price_exception WHERE contract_id = ANY (v_k);
@@ -231,7 +258,10 @@ BEGIN
   DELETE FROM offer WHERE id = ANY (v_f);
   DELETE FROM deal_contract_input WHERE deal_id = ANY (v_d);
   DELETE FROM deal_event WHERE deal_id = ANY (v_d);
+  -- kontrola „obchod v štádiu ponuky musí mať OOM“ by zastavila mazanie OOM otvoreného obchodu – obchod sa maže celý
+  ALTER TABLE deal_oom DISABLE TRIGGER trg_deal_oom_ready;
   DELETE FROM deal_oom WHERE deal_id = ANY (v_d);
+  ALTER TABLE deal_oom ENABLE TRIGGER trg_deal_oom_ready;
   DELETE FROM deal_contact WHERE deal_id = ANY (v_d);
   DELETE FROM deal WHERE id = ANY (v_d);
   DELETE FROM oom_customer WHERE oom_id = ANY (v_o);
