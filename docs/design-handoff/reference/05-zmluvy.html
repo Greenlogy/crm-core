@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zmluvy – Greenlogy CRM</title>
+<!-- Referenčný návrh (statické HTML). Hodnoty farieb sú tu natvrdo; v aplikácii používajte premenné z tokens/tokens.css. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&amp;family=Geist+Mono:wght@400&amp;display=swap">
+<style>
+body{margin:0;background:#f4f8f8}
+a{color:#13689e;text-decoration:none}a:hover{text-decoration:underline}
+.card{background:#ffffff;border:1px solid #e4eef0;border-radius:22px;min-width:0;box-sizing:border-box;box-shadow:0 1px 2px rgba(29,58,79,.04),0 12px 32px -20px rgba(29,58,79,.22)}
+.glassbar{background:rgba(255,255,255,.66);-webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);border:1px solid rgba(255,255,255,.85);border-radius:20px;box-shadow:0 10px 30px -14px rgba(19,104,158,.28)}
+.rl{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:14px;color:#5c7080;font-size:11px;font-weight:400;line-height:14px;text-align:center}
+.rl:hover{background:#eef5f8;color:#1d3a4f;text-decoration:none}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:18px;font-weight:500;border-radius:999px;padding:2px 10px;white-space:nowrap;background:#eef2f4;color:#55697a}
+.ok{background:#e3f8f0;color:#0b7a57}.al{background:#fdebe9;color:#b42318}.wa{background:#fff3df;color:#94500c}.in{background:#e6f0f7;color:#13689e}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.btn{font-family:inherit;font-size:14px;line-height:20px;font-weight:500;min-height:44px;padding:10px 18px;border-radius:999px;border:1px solid #cfe2ef;background:#ffffff;color:#1d3a4f;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;box-sizing:border-box}
+.btn:hover{border-color:#9cc3dd;background:#f7fbfd}
+.pri{background:#2f78ab;border-color:#2f78ab;color:#ffffff}.pri:hover{background:#13689e;border-color:#13689e}
+.btn:focus-visible,.rl:focus-visible,.inp:focus-visible,.chip:focus-visible{outline:2px solid #2f78ab;outline-offset:2px}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.inp{font-family:inherit;font-size:15px;min-height:44px;padding:10px 18px 10px 42px;border:1px solid #d6e4ea;border-radius:999px;color:#1d3a4f;background:#ffffff;box-sizing:border-box;width:100%}
+.chip{font-family:inherit;font-size:13px;line-height:18px;font-weight:400;min-height:38px;padding:8px 14px;border-radius:999px;border:1px solid transparent;background:transparent;color:#3d5566;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;box-sizing:border-box}
+.chip:hover{background:rgba(255,255,255,.8)}
+.cc{font-variant-numeric:tabular-nums;color:#5c7080;font-weight:300}
+.mu{color:#5c7080}
+.sub{font-size:12px;color:#5c7080;line-height:16px;font-weight:300}
+.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:13px}
+.tbl{width:100%;border-collapse:collapse;font-size:14px;line-height:20px;font-variant-numeric:tabular-nums}
+.tbl th{font-size:12px;font-weight:400;color:#5c7080;text-align:left;padding:12px;border-bottom:1px solid #e4eef0;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #f0f5f6;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#f6fafb}
+.tbl th:first-child,.tbl td:first-child{padding-left:24px}
+.tbl th:last-child,.tbl td:last-child{padding-right:24px}
+.num{text-align:right !important}
+.mz{background:#f3f8fb}
+.spin{animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+</style>
+<style>
+/* Mobil (do 760 px): bočné menu sa mení na spodnú lištu, hlavička je nižšia. */
+@media (max-width: 760px){
+  nav[aria-label="Hlavné menu"]{position:fixed;left:0;right:0;bottom:0;z-index:20;flex:none !important;width:100%;flex-direction:row !important;overflow-x:auto;padding:6px 8px calc(6px + env(safe-area-inset-bottom)) !important;gap:2px;background:rgba(255,255,255,.94);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid #e4eef0}
+  nav[aria-label="Hlavné menu"] > span[role="img"], nav[aria-label="Hlavné menu"] > div{display:none !important}
+  nav[aria-label="Hlavné menu"] .rl{min-width:64px;flex:none}
+  main{padding:12px 12px 96px !important}
+  h1{font-size:32px !important}
+  section[aria-label="Hlavička"]{min-height:230px !important;border-radius:22px !important}
+  .glass,.glassbar{margin:-40px 8px 0 !important;padding-left:8px !important;padding-right:8px !important}
+  section[aria-label="Hlavička"]{padding-bottom:56px !important}
+  .glassbar ol{overflow-x:auto}
+}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Lexend, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #1d3a4f; background: #f4f8f8; -webkit-font-smoothing: antialiased;">
+<nav aria-label="Hlavné menu" style="flex: 0 0 88px; box-sizing: border-box; padding: 20px 8px; display: flex; flex-direction: column; gap: 2px;">
+<span style="width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, #05d695 0%, #13689e 100%); display: grid; place-items: center; margin: 0 auto 16px;" aria-label="Greenlogy CRM" role="img"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="#ffffff" stroke-width="3"><circle cx="11" cy="10" r="5"></circle><path d="M15 5.5l3-1.5" stroke-linecap="square"></path><path d="M6.5 18.5c2.6 1.8 6.4 1.8 9 0"></path></svg></span>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"></path></svg>Domov</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"></path></svg>Zákazníci</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 010 8M22 21c0-3-2-5-5-6"></path></svg>Kontakty</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>OOM</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v6h-4z"></path></svg>Obchody</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 13h6M9 17h6"></path></svg>Ponuky</a>
+<a class="rl" href="#" style="position: relative;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>Schvaľ.<span class="pill wa" style="position: absolute; top: 4px; right: 8px; padding: 0 6px; font-size: 11px; line-height: 16px;">3</span></a>
+<a class="rl" href="#" aria-current="page" style="background: #e6f0f7; color: #13689e; font-weight: 500;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6M9 12h6M9 16h6"></path></svg>Zmluvy</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2m0 8v2"></path></svg>Provízie</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>Cenníky</a>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>Viac</a>
+<div style="flex-grow: 1; min-height: 16px;"></div>
+<a class="rl" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg>Nastavenia</a>
+<div style="font-size: 10px; color: #5c7080; text-align: center; line-height: 13px; padding-top: 6px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #05d695;"></span><br>Test</div>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 20px 28px 48px 12px; display: flex; flex-direction: column; gap: 20px;">
+<section aria-label="Hlavička" style="position: relative; border-radius: 28px; overflow: hidden; background: linear-gradient(180deg, #d9efe3 0%, #eef3e6 55%, #f7efdc 100%); min-height: 270px;">
+<svg viewBox="0 0 1300 320" preserveAspectRatio="xMidYMax slice" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+<defs>
+<radialGradient id="aSunGlow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffd27a" stop-opacity=".75"></stop><stop offset=".45" stop-color="#ffd27a" stop-opacity=".25"></stop><stop offset="1" stop-color="#ffd27a" stop-opacity="0"></stop></radialGradient>
+<linearGradient id="aSun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe2a0"></stop><stop offset="1" stop-color="#f2b443"></stop></linearGradient>
+<linearGradient id="aH1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bfe3cd"></stop><stop offset="1" stop-color="#e3f1e6"></stop></linearGradient>
+<linearGradient id="aH2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6cc79a"></stop><stop offset="1" stop-color="#3f9c70"></stop></linearGradient>
+<linearGradient id="aH3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f7a54"></stop><stop offset="1" stop-color="#0f3d2b"></stop></linearGradient>
+<linearGradient id="aPv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7fa6f2"></stop><stop offset="1" stop-color="#2f62c8"></stop></linearGradient>
+<pattern id="aDots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#1a6b4a" fill-opacity=".10"></circle></pattern>
+</defs>
+<rect width="1300" height="200" fill="url(#aDots)"></rect>
+<circle cx="650" cy="168" r="170" fill="url(#aSunGlow)"></circle>
+<circle cx="650" cy="168" r="54" fill="url(#aSun)"></circle>
+<path d="M0 214 C 260 150, 470 196, 650 166 S 1040 132, 1300 176 L1300 320 L0 320 Z" fill="url(#aH1)"></path>
+<g stroke="#ffffff" stroke-linecap="round" fill="none">
+<line x1="540" y1="182" x2="540" y2="118" stroke-width="2.5"></line>
+<g class="spin" style="transform-origin: 540px 118px; transform-box: view-box;" fill="#ffffff" stroke="none"><path d="M540 118 L537 92 Q540 86 543 92 Z"></path><path d="M540 118 L563 130 Q565 136 559 135 Z"></path><path d="M540 118 L517 130 Q515 136 521 135 Z"></path></g>
+<circle cx="540" cy="118" r="3.5" fill="#ffffff" stroke="none"></circle>
+<line x1="762" y1="164" x2="762" y2="94" stroke-width="2.5"></line>
+<g class="spin" style="transform-origin: 762px 94px; transform-box: view-box; animation-duration: 11s;" fill="#ffffff" stroke="none"><path d="M762 94 L759 66 Q762 60 765 66 Z"></path><path d="M762 94 L787 107 Q789 113 783 112 Z"></path><path d="M762 94 L737 107 Q735 113 741 112 Z"></path></g>
+<circle cx="762" cy="94" r="3.5" fill="#ffffff" stroke="none"></circle>
+<line x1="836" y1="160" x2="836" y2="116" stroke-width="2"></line>
+<g class="spin" style="transform-origin: 836px 116px; transform-box: view-box; animation-duration: 8s;" fill="#ffffff" stroke="none"><path d="M836 116 L834 98 Q836 94 838 98 Z"></path><path d="M836 116 L852 124 Q853 128 849 128 Z"></path><path d="M836 116 L820 124 Q819 128 823 128 Z"></path></g>
+</g>
+<path d="M0 252 C 240 214, 460 262, 690 226 S 1080 196, 1300 236 L1300 320 L0 320 Z" fill="url(#aH2)"></path>
+<g><rect x="876" y="200" width="52" height="22" rx="4" transform="skewX(-18)" fill="url(#aPv)"></rect><rect x="936" y="194" width="52" height="22" rx="4" transform="skewX(-18)" fill="url(#aPv)"></rect><rect x="996" y="188" width="52" height="22" rx="4" transform="skewX(-18)" fill="url(#aPv)"></rect></g>
+<path d="M0 284 C 280 256, 560 302, 860 274 S 1180 262, 1300 278 L1300 320 L0 320 Z" fill="url(#aH3)"></path>
+</svg>
+<div style="position: relative; display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-start; justify-content: space-between; padding: 28px 32px 0;">
+<div><h1 style="margin: 0; font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -.03em;">Zmluvy</h1><div style="font-size: 14px; color: #3f5868; margin-top: 8px;">dodávka, výkup a VIWA · údaje z Office portálu</div></div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;"><button class="btn" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path></svg>Export</button><button class="btn pri" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V9M7 14l5-5 5 5M4 3h16"></path></svg>Import z Office portálu</button></div>
+</div>
+</section>
+<section class="glassbar" aria-label="Filtre" style="margin: -88px 20px 0; position: relative; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between;">
+<div role="group" aria-label="Filter podľa stavu" style="display: flex; flex-wrap: wrap; gap: 4px;">
+<button class="chip" type="button" aria-pressed="true" style="background: #2f78ab; color: #ffffff;">Všetky <span style="font-variant-numeric: tabular-nums; color: #dcebf5;">1 412</span></button>
+<button class="chip" type="button" aria-pressed="false">V príprave <span class="cc">12</span></button>
+<button class="chip" type="button" aria-pressed="false">Podpísané <span class="cc">48</span></button>
+<button class="chip" type="button" aria-pressed="false">Účinné <span class="cc">1 097</span></button>
+<button class="chip" type="button" aria-pressed="false">Skončené <span class="cc">255</span></button>
+</div>
+<div role="group" aria-label="Upozornenia" style="display: flex; flex-wrap: wrap; gap: 4px;">
+<button class="chip" type="button" style="background: #fdebe9; color: #b42318;">Pod hranicou bez výnimky <b style="font-weight: 600;">2</b></button>
+<button class="chip" type="button" style="background: #fff3df; color: #94500c;">Končí do 4 mesiacov <b style="font-weight: 600;">14</b></button>
+<button class="chip" type="button" style="background: #fff3df; color: #94500c;">Sprolongované bez novej ceny <b style="font-weight: 600;">3</b></button>
+<button class="chip" type="button" style="background: #fff3df; color: #94500c;">Chýba cena <b style="font-weight: 600;">1</b></button>
+</div>
+</section>
+<section class="card" aria-label="Zoznam zmlúv" style="overflow: hidden;">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e4eef0;">
+<div style="position: relative; flex: 1 1 320px; max-width: 480px;">
+<label for="hzF" style="position: absolute; left: -9999px;">Hľadať zmluvu</label>
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="position: absolute; left: 16px; top: 13px; color: #5c7080;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-5-5"></path></svg>
+<input id="hzF" class="inp" type="search" placeholder="Číslo zmluvy, zákazník alebo EIC…">
+</div>
+<button class="btn" type="button">Typ: všetky<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: #5c7080;"><path d="M6 9l6 6 6-6"></path></svg></button>
+<button class="btn" type="button">Rok bilancie: 2027<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: #5c7080;"><path d="M6 9l6 6 6-6"></path></svg></button>
+<button class="btn" type="button">Obchodník: všetci<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: #5c7080;"><path d="M6 9l6 6 6-6"></path></svg></button>
+</div>
+<div style="overflow-x: auto;">
+<table class="tbl">
+<thead><tr><th scope="col">Zmluva</th><th scope="col">Zákazník · obchodník</th><th scope="col">Stav</th><th scope="col">Účinnosť</th><th scope="col" class="num">OOM</th><th scope="col" class="num">Objem [MWh]</th><th scope="col" class="num">Prid. hodnota [€]</th><th scope="col" class="num mz">Marža firmy [€]</th></tr></thead>
+<tbody>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120262053</a><div class="sub">Dodávka – firma NN</div></td><td><a href="#">Kovovýroba Váh a.s.</a><div class="sub">Martin Horák</div></td><td><span class="pill in">Podpísaná</span></td><td class="mu">1. 1. 2027 – 31. 12. 2027</td><td class="num">17</td><td class="num">21,3</td><td class="num">575,10</td><td class="num mz" style="font-weight: 500;">1 808,10</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120262101</a><div class="sub">Dodávka – firma VN</div></td><td><a href="#">Agro Turiec s.r.o.</a><div class="sub">Martin Horák</div></td><td><span class="pill in">Podpísaná</span><div style="margin-top: 4px;"><span class="pill al"><span class="dot"></span>Pod hranicou bez výnimky</span></div></td><td class="mu">1. 2. 2027 – 31. 1. 2029</td><td class="num">2</td><td class="num">212,0</td><td class="num" style="color: #b42318;">−424,00</td><td class="num mz" style="font-weight: 500;">1 816,00</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120251877</a><div class="sub">Dodávka – firma NN</div></td><td><a href="#">Obec Lietava</a><div class="sub">Peter Kalman</div></td><td><span class="pill ok">Účinná</span><div style="margin-top: 4px;"><span class="pill wa"><span class="dot"></span>Končí do 4 mesiacov</span></div></td><td class="mu">1. 1. 2025 – 31. 12. 2027</td><td class="num">6</td><td class="num">99,3</td><td class="num">397,20</td><td class="num mz" style="font-weight: 500;">1 353,00</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">26VIWP0134</a><div class="sub">VIWA</div></td><td><a href="#">Kovovýroba Váh a.s.</a><div class="sub">Martin Horák</div></td><td><span class="pill ok">Účinná</span></td><td class="mu">1. 10. 2026 – neurčito</td><td class="num">1</td><td class="num">96,0</td><td class="num">1 920,00</td><td class="num mz" style="font-weight: 500;">2 240,40</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120262038</a><div class="sub">Dodávka – domácnosť</div></td><td><a href="#">Lenka Kováčová</a><div class="sub">Zuzana Bieliková</div></td><td><span class="pill ok">Účinná</span></td><td class="mu">1. 11. 2026 – neurčito</td><td class="num">2</td><td class="num">9,9</td><td class="num">182,58</td><td class="num mz" style="font-weight: 500;">265,41</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">26VYRP0134</a><div class="sub">Výkup</div></td><td><a href="#">Mária Nováková</a><div class="sub">Zuzana Bieliková</div></td><td><span class="pill ok">Účinná</span></td><td class="mu">1. 6. 2026 – neurčito</td><td class="num">1</td><td class="num">1,5</td><td class="num">43,80</td><td class="num mz" style="font-weight: 500;">43,80</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120231897</a><div class="sub">Dodávka – firma NN</div></td><td><a href="#">Stavmont s.r.o.</a><div class="sub">Martin Horák</div></td><td><span class="pill wa">Účinná</span><div style="margin-top: 4px;"><span class="pill wa"><span class="dot"></span>Sprolongované bez novej ceny</span></div></td><td class="mu">do 31. 12. 2027 (prolong.)</td><td class="num">3</td><td class="num">212,5</td><td class="num">637,50</td><td class="num mz" style="font-weight: 500;">2 092,50</td></tr>
+<tr><td><a href="#" class="mono" style="font-weight: 600; color: #1d3a4f;">1120241925</a><div class="sub">Dodávka – firma NN</div></td><td><a href="#">Agro Turiec s.r.o.</a><div class="sub">Peter Kalman</div></td><td><span class="pill">Skončená</span></td><td class="mu">1. 1. 2025 – 31. 12. 2025</td><td class="num">2</td><td class="num">180,0</td><td class="num mu">–</td><td class="num mz mu">–</td></tr>
+</tbody>
+</table>
+</div>
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 24px; border-top: 1px solid #e4eef0; font-size: 12px; color: #5c7080; font-weight: 300;"><span>Bilancia za rok 2027. Zmluvy prichádzajú importom z Office portálu. Pridaná hodnota = iba komodita (základ provízie). Marža firmy = komodita + poplatky.</span><span style="display: inline-flex; align-items: center; gap: 6px;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px;"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 018 0v4"></path></svg>iba CEO, Nákup, Marketing, obch. riaditeľ</span></div>
+</section>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,187 @@
+/* =====================================================================
+   Greenlogy CRM – komponenty (vyžaduje tokens/tokens.css)
+   Názvy tried sú návrh; ak appka používa React/Tailwind, preneste
+   rovnaké hodnoty do komponentov – rozhodujú hodnoty, nie názvy.
+   ===================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&family=Geist+Mono:wght@400&display=swap");
+
+body { margin: 0; background: var(--gl-surface-page); color: var(--gl-ink);
+  font-family: var(--gl-font-sans); font-size: var(--gl-fs-body); line-height: 1.5;
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--gl-brand-blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: var(--gl-focus); outline-offset: var(--gl-focus-offset); }
+
+/* ---------- Rozloženie aplikácie ---------- */
+.gl-app { display: flex; flex-wrap: wrap; min-height: 100vh; }
+.gl-main { flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: var(--gl-page-pad);
+  display: flex; flex-direction: column; gap: var(--gl-gap-section); }
+
+/* ---------- Bočné menu (úzky pruh s ikonami a popiskami) ---------- */
+.gl-rail { flex: 0 0 var(--gl-rail-width); box-sizing: border-box; padding: 20px 8px;
+  display: flex; flex-direction: column; gap: 2px; }
+.gl-rail__logo { width: 40px; height: 40px; border-radius: 12px; background: var(--gl-brand-gradient);
+  display: grid; place-items: center; margin: 0 auto 16px; }
+.gl-rail__item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px;
+  border-radius: var(--gl-radius-tile); color: var(--gl-ink-muted); font-size: var(--gl-fs-nav);
+  line-height: 14px; text-align: center; position: relative; }
+.gl-rail__item:hover { background: #eef5f8; color: var(--gl-ink); text-decoration: none; }
+.gl-rail__item[aria-current="page"] { background: var(--gl-blue-50); color: var(--gl-brand-blue); font-weight: var(--gl-fw-medium); }
+.gl-rail__badge { position: absolute; top: 4px; right: 8px; padding: 0 6px; font-size: 11px; line-height: 16px;
+  border-radius: var(--gl-radius-pill); background: var(--gl-warn-bg); color: var(--gl-warn-fg); font-weight: 500; }
+.gl-rail__spacer { flex-grow: 1; min-height: 16px; }
+
+/* ---------- Hlavička s krajinou ---------- */
+.gl-hero { position: relative; overflow: hidden; border-radius: var(--gl-radius-hero);
+  background: var(--gl-hero-sky); min-height: var(--gl-hero-h-sub); }
+.gl-hero--home { min-height: var(--gl-hero-h-home); }
+.gl-hero__art { position: absolute; inset: 0; width: 100%; height: 100%; } /* assets/landscape-hero.svg, preserveAspectRatio="xMidYMax slice" */
+.gl-hero__content { position: relative; display: flex; flex-wrap: wrap; gap: 14px 24px;
+  align-items: flex-start; justify-content: space-between; padding: 28px 32px 0; }
+.gl-hero__title { margin: 0; font-size: var(--gl-fs-h1); font-weight: var(--gl-fw-semibold); line-height: 1; letter-spacing: var(--gl-ls-tight); }
+.gl-hero--home .gl-hero__title { font-size: var(--gl-fs-display); }
+.gl-hero__sub { font-size: 14px; color: var(--gl-ink-2); margin-top: 8px; }
+
+/* Lišta / dlaždice zo skla, ktoré prekrývajú spodok krajiny */
+.gl-glass { background: var(--gl-glass-bg); -webkit-backdrop-filter: var(--gl-glass-blur); backdrop-filter: var(--gl-glass-blur);
+  border: 1px solid var(--gl-glass-border); box-shadow: var(--gl-glass-shadow); }
+.gl-overlap { position: relative; margin: var(--gl-hero-overlap) 20px 0; }
+.gl-glassbar { border-radius: var(--gl-radius-bar); padding: 10px 14px; display: flex; flex-wrap: wrap;
+  gap: 6px 12px; align-items: center; justify-content: space-between; }
+
+/* ---------- Karty ---------- */
+.gl-card { background: var(--gl-surface-card); border: 1px solid var(--gl-border); border-radius: var(--gl-radius-card);
+  box-shadow: var(--gl-shadow-card); min-width: 0; box-sizing: border-box; }
+.gl-card__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 22px 24px 12px; }
+.gl-h2 { margin: 0; font-size: var(--gl-fs-h2); font-weight: var(--gl-fw-semibold); line-height: 1.25; }
+.gl-card--soft { background: var(--gl-gradient-soft); border-color: rgba(255,255,255,.9); }   /* hlavná KPI */
+.gl-card--calc { background: var(--gl-gradient-calc); border-color: #d9ebe6; }               /* kalkulačka */
+.gl-card--danger { background: var(--gl-danger-card-bg); border-color: var(--gl-danger-card-border); }
+
+/* ---------- KPI dlaždice ---------- */
+.gl-kpi { padding: 18px 20px; }
+.gl-kpi__label { font-size: 13px; color: var(--gl-ink-muted); white-space: nowrap; }
+.gl-card--soft .gl-kpi__label { color: var(--gl-green-700); font-weight: var(--gl-fw-medium); }
+.gl-kpi__value { font-size: var(--gl-fs-kpi); font-weight: var(--gl-fw-semibold); line-height: 1; margin-top: 10px;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gl-kpi__value--lg { font-size: var(--gl-fs-kpi-lg); }
+.gl-kpi__value--accent { color: var(--gl-brand-blue); }
+.gl-kpi__unit { font-size: 14px; font-weight: 400; color: var(--gl-ink-muted); letter-spacing: 0; }
+.gl-kpi__meta { font-size: var(--gl-fs-caption); color: var(--gl-ink-muted); margin-top: 6px; font-weight: 300; }
+.gl-big-number { font-size: var(--gl-fs-kpi-xl); font-weight: var(--gl-fw-semibold); line-height: 1;
+  letter-spacing: var(--gl-ls-tight); color: var(--gl-brand-blue); font-variant-numeric: tabular-nums; }
+.gl-accent-line { width: 56px; height: 5px; border-radius: 3px; background: var(--gl-green-400); }
+
+/* ---------- Tlačidlá ---------- */
+.gl-btn { font-family: inherit; font-size: 14px; line-height: 20px; font-weight: var(--gl-fw-medium); min-height: 44px;
+  padding: 10px 18px; border-radius: var(--gl-radius-pill); border: 1px solid var(--gl-blue-100);
+  background: #fff; color: var(--gl-ink); cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  white-space: nowrap; box-sizing: border-box; }
+.gl-btn:hover { border-color: var(--gl-blue-200); background: #f7fbfd; }
+.gl-btn--primary { background: var(--gl-blue-600); border-color: var(--gl-blue-600); color: #fff; }
+.gl-btn--primary:hover { background: var(--gl-blue-700); border-color: var(--gl-blue-700); }
+.gl-btn--sm { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+/* Pravidlo: na obrazovke najviac jedno primárne tlačidlo. */
+
+/* ---------- Polia ---------- */
+.gl-search { position: relative; }
+.gl-search input { font-family: inherit; font-size: 15px; min-height: 44px; width: 100%; box-sizing: border-box;
+  padding: 10px 18px 10px 42px; border: 1px solid var(--gl-border-strong); border-radius: var(--gl-radius-pill);
+  color: var(--gl-ink); background: #fff; }
+.gl-search svg { position: absolute; left: 16px; top: 13px; color: var(--gl-ink-muted); }
+.gl-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--gl-fs-caption); color: var(--gl-ink-muted); }
+.gl-input { font-family: inherit; font-size: 16px; min-height: 44px; padding: 10px 14px; border: 1px solid #cfe2ea;
+  border-radius: var(--gl-radius-field); color: var(--gl-ink); background: #fff; box-sizing: border-box; width: 100%;
+  font-variant-numeric: tabular-nums; }
+.gl-input--num { text-align: right; }
+
+/* ---------- Filtre (čipy) ---------- */
+.gl-chip { font-family: inherit; font-size: 13px; line-height: 18px; min-height: 38px; padding: 8px 14px;
+  border-radius: var(--gl-radius-pill); border: 1px solid transparent; background: transparent; color: #3d5566;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.gl-chip:hover { background: rgba(255,255,255,.8); }
+.gl-chip[aria-pressed="true"] { background: var(--gl-blue-600); color: #fff; }
+.gl-chip__count { font-variant-numeric: tabular-nums; color: var(--gl-ink-muted); font-weight: 300; }
+.gl-chip[aria-pressed="true"] .gl-chip__count { color: #dcebf5; }
+.gl-chip--warn { background: var(--gl-warn-bg); color: var(--gl-warn-fg); }
+.gl-chip--danger { background: var(--gl-danger-bg); color: var(--gl-danger-fg); }
+
+/* ---------- Štítky stavov ---------- */
+.gl-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 18px; font-weight: 500;
+  border-radius: var(--gl-radius-pill); padding: 2px 10px; white-space: nowrap;
+  background: var(--gl-neutral-bg); color: var(--gl-neutral-fg); }
+.gl-pill--ok { background: var(--gl-ok-bg); color: var(--gl-ok-fg); }
+.gl-pill--info { background: var(--gl-info-bg); color: var(--gl-info-fg); }
+.gl-pill--warn { background: var(--gl-warn-bg); color: var(--gl-warn-fg); }
+.gl-pill--danger { background: var(--gl-danger-bg); color: var(--gl-danger-fg); }
+.gl-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ---------- Tabuľky ---------- */
+.gl-table-wrap { overflow-x: auto; }
+.gl-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.gl-table th { font-size: 12px; font-weight: 400; color: var(--gl-ink-muted); text-align: left; padding: var(--gl-cell-pad);
+  border-bottom: 1px solid var(--gl-border); white-space: nowrap; }
+.gl-table td { padding: var(--gl-cell-pad); border-bottom: 1px solid var(--gl-divider); white-space: nowrap;
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.gl-table tr:last-child td { border-bottom: 0; }
+.gl-table tbody tr:hover td { background: var(--gl-surface-hover); }
+.gl-table th:first-child, .gl-table td:first-child { padding-left: var(--gl-cell-pad-edge); }
+.gl-table th:last-child, .gl-table td:last-child { padding-right: var(--gl-cell-pad-edge); }
+.gl-num { text-align: right !important; }
+.gl-col-shade { background: var(--gl-surface-shade); }
+.gl-mono { font-family: var(--gl-font-mono); font-size: 13px; }
+.gl-sub { font-size: 12px; color: var(--gl-ink-muted); line-height: 16px; font-weight: 300; }
+.gl-table-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center;
+  padding: 14px 24px; border-top: 1px solid var(--gl-border); font-size: 13px; color: var(--gl-ink-muted); font-weight: 300; }
+
+/* Avatar / ikonová dlaždica v riadku */
+.gl-avatar { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; flex: none;
+  font-size: 13px; font-weight: 600; background: var(--gl-blue-50); color: var(--gl-brand-blue); } /* B2B */
+.gl-avatar--b2c { background: var(--gl-green-50); color: var(--gl-green-700); }
+.gl-typeicon { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+
+/* ---------- Zoznam ďalších krokov (dátumová dlaždica) ---------- */
+.gl-step { display: flex; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid #edf3f5; }
+.gl-step:first-child { border-top: 0; }
+.gl-datetile { width: 46px; height: 46px; border-radius: var(--gl-radius-tile); flex: none; display: grid; place-items: center;
+  text-align: center; line-height: 1.05; }
+.gl-datetile b { display: block; font-size: 17px; font-weight: 600; }
+.gl-datetile small { font-size: 10px; }
+
+/* ---------- Štádiá obchodu ---------- */
+.gl-stepper { list-style: none; margin: 0; padding: 0; display: flex; flex: 1 1 600px; overflow-x: auto; }
+.gl-stepper li { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 0; min-width: 90px;
+  position: relative; font-size: 13px; text-align: center; color: var(--gl-ink-muted); }
+.gl-stepper li::after { content: ""; position: absolute; top: 10px; left: 50%; width: 100%; height: 2px; background: #c9d9e3; }
+.gl-stepper li:last-child::after { display: none; }
+.gl-stepper .is-done { color: var(--gl-green-700); }
+.gl-stepper .is-done::after { background: var(--gl-green-400); }
+.gl-stepper [aria-current="step"] { color: var(--gl-brand-blue); font-weight: 600; }
+
+/* ---------- Časová os ---------- */
+.gl-event { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--gl-divider); }
+.gl-event:first-child { border-top: 0; }
+.gl-event__icon { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+
+/* ---------- Ikony ---------- */
+.gl-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round;
+  stroke-linejoin: round; flex: none; }
+
+/* ---------- Pohyb (lopatky turbín) ---------- */
+.gl-spin { animation: gl-spin 9s linear infinite; }
+@keyframes gl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gl-spin { animation: none; } }
+
+/* ---------- Mobil (do 760 px) ---------- */
+@media (max-width: 760px) {
+  .gl-rail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; flex: none; width: 100%; flex-direction: row;
+    overflow-x: auto; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.94);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); border-top: 1px solid var(--gl-border); }
+  .gl-rail__logo, .gl-rail__spacer, .gl-rail__status { display: none; }
+  .gl-rail__item { min-width: 64px; flex: none; }
+  .gl-main { padding: 12px 12px 96px; }
+  .gl-hero__title, .gl-hero--home .gl-hero__title { font-size: 32px; }
+  .gl-hero { min-height: 230px; border-radius: 22px; padding-bottom: 56px; }
+  .gl-overlap { margin: -40px 8px 0; }
+}
