@@ -1,4 +1,4 @@
-// Stavebné prvky podľa docs/dizajn/system/komponenty: karta, štítok stavu, KPI karta, údaje, stavy načítania.
+// Stavebné prvky (vzhľad podľa docs/design-handoff): karta, štítok stavu, KPI karta, údaje, dátumová dlaždica, stavy načítania.
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -6,9 +6,17 @@ import type { ApiError } from '../lib/api';
 import { EMPTY, initials } from '../lib/format';
 import { hubspotUrl, SOURCE_NOTE, type Tone } from '../lib/labels';
 
-export function Card(props: { title?: string; aside?: ReactNode; children: ReactNode; footer?: ReactNode; flush?: boolean; label?: string }) {
+export function Card(props: {
+  title?: string;
+  aside?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+  flush?: boolean;
+  label?: string;
+  className?: string;
+}) {
   return (
-    <section className="card" aria-label={props.label ?? props.title}>
+    <section className={props.className ? `card ${props.className}` : 'card'} aria-label={props.label ?? props.title}>
       {props.title && (
         <div className="card-head">
           <h2 className="t-section-title">{props.title}</h2>
@@ -74,6 +82,19 @@ export function Item(props: { title: ReactNode; meta?: ReactNode; side?: ReactNo
       </div>
       {props.side && <div className="item-side">{props.side}</div>}
     </div>
+  );
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'máj', 'jún', 'júl', 'aug', 'sep', 'okt', 'nov', 'dec'];
+
+/** Dátumová dlaždica 46 × 46 (deň a mesiac), podfarbená podľa naliehavosti; celý dátum je v popise. */
+export function DateTile(props: { date: string; tone: Tone }) {
+  const [y, m, d] = props.date.slice(0, 10).split('-').map(Number);
+  return (
+    <span className={`gl-datetile date-tile ${props.tone}`} aria-label={`${d}. ${m}. ${y}`} role="img">
+      <b aria-hidden="true">{d}</b>
+      <small aria-hidden="true">{MONTHS[m - 1]}</small>
+    </span>
   );
 }
 

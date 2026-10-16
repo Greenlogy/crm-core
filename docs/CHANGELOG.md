@@ -2,6 +2,7 @@
 
 ## 2026-10-16
 
+- Dizajn (obrazovka 01 Domov): hlavička s krajinou, cenové dlaždice zo skla (CAL 2027 zvýraznená), graf s plochou a popiskami hodnôt na konci sérií, kalkulačka s veľkým odhadom provízie a jediným primárnym tlačidlom, ďalšie kroky s dátumovými dlaždicami, počty ponúk ako štítky, záporná PH v červenej; stavové čipy (`.chip`) a dátumová dlaždica (`DateTile`) pre celú aplikáciu.
 - Dizajn (krok 2 – spoločné prvky): menu 88 px (na mobile spodná lišta) s položkou „Viac“ (Leady, Zmluvy k obchodom, Výnimky z ceny), dole Upozornenia, Nastavenia, Profil a prostredie; komponenty `PageHero` (krajina inline, lopatky s `prefers-reduced-motion`) a `GlassBar` (`web/src/components/hero.tsx`); nový vzhľad kariet, tlačidiel, polí, prepínačov, štítkov, tabuliek, KPI a údajov na všetkých obrazovkách.
 - Dizajn (krok 1 – základ): tokeny z `docs/design-handoff/tokens/tokens.css` (generátor `web/scripts/tokens.ts` s doplnkovými tokenmi a aliasmi starých názvov podľa DESIGN_SPEC § 9), písmo Lexend + Geist Mono, globálne štýly (`body`, odkazy, fokus, `tabular-nums`), komponenty `gl-*` vo `web/src/styles/components.css` bez natvrdo zapísaných farieb, odstránený tmavý režim.
 - Modul 5: **F6 uzavretá** – `0047`–`0052` na `dev`, `crm-core` na Teste (commity `81bfcb5`, `c1c0240`).

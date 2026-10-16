@@ -302,6 +302,7 @@ a:hover {
 }
 .card-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
@@ -751,7 +752,8 @@ a:hover {
 }
 .head-actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
 }
 .btn.primary {
@@ -773,7 +775,7 @@ a:hover {
 .chips-bar {
   justify-content: space-between;
   padding-top: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--gl-border);
 }
 .chips {
   display: flex;
@@ -782,34 +784,34 @@ a:hover {
 }
 .chip {
   font: inherit;
-  font-size: 13px;
-  line-height: 19px;
-  font-weight: 500;
-  padding: 6px 10px;
-  border-radius: var(--radius-md);
+  font-size: var(--gl-fs-small);
+  line-height: 18px;
+  font-weight: var(--gl-fw-regular);
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: var(--gl-radius-pill);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--ink-muted);
+  color: var(--gl-chip-ink);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
 }
 .chip:hover {
-  color: var(--ink);
+  background: var(--gl-rail-hover);
 }
 .chip[aria-pressed='true'] {
-  background: var(--surface-muted);
-  border-color: var(--border);
-  color: var(--ink);
+  background: var(--gl-blue-600);
+  color: var(--gl-on-primary);
 }
-.chip:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
+.chip[aria-pressed='true'] .cc {
+  color: var(--gl-chip-count-on);
 }
 .cc {
-  color: var(--ink-subtle);
+  color: var(--gl-ink-muted);
+  font-weight: var(--gl-fw-light);
   font-variant-numeric: tabular-nums;
 }
 .check {
@@ -821,9 +823,10 @@ a:hover {
   cursor: pointer;
 }
 .sub {
-  font-size: 12px;
+  font-size: var(--gl-fs-caption);
+  font-weight: var(--gl-fw-light);
   line-height: 16px;
-  color: var(--ink-muted);
+  color: var(--gl-ink-muted);
 }
 .name-cell {
   color: inherit;
@@ -2540,13 +2543,36 @@ a.tab {
   }
 }
 
-/* Domov (F6): dve karty vedľa seba, na úzkej obrazovke pod sebou; legenda grafu */
+/* Domov (F6, dizajn 01-uvodna-stranka): cenové dlaždice zo skla nad krajinou, graf, kalkulačka, ďalšie kroky */
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--gl-gap-grid);
+}
+.home-tile {
+  border-radius: var(--gl-radius-card);
+  min-width: 0;
+}
+.home-tile .gl-kpi__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.home-note {
+  text-align: right;
+  margin: calc(var(--gl-gap-section) * -1 + 8px) 20px 0;
+}
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
+  gap: var(--gl-gap-section);
   align-items: start;
+}
+.home-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gl-gap-section);
+  min-width: 0;
 }
 @media (max-width: 1000px) {
   .home-grid {
@@ -2555,17 +2581,103 @@ a.tab {
 }
 .chart-legend {
   display: flex;
-  gap: var(--space-4);
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-top: 6px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: var(--gl-fs-caption);
+  color: var(--gl-ink-muted);
+}
+.chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-line {
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
 }
 .legend-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  vertical-align: -1px;
+  flex: none;
+}
+.chart-note {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gl-divider);
+}
+.card.calc-card {
+  background: var(--gl-gradient-calc);
+  border-color: var(--gl-calc-border);
+}
+.calc-result {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gl-border-strong);
+}
+.calc-result .gl-big-number {
+  margin-top: 8px;
+}
+.calc-result .gl-accent-line {
+  margin: 14px 0 18px;
+}
+.calc-cta {
+  width: 100%;
+}
+.negative-text {
+  color: var(--gl-danger-fg);
+}
+.step-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.step-link {
+  color: var(--gl-ink);
+  font-weight: var(--gl-fw-medium);
+}
+.step-main .gl-sub {
+  font-size: var(--gl-fs-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.date-tile.negative {
+  background: var(--gl-danger-bg);
+  color: var(--gl-danger-fg);
+}
+.date-tile.warning {
+  background: var(--gl-warn-bg);
+  color: var(--gl-warn-fg);
+}
+.date-tile.info,
+.date-tile.neutral {
+  background: var(--gl-info-bg);
+  color: var(--gl-info-fg);
+}
+.date-tile.positive {
+  background: var(--gl-ok-bg);
+  color: var(--gl-ok-fg);
+}
+.home-value {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gl-border);
+}
+.home-value .gl-kpi__value {
+  color: var(--gl-brand-blue);
+  white-space: normal;
+}
+.home-value .gl-kpi__value.negative-text {
+  color: var(--gl-danger-fg);
+}
+.home-value-weighted {
+  font-size: var(--gl-fs-caption);
+  font-weight: var(--gl-fw-light);
+  color: var(--gl-ink-muted);
+  letter-spacing: 0;
 }
 
 /* --- Mobil (do 760 px): menu je spodná lišta (components.css), „Viac“ sa otvára nad ňou --- */
