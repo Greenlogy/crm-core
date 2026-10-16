@@ -24,6 +24,7 @@ import { companyCheck } from './routes/company-check';
 import { deals } from './routes/deals';
 import { offers } from './routes/offers';
 import { offersPdf } from './routes/offers-pdf';
+import { emails } from './routes/emails';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTER } from './queries/contacts';
@@ -38,6 +39,7 @@ import {
 } from './queries/customers';
 import { listOom, OOM_CHIPS, OOM_TYPES, oomCard, oomFilters } from './queries/oom';
 import { nightlyRun } from './jobs';
+import { emailRun } from './email-jobs';
 import { jobRuns } from './routes/job-runs';
 import { notifications } from './routes/notifications';
 
@@ -145,6 +147,7 @@ app.route('/', jobRuns);
 app.route('/', deals);
 app.route('/', offers);
 app.route('/', offersPdf);
+app.route('/', emails);
 app.route('/', approvals);
 app.route('/', companyCheck);
 
@@ -235,7 +238,8 @@ app.onError((err, c) => {
 // Worker: API (fetch) a naplánované úlohy (scheduled, Cron v wrangler.toml).
 export default {
   fetch: app.fetch,
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(nightlyRun(env));
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    // */5: e-maily (F4); ostatné časy: nočný beh
+    ctx.waitUntil(controller.cron === '*/5 * * * *' ? emailRun(env) : nightlyRun(env));
   },
 } satisfies ExportedHandler<Env>;

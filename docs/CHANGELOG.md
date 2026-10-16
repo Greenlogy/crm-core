@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-16
+
+- Modul 5, F4 krok 2 (lokálne overené, nenasadené): Gmail cez servisný účet – jediné miesto adries Gmail API (`gmail/endpoints.ts`: iba `threads.get`, `messages.get`, odoslanie), čítanie iba cez `gmailRead` po `gmail_read_authorize`; z formátu `full` sa obsah príloh (aj vložených obrázkov) zahodí bez dekódovania, ukladá sa iba text a hlavičky vlákna; odolné odoslanie (`gmail/deliver.ts`); Cron `*/5` (dokončenie, fronta potvrdení, interné e-maily z crm@, odpovede); na Teste iba @greenlogy.com a `MAIL_ALLOWLIST`. Obrazovky 37, e-maily v kartách, profil s fotkou a podpisom, šablóny e-mailov, čítanie schránok, Gmail pilot pri používateľovi, oslovenie kontaktu. Testy API `npm test`, kontrola `scripts/check-gmail.mjs` v `npm run typecheck`.
+- Modul 5, F4 krok 1b (nenasadené): `0042` na `dev` (Peter). `0043_emaily_doplnky` overená nanečisto – Gmail iba `threads.get` a `messages.get` (nie `attachments.get` ani formát `raw`), formát v denníku čítania; voľba „Poslať zákazníkovi potvrdenie“ pri ručnej akceptácii, vypnutie v časovej osi. Rozhodnutia F4 body 1–4.
+- Modul 5, F4 krok 1 (nenasadené): `0042_emaily` overená nanečisto, 225 kontrol (séria E) – profil do podpisu a fotka, oslovenie pri kontakte, šablóny e-mailov s verziami (SK platné, EN návrh), vlákna a správy, odolné odoslanie ponuky (odosiela sa → ID z Gmailu → Odoslaná, dokončenie behom na pozadí, nikdy znova), jediná kontrola čítania Gmailu s denníkom, odpovede a sledovanie 30 dní, pripomienka platnosti (SPOT/VIWA), potvrdenie akceptácie zákazníkovi, interné e-maily z crm@; `app-role.sql`, `run.sh`. Rozhodnutia F4 (odpovede 1–7, odolnosť odoslania).
+
 ## 2026-10-15
 
 - Modul 5: **F3 uzavretá** – `0039`–`0041` na `dev`, `crm-core` a `crm-ponuka` na Teste, Peter otestoval.

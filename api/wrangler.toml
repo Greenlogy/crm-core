@@ -42,12 +42,15 @@ id = "c7a47fba727d45ec83565393f125c9d0"
 ENVIRONMENT = "test"   # Test (Neon dev); Ostré dostane vlastné prostredie
 ACCESS_TEAM_DOMAIN = "https://greenlogy.cloudflareaccess.com"
 PUBLIC_OFFER_URL = "https://crm-ponuka.peter-700.workers.dev"   # stránka ponuky (Worker crm-ponuka, mimo Access); Ostré: ponuka.greenlogy.com
+CRM_URL = "https://crm-core.peter-700.workers.dev"   # odkazy v interných e-mailoch; Ostré: vlastná adresa
+# Gmail (F4): GOOGLE_SA_KEY a na Teste MAIL_ALLOWLIST iba ako wrangler secret
 ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 
 # Naplánované úlohy (api/src/jobs.ts): denná aktivácia Pripravovaných OOM o 0:05 Europe/Bratislava.
 # Cron beží v UTC – dva časy pokryjú zimný aj letný čas; druhé spustenie nič nezmení.
+# */5: e-maily (api/src/email-jobs.ts) – dokončenie odoslaní, fronta, interné e-maily, odpovede vo vláknach CRM.
 [triggers]
-crons = ["5 22 * * *", "5 23 * * *"]
+crons = ["5 22 * * *", "5 23 * * *", "*/5 * * * *"]
 
 [observability]
 enabled = true

@@ -87,6 +87,11 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
   pridelenie_firmy: { label: 'Pridelenie firmy', tone: 'warning' },
   ponuka_akceptovana: { label: 'Ponuka akceptovaná', tone: 'positive' },
   ponuka_zablokovana: { label: 'Verzia ponuky zablokovaná', tone: 'warning' },
+  akceptacia_zrusena: { label: 'Akceptácia zrušená', tone: 'warning' },
+  ponuka_odpoved: { label: 'Odpoveď na e-mail', tone: 'positive' },
+  ponuka_pripomienka: { label: 'Pripomienka platnosti', tone: 'info' },
+  gmail_chyba: { label: 'Chyba Gmailu', tone: 'negative' },
+  email_chyba: { label: 'Chyba e-mailu', tone: 'negative' },
 };
 
 // Kroky nočného behu zmlúv (denník, 0028)

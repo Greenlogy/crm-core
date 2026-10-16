@@ -33,6 +33,9 @@ import { JobRunsPage } from './pages/settings/JobRunsPage';
 import { LookupsPage } from './pages/settings/LookupsPage';
 import { PipelinesPage } from './pages/settings/PipelinesPage';
 import { OfferTemplatesPage } from './pages/settings/OfferTemplatesPage';
+import { EmailTemplatesPage } from './pages/settings/EmailTemplatesPage';
+import { MailboxAccessPage } from './pages/settings/MailboxAccessPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { PricingPage } from './pages/settings/PricingPage';
 import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
@@ -70,6 +73,8 @@ const router = createBrowserRouter([
       { path: 'zmluvy/:id', element: <ContractPage /> },
       { path: 'vynimky', element: <ExceptionsPage /> },
       { path: 'upozornenia', element: <NotificationsPage /> },
+      { path: 'profil', element: <ProfilePage /> },
+      { path: 'profil/:id', element: <ProfilePage /> },
       // Cenníky: pevné adresy pred /cenniky/:id (stránka detailu prijme iba platné ID)
       { path: 'cenniky', element: <PriceListsPage /> },
       { path: 'cenniky/produkty', element: <ProductsPage /> },
@@ -87,10 +92,12 @@ const router = createBrowserRouter([
           { path: 'parovanie-sadzieb', element: <TariffMappingPage /> },
           { path: 'cenove-parametre', element: <PricingPage /> },
           { path: 'sablony-ponuk', element: <OfferTemplatesPage /> },
+          { path: 'sablony-emailov', element: <EmailTemplatesPage /> },
           { path: 'preklady-importov', element: <ImportAliasesPage /> },
           { path: 'vlastne-polia', element: <CustomFieldsPage /> },
           { path: 'pipelines', element: <PipelinesPage /> },
           { path: 'audit', element: <AuditPage /> },
+          { path: 'citanie-schranok', element: <MailboxAccessPage /> },
           { path: 'nocny-beh', element: <JobRunsPage /> },
         ],
       },

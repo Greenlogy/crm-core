@@ -4,12 +4,14 @@
 import postgres from 'postgres';
 import type { AuthEnv } from './auth';
 import type { FinstatEnv } from './finstat';
+import type { GmailEnv } from './gmail/gmail';
 
-export type Env = AuthEnv & FinstatEnv & {
+export type Env = AuthEnv & FinstatEnv & GmailEnv & {
   HYPERDRIVE: Hyperdrive;
   BROWSER: Fetcher;        // Browser Run – PDF ponuky (F3)
   DOCS: R2Bucket;          // R2 crm-dokumenty-* (jurisdikcia EÚ): PDF ponúk, podpísané ponuky
   PUBLIC_OFFER_URL: string; // adresa stránky ponuky (Worker crm-ponuka)
+  CRM_URL: string;          // adresa CRM (odkazy v interných e-mailoch z crm@greenlogy.com)
 };
 
 export type Sql = postgres.Sql;

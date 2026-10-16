@@ -191,6 +191,7 @@ function UserForm(props: {
   const [assigns, setAssigns] = useState(u?.approves_assignments ?? false);
   const [phone, setPhone] = useState(u?.phone ?? '');
   const [jobTitle, setJobTitle] = useState(u?.job_title ?? '');
+  const [gmail, setGmail] = useState(u?.gmail_enabled ?? false);
   const [deactivate, setDeactivate] = useState(false);
   const save = useSave();
   const team = props.teams.find((t) => t.id === teamId);
@@ -211,6 +212,7 @@ function UserForm(props: {
       approves_assignments: team?.is_external ? false : assigns,
       phone: phone.trim() || null,
       job_title: jobTitle.trim() || null,
+      gmail_enabled: gmail,
     };
     const ok = await save.run(() =>
       u ? send('PATCH', `/api/settings/users/${u.id}`, body) : send('POST', '/api/settings/users', { ...body, email }),
@@ -310,8 +312,40 @@ function UserForm(props: {
         Nákup vidia všetky spoločnosti.
       </p>
       {save.error && <Notice tone="error">{save.error}</Notice>}
+      {u && !readOnly && <GmailSection userId={u.id} enabled={gmail} onChange={setGmail} />}
       {u && (u.seller_type || sellerType) && !readOnly && <CommissionSection userId={u.id} />}
     </SidePanel>
+  );
+}
+
+// --- Gmail (F4, pilot) ---------------------------------------------------------
+
+/** E-maily z CRM zo schránky používateľa: zapína admin postupne (pilot). Overenie iba vydá token – schránka sa nečíta. */
+function GmailSection(props: { userId: string; enabled: boolean; onChange: (v: boolean) => void }) {
+  const [check, setCheck] = useState<{ ok: boolean; mailbox?: string; error?: string } | null>(null);
+  const save = useSave();
+  return (
+    <fieldset className="fieldset">
+      <legend>E-maily z CRM (Gmail)</legend>
+      <Check checked={props.enabled} onChange={props.onChange}>
+        Posiela e-maily z CRM zo svojej schránky (pilot) – uloží sa tlačidlom Uložiť
+      </Check>
+      <div className="row-actions">
+        <button type="button" className="btn btn-sm" disabled={save.busy} onClick={() => save.run(async () => {
+          setCheck(await send<{ ok: boolean; mailbox?: string; error?: string }>('POST', '/api/settings/gmail-check', { user_id: props.userId }));
+        })}>
+          Overiť nastavenie Gmailu
+        </button>
+        <a className="btn btn-sm" href={`/profil/${props.userId}`}>Profil a podpis</a>
+      </div>
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {check && (
+        <Notice tone={check.ok ? 'ok' : 'error'}>
+          {check.ok ? `Gmail pre ${check.mailbox} je nastavený (delegovanie funguje).` : `Gmail nefunguje: ${check.error}`}
+        </Notice>
+      )}
+      <p className="caption">CRM číta iba vlákna e-mailov, ktoré poslalo z CRM, a každé čítanie zapíše do denníka (Nastavenia → Čítanie schránok).</p>
+    </fieldset>
   );
 }
 

@@ -9,7 +9,7 @@ import { bundledAssets, offerAssets } from '../render/assets';
 import { confirmationHtml, offerHtml, type OfferDocument, pdfFooter } from '../render/offer-html';
 import { htmlToPdf, sha256Hex } from '../render/pdf';
 import { type AppEnv, UUID } from '../types';
-import { BadRequest, type Body, oneOf, readBody, str } from '../validate';
+import { BadRequest, type Body, bool, oneOf, readBody, str } from '../validate';
 
 export const offersPdf = new Hono<AppEnv>();
 
@@ -38,7 +38,7 @@ const pdfResponse = (pdf: Uint8Array | ReadableStream, name: string, inline = tr
 const fileName = (displayNumber: string, suffix = '') => `Cenova-ponuka-${displayNumber.replace('/', '-')}${suffix}.pdf`;
 
 /** Token odkazu: 32 náhodných bajtov ako base64url (43 znakov); do databázy ide iba SHA-256 reťazca tokenu. */
-function newToken(): string {
+export function newToken(): string {
   const b = crypto.getRandomValues(new Uint8Array(32));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -73,6 +73,23 @@ offersPdf.get('/offers/:id/preview.pdf', async (c) => {
   });
   return pdfResponse(await htmlToPdf(c.env.BROWSER, html, pdfFooter(doc)), fileName(o.display_number, '-nahlad'));
 });
+
+/**
+ * PDF odosielanej ponuky (platná šablóna) uložené v R2 pod kľúčom, ktorý databáza pri odoslaní prijme
+ * (ponuky/{org}/{rok}/{číslo}[-verzia].pdf). Použije ho aj odoslanie e-mailom (emails.ts).
+ */
+export async function storeOfferPdf(sql: Sql, env: AppEnv['Bindings'], offerId: string): Promise<{ key: string; sha: string }> {
+  const o = await offerRow(sql, offerId);
+  const doc = await documentOf(sql, offerId);
+  if (!doc.template || doc.template.status !== 'platna') {
+    throw new BadRequest(`Šablóna ponuky (${doc.offer.kind}, ${doc.offer.language.toUpperCase()}) ešte nie je schválená – admin ju zverejní v Nastaveniach → Šablóny ponúk.`);
+  }
+  const pdf = await htmlToPdf(env.BROWSER, offerHtml(doc, await offerAssets(sql, o.org_id)), pdfFooter(doc));
+  const sha = await sha256Hex(pdf);
+  const key = `ponuky/${o.org_id}/${yearOf(o.number)}/${o.number}${versionSuffix(o.version)}.pdf`;
+  await env.DOCS.put(key, pdf, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { offer: o.id, sha256: sha } });
+  return { key, sha };
+}
 
 // Odoslanie (ručne, mimo CRM): v jednej transakcii stav Odoslaná + platnosť, PDF do R2, odkaz (zobrazí sa iba raz)
 offersPdf.post('/offers/:id/send', async (c) => {
@@ -144,6 +161,8 @@ offersPdf.post('/offers/:id/accept-manual', async (c) => {
   const channel = oneOf(b, 'channel', 'Kanál', MANUAL_CHANNELS);
   if (!channel) throw new BadRequest('Vyberte, ako zákazník ponuku prijal.');
   const note = str(b, 'note', 'Poznámka', { max: 2000, optional: true }) || null;
+  // „Poslať zákazníkovi potvrdenie“ (predvolene áno, 0043)
+  const sendConfirmation = bool(b, 'send_confirmation', 'Poslať zákazníkovi potvrdenie') ?? true;
   const sql = c.var.sql;
   const o = await offerRow(sql, offerId);
   let key: string | null = null;
@@ -157,7 +176,9 @@ offersPdf.post('/offers/:id/accept-manual', async (c) => {
   }
   const [r] = await sql<{ id: string }[]>`
     SELECT offer_accept_manual(${offerId}, ${variant}, ${name}, ${func}, ${at}, ${channel}, ${note}, ${key}) AS id`;
-  // potvrdenie akceptácie v PDF sa uloží hneď (dôkaz, nemení sa) – v tej istej transakcii (0041)
+  if (!sendConfirmation) await sql`SELECT offer_acceptance_confirmation_off(${r.id})`;
+  // potvrdenie akceptácie v PDF sa uloží hneď (dôkaz, nemení sa) – v tej istej transakcii (0041); so zapnutou voľbou
+  // ho databáza zaradí do fronty e-mailov zákazníkovi (0042)
   await storeConfirmation(sql, c.env, r.id);
   return c.json({ id: r.id }, 201);
 });

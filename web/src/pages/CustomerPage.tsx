@@ -1,6 +1,7 @@
 // Karta firmy podľa docs/dizajn/obrazovky/01-karta-firmy.html (variant B, modul Zákazníci):
 // KPI v jednom rade; vľavo údaje, FinStat a vývoj stavu, v strede časová os, vpravo kontakty, OOM, dealy, zmluvy.
 
+import { EmailList } from '../components/email';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CompanyContactsCard, TimelineCard } from '../components/customer-f2';
@@ -124,6 +125,9 @@ export function CustomerPage() {
 
         <div className="col-mid">
           <TimelineCard kind="company" id={c.id} items={c.timeline} canAdd={c.can_edit} onAdded={reload} />
+          <Card title="E-maily a odpovede">
+            <EmailList query={`company_id=${c.id}`} source={{ companyId: c.id }} />
+          </Card>
         </div>
 
         <div className="col-right">

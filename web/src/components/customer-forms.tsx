@@ -245,6 +245,7 @@ export function PersonFormPanel(props: {
   const [phone, setPhone] = useState(p?.phone ?? '');
   const [mobile, setMobile] = useState(p?.mobile ?? '');
   const [position, setPosition] = useState(p?.position ?? '');
+  const [salutation, setSalutation] = useState(p?.salutation ?? '');
   const [address, setAddress] = useState(p?.address ?? '');
   const [source, setSource] = useState(p?.source ?? '');
   const [owner, setOwner] = useState(p ? (p.owner_id ?? '') : me.id);
@@ -286,7 +287,7 @@ export function PersonFormPanel(props: {
   const submit = async () => {
     const body: Record<string, unknown> = servis
       ? { email, phone, mobile, address }
-      : { title, first_name: first, last_name: last, email, phone, mobile, position, address, source: source || null };
+      : { title, first_name: first, last_name: last, email, phone, mobile, position, salutation, address, source: source || null };
     if (!p) {
       body.is_household = isHousehold;
       body.owner_id = owner || null;
@@ -405,6 +406,9 @@ export function PersonFormPanel(props: {
         )}
         <Field label="Pozícia">
           <TextInput value={position} onChange={setPosition} maxLength={100} disabled={servis} />
+        </Field>
+        <Field label="Oslovenie v e-maile" hint="Napr. „Dobrý deň, pán Mráz“. Prázdne = „Dobrý deň“.">
+          <TextInput value={salutation} onChange={setSalutation} maxLength={200} disabled={servis} />
         </Field>
         <Field label="Zdroj">
           <Select

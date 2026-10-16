@@ -259,7 +259,7 @@ Ponuka má časti v tomto poradí:
 - **Druhy e-mailov:**
   - ponuka: text zo šablóny, odkaz na stránku a PDF,
   - potvrdenie akceptácie zákazníkovi,
-  - **pripomienka platnosti:** deň pred koncom platnosti CRM pripraví koncept, obchodník ho odošle jedným klikom (nie automaticky),
+  - **pripomienka platnosti:** 2 pracovné dni pred koncom platnosti CRM pripraví koncept, iba pri SPOT a VIWA (pri FIX nie); obchodník ho odošle jedným klikom (nie automaticky; Peter 15. a 16. 10. 2026),
   - voľný e-mail zákazníkovi z karty obchodu alebo zákazníka (prázdny alebo zo šablóny).
 - **Interné upozornenia** (výnimky, akceptácie, obnovy, pridelenie firmy) idú do zvončeka. Schvaľovateľovi aj e-mailom z adresy CRM (napr. crm@greenlogy.com).
 - **Záznam:**

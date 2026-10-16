@@ -3,11 +3,13 @@
 // verzie a platnosť. Výpočty, stav a pravidlá robí databáza; web iba zobrazuje a posiela zmeny.
 // F3: náhľad a PDF ponuky, odoslanie s odkazom na stránku ponuky (odkaz sa ukáže iba raz), akceptácia (klik zákazníka
 // na stránke, ručne s kanálom a podpísaným PDF), zrušenie akceptácie adminom, zmluvná pokuta, zablokovaná verzia.
-// E-mail z CRM je F4.
+// F4: odoslanie e-mailom z CRM (dialóg 37) – PDF, odkaz a stav Odoslaná zapíše CRM až po odoslaní; ručná akceptácia
+// s voľbou „Poslať zákazníkovi potvrdenie“.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
+import { EmailComposer } from '../components/email';
 import { Card, Empty, ErrorState, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { send, useApi } from '../lib/api';
 import { date, dec, eur, text } from '../lib/format';
@@ -32,7 +34,7 @@ const nowLocal = () => {
   return d.toISOString().slice(0, 16);
 };
 
-type Panel = null | 'prepare' | 'sent' | 'reject' | 'shorten' | 'extend' | 'delete' | 'link' | 'accept' | 'unblock';
+type Panel = null | 'prepare' | 'email' | 'sent' | 'reject' | 'shorten' | 'extend' | 'delete' | 'link' | 'accept' | 'unblock';
 
 export function OfferPage() {
   const { id = '' } = useParams();
@@ -214,6 +216,9 @@ export function OfferPage() {
       </div>
 
       {panel === 'prepare' && <PreparePanel offer={o} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />}
+      {panel === 'email' && (
+        <EmailComposer title={`Nový e-mail · ${o.deal_name}`} source={{ offerId: o.id }} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />
+      )}
       {panel === 'sent' && <SendPanel offer={o} onClose={() => { setPanel(null); reload(); }} />}
       {panel === 'link' && <LinkPanel offer={o} onClose={() => { setPanel(null); reload(); }} />}
       {panel === 'accept' && <AcceptPanel offer={o} onClose={() => setPanel(null)} onDone={() => { setPanel(null); reload(); }} />}
@@ -263,9 +268,14 @@ function OfferActions(props: { offer: Offer; busy: boolean; onPanel: (p: Panel) 
       )}
       {o.status === 'caka_na_schvalenie' && <div className="caption">Ponuka čaká na schválenie – odoslať sa dá po rozhodnutí.</div>}
       {o.status === 'pripravena' && (
-        <button type="button" className="btn primary" disabled={props.busy} onClick={() => props.onPanel('sent')}>
-          Odoslať zákazníkovi
-        </button>
+        <>
+          <button type="button" className="btn primary" disabled={props.busy} onClick={() => props.onPanel('email')}>
+            Odoslať e-mailom
+          </button>
+          <button type="button" className="btn" disabled={props.busy} onClick={() => props.onPanel('sent')}>
+            Odoslané mimo CRM
+          </button>
+        </>
       )}
       {isDraft(o.status) && (
         <button type="button" className="btn" disabled={props.busy} onClick={props.onReprice}>
@@ -883,7 +893,7 @@ function SendPanel(props: { offer: Offer; onClose: () => void }) {
   const fix = props.offer.variants.some((v) => v.price_kind === 'fix' || v.price_kind === 'kombinacia');
   return (
     <SidePanel
-      title={done ? 'Ponuka odoslaná' : 'Odoslať zákazníkovi'}
+      title={done ? 'Ponuka odoslaná' : 'Odoslané mimo CRM'}
       onClose={props.onClose}
       footer={
         done ? (
@@ -902,7 +912,7 @@ function SendPanel(props: { offer: Offer; onClose: () => void }) {
         <LinkResult link={done.link} offerId={props.offer.id} validUntil={done.valid_until} />
       ) : (
         <>
-          <p>CRM uloží PDF ponuky a vytvorí odkaz na stránku ponuky pre zákazníka. PDF a odkaz pošlite zákazníkovi z vlastného e-mailu (e-mail z CRM pribudne neskôr).</p>
+          <p>Ponuku ste zákazníkovi odovzdali inak ako e-mailom z CRM (vlastný e-mail, osobne). CRM uloží PDF ponuky a vytvorí odkaz na stránku ponuky; pošlite ich zákazníkovi sami. Odpovede na takýto e-mail CRM nevidí.</p>
           <Field label="Kedy bola (bude) odoslaná">
             <input className="inp" type="datetime-local" value={at} max={nowLocal()} onChange={(e) => setAt(e.target.value)} />
           </Field>
@@ -983,6 +993,7 @@ function AcceptPanel(props: { offer: Offer; onClose: () => void; onDone: () => v
   const [channel, setChannel] = useState<'telefon' | 'email' | 'osobne' | 'podpisane_pdf' | ''>('');
   const [note, setNote] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [confirm, setConfirm] = useState(true);
   const save = useSave();
   const submit = () =>
     save.run(async () => {
@@ -995,6 +1006,7 @@ function AcceptPanel(props: { offer: Offer; onClose: () => void; onDone: () => v
       }
       await send('POST', `/api/offers/${o.id}/accept-manual`, {
         variant_id: variant, signer_name: name, signer_function: func, accepted_at: new Date(at).toISOString(), channel, note, file_base64: fileB64,
+        send_confirmation: confirm,
       });
       props.onDone();
     });
@@ -1030,6 +1042,10 @@ function AcceptPanel(props: { offer: Offer; onClose: () => void; onDone: () => v
       <Field label="Poznámka (nepovinné)">
         <TextInput value={note} maxLength={2000} onChange={setNote} />
       </Field>
+      <Check checked={confirm} onChange={setConfirm}>
+        Poslať zákazníkovi potvrdenie (e-mailom s PDF potvrdenia)
+      </Check>
+      {!confirm && <p className="caption">Potvrdenie sa nepošle – zapíše sa to do časovej osi obchodu.</p>}
       <p className="caption">Akceptovať sa dá iba v platnosti ponuky. Obchod sa posunie do Akceptácie, rozpracovaná nová verzia sa zablokuje. Zapíše sa, kto akceptáciu zaznačil.</p>
     </SidePanel>
   );

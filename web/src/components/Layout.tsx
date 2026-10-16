@@ -55,11 +55,14 @@ export function Layout() {
     const t = window.setInterval(reloadBell, 5 * 60_000);
     return () => window.clearInterval(t);
   }, [reloadBell]);
+  const marketing = me.team_code === 'marketing';
   const settingsPath = me.is_admin
     ? '/nastavenia'
     : me.approves_prices
       ? '/nastavenia/cenove-parametre'
-      : '/nastavenia/nocny-beh';
+      : marketing
+        ? '/nastavenia/sablony-emailov'
+        : '/nastavenia/nocny-beh';
   const navClass = ({ isActive }: { isActive: boolean }) => `nav${isActive ? ' active' : ''}`;
 
   useEffect(() => {
@@ -144,7 +147,7 @@ export function Layout() {
               </span>
             )}
           </NavLink>
-          {(me.is_admin || me.approves_prices || me.can_see_job_runs) && (
+          {(me.is_admin || me.approves_prices || me.can_see_job_runs || marketing) && (
             <NavLink to={settingsPath} className={navClass}>
               <Icon d={ICONS.settings} />
               Nastavenia
@@ -155,9 +158,11 @@ export function Layout() {
             {ENVIRONMENT_LABEL[me.environment] ?? me.environment}
             {defaultOrg ? ` · ${defaultOrg.name}` : ''}
           </div>
-          <span className="caption" title={me.email}>
-            {me.name} · {me.team_name}
-          </span>
+          <NavLink to="/profil" className={navClass} title={`${me.email} – profil a podpis e-mailu`}>
+            <span className="caption">
+              {me.name} · {me.team_name}
+            </span>
+          </NavLink>
           <button type="button" className="nav" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             <Icon d={theme === 'dark' ? ICONS.sun : ICONS.moon} />
             {theme === 'dark' ? 'Svetlý režim' : 'Tmavý režim'}

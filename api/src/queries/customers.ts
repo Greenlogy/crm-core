@@ -175,7 +175,7 @@ export async function customerCard(sql: Sql, kind: CustomerKind, id: string) {
            WHERE c.id = ${id}`
       : await sql`
           SELECT p.id, p.first_name, p.last_name, concat_ws(' ', p.first_name, p.last_name) AS name, p.title, p.email,
-                 p.phone, p.mobile, p.position, p.address, p.source, p.is_household,
+                 p.phone, p.mobile, p.position, p.salutation, p.address, p.source, p.is_household,
                  p.status, p.status_source, p.status_changed_at, p.is_former_customer, p.is_producer,
                  CASE WHEN p.is_producer THEN 'Domácnosť · výrobca' ELSE 'Domácnosť' END AS segment_label,
                  p.archived, p.marketing_allowed, p.marketing_opt_out_at, p.marketing_opt_out_source,

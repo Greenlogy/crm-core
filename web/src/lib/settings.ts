@@ -12,6 +12,7 @@ export type SettingsUser = {
   seller_type: SellerType | null;
   phone: string | null;
   job_title: string | null;
+  gmail_enabled: boolean;
   approves_prices: boolean;
   approves_assignments: boolean;
   status: UserStatus;

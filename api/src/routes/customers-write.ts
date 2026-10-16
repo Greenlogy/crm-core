@@ -179,6 +179,7 @@ const PERSON_TEXT = [
   ['phone', 'Telefón', 40],
   ['mobile', 'Mobil', 40],
   ['position', 'Pozícia', 100],
+  ['salutation', 'Oslovenie v e-maile', 200],
   ['address', 'Adresa', 300],
   ['source', 'Zdroj', 63],
 ] as const;

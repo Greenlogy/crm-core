@@ -2237,3 +2237,176 @@ a.tab {
   background: var(--surface-muted);
   border-radius: var(--radius-md);
 }
+
+/* --- E-maily (F4, dizajn 37) --- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.modal {
+  width: min(860px, 100%);
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-pop);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.modal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.modal-foot .caption {
+  flex: 1 1 auto;
+}
+.mail-grid {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.mail-label {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.mail-body {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  min-height: 220px;
+  resize: vertical;
+}
+.mail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mail-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+}
+.mail-chip-link {
+  background: var(--info-tint);
+  color: var(--info);
+}
+.mail-sig {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+.mail-sig-photo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.mail-sig-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+.mail-sig-text {
+  flex: 1 1 auto;
+  border-left: 3px solid var(--brand);
+  padding-left: 12px;
+}
+.mail-sig-name {
+  color: var(--brand-text);
+  font-weight: 600;
+  font-size: 14px;
+}
+.mail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mail-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mail-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.mail-in {
+  border-left: 3px solid var(--brand);
+}
+.mail-item-head {
+  font: inherit;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 12px;
+}
+.mail-item-title {
+  font-weight: 500;
+  font-size: 13px;
+}
+.mail-item-body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mail-text {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+@media (max-width: 640px) {
+  .mail-grid {
+    grid-template-columns: 1fr;
+  }
+}

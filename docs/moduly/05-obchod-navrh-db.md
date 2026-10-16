@@ -799,8 +799,17 @@ Nič z toho sa nerobí teraz; až pri fáze F4.
    1. Vytvoriť projekt „greenlogy-crm“ (v organizácii greenlogy.com).
    2. APIs & Services → Library → zapnúť **Gmail API**.
    3. IAM & Admin → Service Accounts → **Create service account** „crm-gmail“. Žiadne roly v projekte nepridávať.
-   4. Pri servisnom účte → Keys → Add key → **JSON**. Súbor sa stiahne. Ak to zakáže politika organizácie (`iam.disableServiceAccountKeyCreation`), treba pre projekt výnimku.
+   4. Pri servisnom účte → Keys → Add key → **JSON**. Súbor sa stiahne. Ak to zakáže politika organizácie (`iam.disableServiceAccountKeyCreation`), postupujte podľa bodu 1a.
    5. Opísať **Unique ID** (Client ID, číslo) servisného účtu.
+
+   **1a. Ak organizácia blokuje vytváranie kľúčov** (hláška „Service account key creation is disabled“ – pravidlo `iam.disableServiceAccountKeyCreation`, v nových organizáciách Google ho zapína predvolene). Výnimka **iba pre projekt CRM**, pravidlo pre zvyšok organizácie ostáva:
+   1. Účet správcu potrebuje rolu **Organization Policy Administrator** (`roles/orgpolicy.policyAdmin`) na úrovni **organizácie**: IAM & Admin → IAM → v hornom výbere zvoliť organizáciu greenlogy.com → Grant access → účet správcu → rola „Organization Policy Administrator“ → Save. (Rolu má iba správca organizácie; po vytvorení kľúča ju môžete odobrať.)
+   2. V hornom výbere zvoliť **projekt greenlogy-crm** (nie organizáciu) → IAM & Admin → **Organization Policies**.
+   3. Vyhľadať „**Disable service account key creation**“ (`iam.disableServiceAccountKeyCreation`; ak je tam aj „managed“ verzia `iam.managed.disableServiceAccountKeyCreation`, upraviť tú, ktorá je vynútená).
+   4. **Manage policy** → Policy source: **Override parent's policy** → Rules: **Add a rule** → Enforcement: **Off** → **Set policy**. Prejavenie trvá zvyčajne do 2 minút.
+   5. Vytvoriť kľúč JSON podľa bodu 4.
+   6. Odporúčanie: pravidlo pre projekt znova zapnúť (Manage policy → Inherit parent's policy → Set policy). Vytvorený kľúč funguje ďalej; pri ročnej výmene kľúča sa výnimka zopakuje.
+   - Rovnako cez `gcloud` (Cloud Shell, ako správca): `gcloud resource-manager org-policies disable-enforce iam.disableServiceAccountKeyCreation --project=greenlogy-crm` a po vytvorení kľúča `gcloud resource-manager org-policies delete iam.disableServiceAccountKeyCreation --project=greenlogy-crm` (projekt znova dedí pravidlo organizácie).
 2. **Google Admin** (admin.google.com):
    1. Security → Access and data control → **API controls** → **Manage Domain Wide Delegation** → Add new.
    2. Client ID = číslo z bodu 1.5; OAuth scopes (presne, oddelené čiarkou):
@@ -1482,3 +1491,79 @@ F2 je uzavretá (commit `d6ab0a9`). F3 podľa častí 1.7, 1.10, 4, 5 a zadania 
 2. **WAF na Ostrom** – zapísané do úloh pred Ostrým (STAV). Na ochranu dôkazov odporúčam R2 **bucket lock** (súbory v `ponuky/`, `potvrdenia/`, `podpisane/` nemožno prepísať ani zmazať).
 3. **Doplnky z predošlej správy sú v `0040`, nie v `0039`** (0039 už bola na `dev`): predvolené práva (`ALTER DEFAULT PRIVILEGES` – test `checks_predvolene_prava.sql` a D8), koeficient VIWA z programu cenníka (D1, zmena odhadu aditívu ho nemení), schválenie nižšej zmluvnej pokuty (D7).
 4. **Hlásenie chýbajúcej hranice** (Peter, test na dev: ponuka manažéra založená pred doplnením odhadu portfólia): pri manažérovi „chýba odhad portfólia (hranica manažéra) – doplňte ho v cenách dňa a ponuku prepočítajte“, pri obchodníkovi „chýba cena pre obchodníka – doplňte ceny dňa a ponuku prepočítajte“ (`offer_variant_values` v `0041`, test D9). Ponuka si ceny fixuje k dátumu verzie – po doplnení cien dňa ju treba prepočítať.
+
+## 28. Plán F4 – e-maily z CRM cez Gmail (na schválenie, 15. 10. 2026)
+
+F3 je uzavretá (commit `3228296`). F4 podľa častí 1.9, 1.10 (e-maily), 3 (Gmail) a zadania 8; obrazovka 37, profil používateľa, Nastavenia → Šablóny e-mailov.
+
+### 28.1 Predpoklady (Peter)
+
+1. Google Workspace podľa časti 3.7: projekt v Google Cloud, Gmail API, servisný účet `crm-gmail`, kľúč JSON, delegovanie na doménu s oprávneniami `gmail.send` a `gmail.readonly`, schránka `crm@greenlogy.com`.
+2. Cloudflare: `wrangler secret put GOOGLE_SA_KEY` (Test), na Teste `MAIL_ALLOWLIST` (adresy mimo @greenlogy.com, na ktoré smie Test posielať); nový Cron `*/5 * * * *` (kontrola odpovedí a fronta) – vo `wrangler.toml`.
+
+### 28.2 Migrácia `0042_emaily`
+
+- `app_user`: `gmail_enabled` (pilot, mení admin), profil do podpisu – `mobile`, `photo` (bytea do 300 kB) a `linkedin_url` (telefón a funkcia už sú z `0039`).
+- `email_thread`, `email_message`, `email_outbox`, `gmail_mailbox_state`, `mailbox_access_log` podľa 1.9 (denník čítania iba pridávanie, nemení sa ani nemaže); `email_template_version` podľa 1.10 (verzie ako pri šablónach ponúk; mení admin a Marketing) s prvými verziami SK (EN návrh): ponuka dodávka / výkup / VIWA, potvrdenie akceptácie, pripomienka platnosti, voľný e-mail.
+- `gmail_thread_allowed(schránka, thread_id)` – jediná kontrola v databáze, či vlákno patrí CRM a schránke (volá ju `gmailRead` pred každým čítaním); zápis do denníka čítania.
+- Odoslanie ponuky e-mailom: kanál `crm` (už v `offer_send_channel`) – v jednej transakcii stav Odoslaná, PDF, odkaz a záznam e-mailu; ak Gmail odmietne, transakcia sa vráti a ponuka ostane Pripravená.
+- Koncept pripomienky platnosti v nočnom behu: 2 pracovné dni pred koncom platnosti, iba SPOT a VIWA (odpoveď 12) – odošle ho obchodník jedným klikom.
+- Upozornenia `ponuka_odpoved`, `ponuka_pripomienka`, `gmail_chyba`; RLS: vlákna a správy podľa obchodu / zákazníka, denník čítania iba admin; audit.
+- Testy séria E: denník čítania sa nedá meniť, `gmail_thread_allowed` odmietne cudzie vlákno a cudziu schránku, fronta, pripomienka (pracovné dni, iba SPOT/VIWA), RLS, šablóny (povolené premenné).
+
+### 28.3 Kód
+
+- `api/src/gmail.ts`: token cez `jose` (JWT RS256, oprávnenia `gmail.send` + `gmail.readonly`, iba pre aktívneho používateľa @greenlogy.com so zapnutým Gmailom), `gmailSend` (MIME: HTML + text, PDF ponuky v prílohe, fotka podpisu `cid:`, bez sledovacích pixelov, vo vlákne `In-Reply-To` / `References`; na Teste iba @greenlogy.com a `MAIL_ALLOWLIST`), **`gmailRead`** – jediné miesto čítania (`threads.get`, `messages.get`, `attachments.get`), pred volaním `gmail_thread_allowed`, každé čítanie do denníka; nikdy `list`, `search` ani `history.list`. Kontrola v repozitári (skript `api/scripts/check-gmail.mjs` v `npm run typecheck`): žiadny iný súbor nevolá čítanie Gmail API a `gmailRead` odmietne `list` / `q`.
+- Cron `*/5`: sledované vlákna (`watch_until` ≥ dnes – aktivita za 30 dní) → `threads.get` (metadata) → nové správy `messages.get` → `email_message` (vyčistené HTML cez HTMLRewriter – bez skriptov, štýlov, rámcov, obrázkov z webu a `javascript:` odkazov; prílohy iba zoznam), upozornenie vlastníkovi; fronta `email_outbox` (potvrdenie akceptácie zákazníkovi do vlákna ponuky, e-mail schvaľovateľom z `crm@`), 3 pokusy; chyba schránky → `gmail_mailbox_state`, po 3 chybách upozornenie adminom.
+- API: `/emails` (koncept, odoslať, vlákno, príloha na stiahnutie cez `gmailRead`), `/me/profile` (fotka, telefóny, LinkedIn, náhľad podpisu), `/settings/email-templates`, `/settings/gmail-check` (token + iba profil schránky).
+- Obrazovky: 37 nový e-mail (z editora ponuky „Odoslať e-mailom“ s odkazom a PDF, z karty obchodu a zákazníka voľný e-mail, šablóna, úprava textu, podpis z profilu, koncept), časová os obchodu a zákazníka s e-mailmi a odpoveďami, profil používateľa, Nastavenia → Šablóny e-mailov, Nastavenia → Používatelia (Gmail zapnutý – pilot), Audit (filter „Čítanie schránok“).
+
+### 28.4 Otázky k F4
+
+1. **Google Workspace (28.1):** kedy bude pripravený servisný účet, delegovanie a `crm@greenlogy.com`? Kód a testy viem urobiť skôr (lokálne bez Gmailu), skutočné odoslanie až s kľúčom.
+2. **Text dnešného e-mailu s ponukou** (predvolená šablóna podľa zadania 8): pošlete mi ho? Inak vezmem text z návrhu 37 ako návrh na úpravu na obrazovke šablón.
+3. **Pripomienka platnosti:** zadanie 8 hovorí „deň pred koncom“, odpoveď 12 „2 pracovné dni pred koncom, iba SPOT a VIWA“. **Odporúčam odpoveď 12.** Súhlas?
+4. **Potvrdenie akceptácie zákazníkovi, keď obchodník ešte nemá zapnutý Gmail (pilot):** odoslať z `crm@greenlogy.com` s odpoveďou na obchodníka (Reply-To), alebo neposielať? **Odporúčam `crm@` s Reply-To.**
+5. **E-mailom z `crm@` posielať iba** novú žiadosť o schválenie schvaľovateľom (tabuľka 1.14); ostatné upozornenia ostávajú iba v zvončeku. Súhlas?
+6. **Fotka do podpisu:** v databáze (do 300 kB, ako obrázky PDF). Súhlas?
+7. **`MAIL_ALLOWLIST` na Teste:** okrem @greenlogy.com ktoré adresy (napr. vaša súkromná na skúšku)?
+
+### 28.5 Odpovede (Peter, 16. 10. 2026) – plán F4 schválený
+
+1. Google Workspace a `crm@greenlogy.com` sú pripravené; kód a testy hneď. Do 3.7 doplnený bod 1a (výnimka z `iam.disableServiceAccountKeyCreation` iba pre projekt CRM).
+2. Šablóna e-mailu s ponukou podľa dnešného e-mailu obchodníkov (predmet „Cenová ponuka «číslo ponuky» – «názov zákazníka»“, «oslovenie», «zhrnutie variantov», «platnosť», «odkaz na ponuku», «podpis»). «oslovenie» je pole pri kontakte (predvolene „Dobrý deň“, obchodník ho zmení); «zhrnutie variantov» predvyplní CRM (napr. „FIX na rok 2027 a SPOT + 8,00 €/MWh“), obchodník ho môže upraviť. SK platné, EN návrh.
+3. Koncept pripomienky platnosti 2 pracovné dni pred koncom, iba SPOT a VIWA (zadanie 8 opravené).
+4. Potvrdenie akceptácie zákazníkovi: s zapnutým Gmailom zo schránky obchodníka do vlákna ponuky, inak z `crm@greenlogy.com` s Reply-To na obchodníka; vždy s PDF potvrdenia uloženým pri akceptácii.
+5. Z `crm@`: schvaľovateľom nová žiadosť o schválenie; obchodníkovi akceptácia zákazníkom a výsledok jeho žiadosti. Ostatné iba zvonček.
+6. Fotka do podpisu v DB do 300 kB, pri nahratí orezaná na štvorec a zmenšená; mení ju používateľ sám alebo admin.
+7. `MAIL_ALLOWLIST` na Teste: Petrova súkromná adresa na skúšku – iba ako secret, nie v kóde ani v dokumentoch.
+8. **Odoslanie ponuky e-mailom – odolnosť:** najprv záznam „odosiela sa“ s jednorazovým kľúčom, potom odoslanie, potom ID správy z Gmailu a stav Odoslaná. Ak sa po odoslaní nepodarí dokončiť zápis, ďalší beh fronty / nočná kontrola nájde ponuky „odosiela sa“ a podľa ID správy ich dokončí, nikdy neodošle znova. Test.
+
+## 29. F4 – krok 1: `0042_emaily` (overená nanečisto 16. 10. 2026)
+
+- **Profil a podpis:** `app_user.gmail_enabled` (pilot, zapína admin), `mobile`, `linkedin_url` (iba `https://…linkedin.com/…`); `user_photo` (do 300 kB, PNG/JPEG, odtlačok; mení sám alebo admin – RLS; bez auditu riadkov); `user_profile_set`, `email_signature`, `user_photo_get`. `contact.salutation` – «oslovenie», prázdne = „Dobrý deň“ (EN „Dear Sir or Madam“).
+- **Šablóny e-mailov** `email_template_version` (ako šablóny ponúk): `ponuka_dodavka / _vykup / _viwa`, `potvrdenie_akceptacie`, `pripomienka_platnosti`, `volny`; SK platné, EN návrh; mení admin a tím Marketing (`crm_email_template_editor`), platná sa nemení, `email_template_publish`. Kontrola premenných, «podpis» povinný, odkaz a podpis nie v predmete. Pripomienka odkaz neobsahuje (v DB je iba odtlačok) – odkazuje na pôvodný e-mail.
+- **Vlákna a správy:** `email_thread` (schránka; `NULL` = crm@; väzba na obchod / firmu / kontakt / ponuku; `watch_until`), `email_message` (stavy koncept, v rade, odosiela sa, odoslaný, chyba, prijatý; `send_key`, `pending`; po odoslaní sa nemení; telo nejde do auditu). Zápis iba funkciami; RLS podľa obchodu / zákazníka a schránky, koncept vidí iba autor (koncept pripomienky vlastník schránky).
+- **Odoslanie (odpoveď 8):** `email_compose_offer` (predvyplnenie, zhrnutie variantov `offer_variants_summary_text`, adresát) → `email_draft_save` → `email_send_prepare(id, kľúč, PDF, odtlačok odkazu)` (kontrola ako pri odoslaní, `fresh = false` pri rovnakom kľúči – kód neodošle znova; doplní «platnosť») → Gmail → `email_send_recorded` (ID správy a vlákna hneď, samostatne) → `email_send_complete` (ponuka Odoslaná kanálom `crm`, PDF, šablóna, odkaz; vlákno sa sleduje 30 dní). Počas odosielania je ponuka zamknutá (`offer_email_lock`). Ak sa ponuka nedá dokončiť, e-mail ostane Odoslaný a autor + admin dostanú upozornenie `email_chyba`. Gmail odmietol → `email_send_failed` (koncept s chybou). `email_pending_recover` (beh na pozadí): s ID dokončí, bez ID po 15 min Chyba + upozornenie, **nikdy neodošle znova**; obchodník po kontrole Odoslaných vráti do konceptu (`email_retry`). `offer_mark_sent` rozdelená na `offer_send_check` + `offer_mark_sent_apply` (správanie rovnaké; kanál `crm` ručne nejde).
+- **Čítanie Gmailu:** `gmail_read_authorize(schránka, vlákno, správa, metóda)` – jediná kontrola: iba `threads.get` / `messages.get` / `attachments.get`, iba vlákno CRM v danej schránke, crm@ sa nečíta; beh na pozadí iba `threads.get` sledovaného vlákna, používateľ iba známu správu vo vlákne, ktoré vidí. Každé povolené čítanie → `mailbox_access_log` (nemení sa ani nemaže, ani vlastník; vidí admin). `email_watch_threads`, `email_message_received` (raz podľa ID; predĺži sledovanie, upozornenie `ponuka_odpoved`), `email_thread_checked` (3 chyby schránky → `gmail_chyba` adminom raz; zmazané vlákno sa prestane sledovať).
+- **Fronta:** potvrdenie akceptácie po uložení PDF potvrdenia (`email_confirmation_queue`): so zapnutým Gmailom zo schránky obchodníka do vlákna ponuky, inak z crm@ s Reply-To; zrušená akceptácia sa neodošle; `email_queue_claim`. Interné e-maily z crm@ (`email_outbox` podľa upozornení `schvalenie_nove`, `schvalenie_rozhodnutie`, `ponuka_akceptovana`): `email_outbox_claim`, `email_outbox_result`.
+- **Pripomienka platnosti** v nočnom behu obchodov (`deal_daily_run_at`): ponuka bez FIX / kombinácie / cenníka so SPOT alebo VIWA, od 2. pracovného dňa pred koncom platnosti, raz; koncept v schránke obchodníka + upozornenie `ponuka_pripomienka`.
+- Testy séria E (E0–E8, `checks_emaily.sql`), mutácie: čítanie na pozadí, idempotencia kľúča, neisté odoslanie, zámok ponuky, denník, pripomienka pri FIX, zhrnutie, kľúč pri zápise ID – všetky zachytené. `down` vráti schému zhodnú s 0041.
+- Poznámka pre kód: kód nahrádza «odkaz na ponuku» a «podpis» až pri odoslaní (token odkazu sa neukladá); z uložených odpovedí zákazníka treba odkaz s tokenom odstrániť (citovaný pôvodný e-mail).
+
+### 29.1 `0043_emaily_doplnky` (Peter 16. 10., body 1–4; `0042` už bola na `dev`)
+
+1. **Čítanie Gmailu** – zoznam povolených operácií je v databáze (`gmail_read_authorize`), nie iba v kóde: iba `threads.get` (beh na pozadí, sledované vlákno) a `messages.get` (používateľ, známa správa vo viditeľnom vlákne), formát iba `minimal` / `metadata` / `full`. `attachments.get` a `raw` sú zakázané funkciou aj obmedzením stĺpcov denníka (`method`, nový `format`). `gmail.ts` posiela iba tieto hodnoty. Test E4 (attachments.get, raw), mutácie zachytené dvakrát (funkcia aj obmedzenie). Prílohy z odpovedí sa ukladajú iba ako zoznam (názov, typ, veľkosť).
+2. Pripomienka nie pri FIX / kombinácii / cenníku – súhlas (bez zmeny).
+3. Adresát potvrdenia: posledný adresát e-mailu s ponukou, inak kontaktná osoba, inak sa neposiela – súhlas (bez zmeny).
+4. **Ručná akceptácia:** `offer_acceptance.send_confirmation` (predvolene `true`); `offer_acceptance_confirmation_off(id)` volá kód pri vypnutej voľbe pred uložením PDF potvrdenia (iba ručná, do 10 minút, kto smie upravovať ponuku); zapíše `potvrdenie_neodoslane` do časovej osi; `email_confirmation_queue` potvrdenie nezaradí. Test E7.
+
+## 30. F4 – krok 2: API, beh na pozadí a obrazovky (16. 10. 2026)
+
+- **Gmail (`api/src/gmail/`):** `endpoints.ts` – jediné miesto adries Gmail API (čítanie iba `threads.get` / `messages.get` vo formáte minimal / metadata / full, odoslanie `messages.send`); `gmail.ts` – token servisného účtu (`jose`, RS256) zvlášť pre schránku a oprávnenie (`gmail.send` / `gmail.readonly`), `gmailSend` (na Teste iba @greenlogy.com a `MAIL_ALLOWLIST`), **`gmailRead` – jediné čítanie**, pred ním `gmail_read_authorize` (denník); `mime.ts` – skladanie správy (text + HTML, fotka podpisu `cid:`, PDF, bez sledovacích prvkov, hlavičky bez vloženia ďalších) a spracovanie prijatej správy; `deliver.ts` – odoslanie v potvrdených krokoch (odosiela sa → Gmail → ID → dokončenie). Kontrola `api/scripts/check-gmail.mjs` (v `npm run typecheck`): adresa Gmailu iba v `endpoints.ts`, volanie iba v `gmail.ts`, nikde list, search, history, attachments, watch ani `raw`.
+- **Prijatá správa (Peter 16. 10.):** z formátu `full` sa časti s prílohami – názov súboru, `attachmentId`, `Content-Disposition: attachment`, `inline` s názvom, `Content-ID`, iný typ než text – preskočia **bez dekódovania**; ukladá sa iba text (text/plain, inak text z HTML bez skriptov, štýlov a obrázkov) a hlavičky vlákna (odosielateľ, adresáti, predmet, Message-ID, čas). Odkaz na stránku ponuky s tokenom sa z citovaného textu nahradí „[odkaz na ponuku]“. Testy `api/test/gmail.test.ts` (`npm test`, 11 testov; neplatné base64 v prílohách dokazuje, že sa obsah ani nečíta; mutácie pravidiel zachytené).
+- **Beh na pozadí** (`email-jobs.ts`, Cron `*/5 * * * *`): `email_pending_recover` → fronta potvrdení akceptácie (`email_queue_claim` → `deliver`) → interné e-maily z crm@ (`email_outbox_claim`, odkaz do CRM `CRM_URL`) → sledované vlákna (`threads.get`, `full`) → `email_message_received`, `email_thread_checked`. Do logu iba počty.
+- **API (`routes/emails.ts`):** predvyplnenie k ponuke a voľného e-mailu, koncepty, odoslanie (PDF a odkaz sa pripravia pred „odosiela sa“, k ponuke sa zapíšu až po odoslaní; `send_key` z prehliadača – dvojklik neodošle znova), návrat po chybe, e-maily obchodu / firmy / kontaktu, profil a fotka (štvorec 64–1024 px, do 300 kB), šablóny e-mailov, overenie Gmailu (iba vydanie tokenu – schránka sa nečíta), denník čítania. Ručná akceptácia: `send_confirmation`. Používatelia: `gmail_enabled`. Kontakt: `salutation`.
+- **Obrazovky:** 37 Nový e-mail (z ponuky „Odoslať e-mailom“, voľný e-mail z karty obchodu / firmy / kontaktu, koncept pripomienky jedným klikom), karta „E-maily a odpovede“ na obchode, firme a kontakte, Môj profil (`/profil`; admin `/profil/:id`), Nastavenia → Šablóny e-mailov (admin a Marketing) a Čítanie schránok, Používatelia → Gmail (pilot) a overenie, oslovenie pri kontakte, voľba potvrdenia pri ručnej akceptácii. „Odoslané mimo CRM“ ostáva pre ponuky odovzdané inak.
+- Lokálne overené s `ENVIRONMENT=lokal`, `GMAIL_FAKE=1` (bez Google): odoslanie ponuky (stav Odoslaná, kanál crm, PDF, odkaz, platnosť), opakovanie s rovnakým kľúčom (bez druhého odoslania), potvrdenie akceptácie do vlákna ponuky, interný e-mail z crm@, čítanie vlákna v denníku, blokovanie adresy mimo zoznamu na Teste, fotka.
+

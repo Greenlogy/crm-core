@@ -1,6 +1,7 @@
 // Karta osoby podľa docs/dizajn/obrazovky/10-karta-osoby.html (modul Zákazníci):
 // domácnosť aj kontakt vo firme. Vľavo údaje, firmy a vývoj stavu, v strede časová os, vpravo OOM, dealy, zmluvy.
 
+import { EmailList } from '../components/email';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MarketingPanel, OPT_OUT_SOURCE_LABEL, TimelineCard } from '../components/customer-f2';
@@ -118,6 +119,7 @@ export function PersonPage() {
                 ['E-mail', p.email ? <a href={`mailto:${p.email}`}>{p.email}</a> : text(null)],
                 ['Telefón', text(p.phone)],
                 ['Mobil', text(p.mobile)],
+                ['Oslovenie v e-maile', text(p.salutation ?? 'Dobrý deň (predvolené)')],
                 ['Adresa', text(p.address)],
                 ['Pozícia', text(p.position)],
                 ['Vlastník', owner],
@@ -186,6 +188,9 @@ export function PersonPage() {
 
         <div className="col-mid">
           <TimelineCard kind="person" id={p.id} items={p.timeline} canAdd={p.can_edit} onAdded={reload} />
+          <Card title="E-maily a odpovede">
+            <EmailList query={`person_id=${p.id}`} source={{ personId: p.id }} />
+          </Card>
         </div>
 
         <div className="col-right">

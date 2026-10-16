@@ -13,10 +13,12 @@ export const SETTINGS_SECTIONS = [
   { path: 'parovanie-sadzieb', label: 'Párovanie sadzieb' },
   { path: 'cenove-parametre', label: 'Cenové parametre', approver: true },
   { path: 'sablony-ponuk', label: 'Šablóny ponúk' },
+  { path: 'sablony-emailov', label: 'Šablóny e-mailov', marketing: true },
   { path: 'preklady-importov', label: 'Preklady importov' },
   { path: 'vlastne-polia', label: 'Vlastné polia' },
   { path: 'pipelines', label: 'Pipelines a stage' },
   { path: 'audit', label: 'Audit' },
+  { path: 'citanie-schranok', label: 'Čítanie schránok' },
   { path: 'nocny-beh', label: 'Nočný beh', jobs: true },
 ] as const;
 
@@ -24,12 +26,14 @@ export function SettingsLayout() {
   const me = useMe();
   const location = useLocation();
   const section = location.pathname.split('/')[2] ?? '';
-  if (!me.is_admin && !me.approves_prices && !me.can_see_job_runs) {
+  const marketing = me.team_code === 'marketing';
+  if (!me.is_admin && !me.approves_prices && !me.can_see_job_runs && !marketing) {
     return <div className="error-box" role="alert">Nastavenia môže otvoriť iba admin.</div>;
   }
   // Bez admina iba povolené sekcie: Cenové parametre („schvaľuje ceny“), Nočný beh (Nákup)
   const allowed = (s: (typeof SETTINGS_SECTIONS)[number]) =>
-    me.is_admin || ('approver' in s && s.approver && me.approves_prices) || ('jobs' in s && s.jobs && me.can_see_job_runs);
+    me.is_admin || ('approver' in s && s.approver && me.approves_prices) || ('jobs' in s && s.jobs && me.can_see_job_runs) ||
+    ('marketing' in s && s.marketing && marketing);
   const sections = SETTINGS_SECTIONS.filter(allowed);
   if (!me.is_admin && !sections.some((s) => s.path === section)) {
     return <Navigate to={`/nastavenia/${sections[0].path}`} replace />;
@@ -48,7 +52,11 @@ export function SettingsLayout() {
             ? 'Mení admin a obchodný riaditeľ. Každá zmena ide do auditu.'
             : section === 'nocny-beh'
               ? 'Iba čítanie – vidí admin a Nákup.'
-              : 'Mení iba admin. Každá zmena ide do auditu.'}
+              : section === 'sablony-emailov'
+                ? 'Mení admin a Marketing. Každá zmena ide do auditu.'
+                : section === 'citanie-schranok'
+                  ? 'Každé čítanie schránky cez Gmail – iba čítanie, nedá sa zmeniť ani zmazať.'
+                  : 'Mení iba admin. Každá zmena ide do auditu.'}
         </div>
       </nav>
       <div className="settings-body">
