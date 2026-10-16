@@ -2427,3 +2427,52 @@ a.tab {
   flex-direction: column;
   align-items: stretch;
 }
+
+/* --- Zmluvy k obchodom (F5, dizajn 38, 40) --- */
+.ban-ok {
+  background: var(--positive-tint);
+  color: var(--positive);
+}
+.input-tbl td {
+  vertical-align: middle;
+}
+.input-label {
+  width: 38%;
+  color: var(--ink-muted);
+}
+.input-act {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.input-missing td {
+  background: var(--warning-tint);
+}
+.input-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.input-main,
+.input-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.input-tbl {
+  width: 100%;
+  table-layout: fixed;
+}
+.input-tbl td {
+  overflow-wrap: anywhere;
+}
+.input-act {
+  width: 110px;
+}
+@media (max-width: 900px) {
+  .input-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

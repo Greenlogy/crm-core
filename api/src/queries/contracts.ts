@@ -8,7 +8,8 @@ import type { Sql } from '../db';
 export const CONTRACT_PAGE_SIZE = 50;
 export const CONTRACT_STATES = ['v_priprave', 'podpisana', 'ucinna', 'skoncena', 'odmietnuta', 'neuspesna'] as const;
 export const CONTRACT_TYPES = ['dodavka_domacnost', 'dodavka_firma_nn', 'dodavka_firma_vn', 'vykup', 'viwa'] as const;
-export const CONTRACT_FLAGS = ['chyba_cena', 'kontrola_importu', 'sprolongovane_bez_ceny', 'konci_do_4_mesiacov', 'pod_hranicou_bez_vynimky', 'nad_30_mwh', 'objem_xm'] as const;
+export const CONTRACT_FLAGS = ['chyba_cena', 'kontrola_importu', 'sprolongovane_bez_ceny', 'konci_do_4_mesiacov', 'pod_hranicou_bez_vynimky', 'nad_30_mwh', 'objem_xm',
+  'cena_ina_ako_v_ponuke', 'nesparovana', 'bez_obchodu'] as const;
 /** Tlačidlá zoznamu: stavy a príznaky. */
 export const CONTRACT_CHIPS = new Set<string>(['', ...CONTRACT_STATES, ...CONTRACT_FLAGS]);
 
@@ -25,8 +26,14 @@ const OVER_30 = `(k.company_id IN (SELECT s.company_id FROM small_business_volum
                                     WHERE s.state IN ('vyradit', 'nesulad')))`;
 // Objem ≠ XM Trade (0030): zmluvné množstvo sa dnes líši od plánovanej spotreby OOM z XM Trade o viac ako 5 %
 const VOLUME_XM = `(k.id IN (SELECT d.contract_id FROM contract_volume_diff(crm_today()) d WHERE d.over))`;
-/** Podmienka tlačidla príznaku: uložené príznaky z contract_flag; „Končí do 4 mesiacov“, „Nad 30 MWh“ a „Objem ≠ XM Trade“ sa počítajú. */
-const COMPUTED: Record<string, string> = { konci_do_4_mesiacov: ENDING, nad_30_mwh: OVER_30, objem_xm: VOLUME_XM };
+// Párovanie s obchodmi (0045): nespárovaná zmluva čaká na rozhodnutie; „Bez obchodu“ je rozhodnutie (filter, nie problém)
+const UNMATCHED = `(k.id IN (SELECT x.id FROM contract x WHERE x.deal_match = 'caka'))`;
+const NO_DEAL = `(k.id IN (SELECT x.id FROM contract x WHERE x.deal_match = 'bez_obchodu'))`;
+/** Podmienka tlačidla príznaku: uložené príznaky z contract_flag; „Končí do 4 mesiacov“, „Nad 30 MWh“, „Objem ≠ XM Trade“,
+ *  „Nespárovaná“ a „Bez obchodu“ sa počítajú. */
+const COMPUTED: Record<string, string> = {
+  konci_do_4_mesiacov: ENDING, nad_30_mwh: OVER_30, objem_xm: VOLUME_XM, nesparovana: UNMATCHED, bez_obchodu: NO_DEAL,
+};
 const flagCond = (f: string) => COMPUTED[f] ?? `('${f}' = ANY (k.flags))`;
 
 export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONTRACT_PAGE_SIZE) {
@@ -55,9 +62,12 @@ export async function listContracts(sql: Sql, f: ContractFilter, pageSize = CONT
              k.auto_prolong, k.customer_kind, k.customer_name, k.company_id, k.person_id, k.owner_id, k.owner_name,
              k.oom_count, k.qty_mwh, to_jsonb(k.flags) AS flags, k.org_id, g.legal_name AS org_name,
              ${sql.unsafe(ENDING)} AS ending,
+             k.deal_id, dl.name AS deal_name, kx.deal_match,
              count(*) OVER ()::int AS total
         FROM contract_v k
         JOIN org g ON g.id = k.org_id
+        JOIN contract kx ON kx.id = k.id
+        LEFT JOIN deal dl ON dl.id = k.deal_id
        WHERE ${base} AND (${chipCond})
        ORDER BY k.valid_from DESC NULLS FIRST, k.number DESC
        LIMIT ${pageSize} OFFSET ${(f.page - 1) * pageSize}`,
@@ -125,8 +135,19 @@ export async function contractCard(sql: Sql, id: string) {
            crm_approves_prices() AS can_resolve_threshold,
            (SELECT to_jsonb(s) FROM small_business_volume(greatest(crm_today(), coalesce(k.valid_from, crm_today())), k.company_id) s
              WHERE k.company_id IS NOT NULL) AS regulation_check,
-           (SELECT to_jsonb(d) FROM contract_volume_diff(greatest(crm_today(), coalesce(k.valid_from, crm_today())), k.id) d) AS volume_check
+           (SELECT to_jsonb(d) FROM contract_volume_diff(greatest(crm_today(), coalesce(k.valid_from, crm_today())), k.id) d) AS volume_check,
+           -- párovanie s obchodom (0045)
+           kx.deal_match, kx.deal_matched_at, kx.deal_match_note, mu.name AS deal_matched_by_name, dl.name AS deal_name,
+           (SELECT code FROM pipeline_stage WHERE id = dl.stage_id) AS deal_stage,
+           offer_display_number(ov) AS offer_number, chr(64 + vv.sort_order) || ' · ' || vv.name AS offer_variant, ov.id AS offer_id,
+           crm_contract_match_editor(kx) AS can_decide_deal, crm_is_admin() AS is_admin,
+           CASE WHEN kx.deal_match = 'caka' THEN contract_deal_candidates(k.id) END AS deal_candidates
       FROM contract_v k
+      JOIN contract kx ON kx.id = k.id
+      LEFT JOIN app_user mu ON mu.id = kx.deal_matched_by
+      LEFT JOIN deal dl ON dl.id = k.deal_id
+      LEFT JOIN offer_variant vv ON vv.id = kx.offer_variant_id
+      LEFT JOIN offer ov ON ov.id = vv.offer_id
       LEFT JOIN contract pk ON pk.id = k.previous_contract_id
       LEFT JOIN contract rk ON rk.id = k.related_contract_id
      WHERE k.id = ${id}`;

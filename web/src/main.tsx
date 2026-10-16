@@ -36,6 +36,8 @@ import { OfferTemplatesPage } from './pages/settings/OfferTemplatesPage';
 import { EmailTemplatesPage } from './pages/settings/EmailTemplatesPage';
 import { MailboxAccessPage } from './pages/settings/MailboxAccessPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ContractInputPage } from './pages/ContractInputPage';
+import { ContractMatchingPage } from './pages/ContractMatchingPage';
 import { PricingPage } from './pages/settings/PricingPage';
 import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
@@ -65,6 +67,8 @@ const router = createBrowserRouter([
       { path: 'oom/:id', element: <OomPage /> },
       { path: 'obchody', element: <DealsPage /> },
       { path: 'obchody/:id', element: <DealPage /> },
+      { path: 'obchody/:id/podklady', element: <ContractInputPage /> },
+      { path: 'zmluvy-k-obchodom', element: <ContractMatchingPage /> },
       { path: 'ponuky/:id', element: <OfferPage /> },
       { path: 'overenie-firmy', element: <CompanyCheckPage /> },
       { path: 'schvalovanie', element: <ApprovalsPage /> },

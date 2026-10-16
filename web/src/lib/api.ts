@@ -493,7 +493,12 @@ export type ContractListItem = {
   margin_eur?: Num;
   portfolio_stale?: boolean | null;
   balance_missing?: string | null;
+  /** párovanie s obchodom (0045) */
+  deal_id?: string | null;
+  deal_name?: string | null;
+  deal_match?: 'caka' | 'auto' | 'rucne' | 'bez_obchodu' | null;
 };
+export type DealCandidate = { deal_id: string; name: string; stage: string; accepted: boolean; eic_total: number; eic_match: number; ok: boolean };
 export type ContractList = {
   page: number;
   pageSize: number;
@@ -504,6 +509,16 @@ export type ContractList = {
 };
 
 export type ContractCard = ContractListItem & {
+  deal_matched_at: string | null;
+  deal_match_note: string | null;
+  deal_matched_by_name: string | null;
+  deal_stage: string | null;
+  offer_number: string | null;
+  offer_variant: string | null;
+  offer_id: string | null;
+  can_decide_deal: boolean;
+  is_admin: boolean;
+  deal_candidates: DealCandidate[] | null;
   op_id: string | null;
   signed_on: string | null;
   small_business: boolean;

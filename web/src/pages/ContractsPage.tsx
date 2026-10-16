@@ -224,7 +224,17 @@ export function ContractsPage() {
                           </Pill>
                         ))}
                         {k.ending && <Pill tone="warning">Končí do 4 mesiacov</Pill>}
+                        {k.deal_match === 'caka' && <Pill tone="warning">Nespárovaná</Pill>}
+                        {k.deal_match === 'bez_obchodu' && <Pill>Bez obchodu</Pill>}
                       </span>
+                      {k.deal_id && (
+                        <div className="sub">
+                          obchod{' '}
+                          <Link to={`/obchody/${k.deal_id}`} onClick={(e) => e.stopPropagation()}>
+                            {k.deal_name}
+                          </Link>
+                        </div>
+                      )}
                     </td>
                     <td>{contractPeriod(k)}</td>
                     <td className="num">{num(k.oom_count, 0)}</td>

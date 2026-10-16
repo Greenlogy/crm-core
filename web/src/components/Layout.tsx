@@ -128,6 +128,10 @@ export function Layout() {
           <Icon d={ICONS.contracts} />
           Zmluvy
         </NavLink>
+        <NavLink to="/zmluvy-k-obchodom" className={navClass}>
+          <Icon d={ICONS.contracts} />
+          Zmluvy k obchodom
+        </NavLink>
         <NavLink to="/vynimky" className={navClass}>
           <Icon d={ICONS.pricelist} />
           Výnimky z ceny

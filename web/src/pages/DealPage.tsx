@@ -93,6 +93,11 @@ export function DealPage() {
           </div>
         </div>
         <div className="head-actions">
+          {(d.stage_code === 'akceptacia' || d.stage_code === 'vyhrane') && (
+            <Link className="btn" to={`/obchody/${d.id}/podklady`}>
+              Podklady pre zmluvu
+            </Link>
+          )}
           {editable && (
             <button type="button" className="btn" onClick={() => setPanel('step')}>
               Ďalší krok
