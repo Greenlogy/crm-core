@@ -30,6 +30,8 @@ type CustomerHit = { id: string; kind: 'company' | 'person'; name: string; ico: 
 /** Nový obchod: zákazník (predvolený z overenia firmy, alebo hľadanie), pipeline, názov, zdroj, termíny. */
 export function NewDealPanel(props: {
   customer?: { id: string; kind: 'company' | 'person'; name: string };
+  estimate?: string; // predvyplnená PH (kalkulačka na Domove, F6)
+  step?: string; // predvyplnený ďalší krok (kalkulačka na Domove, F6)
   onClose: () => void;
   onSaved: (id: string) => void;
 }) {
@@ -47,8 +49,8 @@ export function NewDealPanel(props: {
   const [owner, setOwner] = useState(me.id);
   const [expected, setExpected] = useState('');
   const [supply, setSupply] = useState('');
-  const [estimate, setEstimate] = useState('');
-  const [step, setStep] = useState('');
+  const [estimate, setEstimate] = useState(props.estimate ?? '');
+  const [step, setStep] = useState(props.step ?? '');
   const [stepOn, setStepOn] = useState('');
   const save = useSave();
 

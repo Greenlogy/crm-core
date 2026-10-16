@@ -21,6 +21,7 @@ export function outboxMessage(o: OutboxItem, crmUrl: string): { subject: string;
     : o.deal_id ? `${base}/obchody/${o.deal_id}` : `${base}/upozornenia`;
   const subject = o.kind === 'schvalenie_nove' ? 'CRM: nová žiadosť o schválenie'
     : o.kind === 'schvalenie_rozhodnutie' ? 'CRM: rozhodnutie o vašej žiadosti'
+    : o.kind === 'pomoc_s_ponukou' ? 'CRM: žiadosť o pomoc s ponukou'
     : 'CRM: zákazník prijal ponuku';
   const text = [
     'Dobrý deň,',

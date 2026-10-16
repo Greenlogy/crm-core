@@ -1,5 +1,6 @@
 // Obchody – pipeline (dizajn 32; zadanie časti 3, 4 a 13). Kanban podľa štádií a zoznam s filtrami, súčty
-// pridanej hodnoty a vážená PH podľa pravdepodobnosti. Do ponúk (F2) je PH odhad zadaný na obchode.
+// pridanej hodnoty a vážená PH podľa pravdepodobnosti. PH obchodu (F6): akceptovaný variant, inak hlavný variant poslednej
+// odoslanej ponuky, inak odhad zadaný na obchode.
 // Interní aj externí obchodníci majú tú istú obrazovku; koho obchody vidia, rozhoduje databáza.
 
 import { useMemo, useState } from 'react';
@@ -13,6 +14,8 @@ import { type DealOptions, type DealRow, OUTCOME_TONE, STEP_STATE } from '../lib
 import { date, eur, num, text } from '../lib/format';
 
 type View = 'kanban' | 'zoznam';
+/** Súčty z databázy cez všetky vyhovujúce obchody (nie iba zobrazených najviac 1 000) – po štádiách (F6, 0052). */
+type StageTotal = { stage_id: string; outcome: DealRow['stage_outcome']; count: number; value_eur: string; weighted_eur: string; attention: number; lost_reasons: string[] };
 const STEP_FILTER: [string, string][] = [
   ['', 'Všetky kroky'],
   ['bez_alebo_po', 'Bez kroku alebo po termíne'],
@@ -20,6 +23,8 @@ const STEP_FILTER: [string, string][] = [
   ['bez_kroku', 'Bez ďalšieho kroku'],
   ['po_termine', 'Po termíne'],
 ];
+
+const VALUE_SOURCE = { akceptovany: 'akceptovaný variant', ponuka: 'hlavný variant ponuky', odhad: 'odhad na obchode' } as const;
 
 const money = (v: string | number | null | undefined) => (v === null || v === undefined ? '–' : `${eur(v)} €`);
 
@@ -44,7 +49,7 @@ export function DealsPage() {
     ...(q.trim().length >= 2 ? { q: q.trim() } : {}),
     closed: 'mesiac',
   });
-  const { data, error } = useApi<{ items: DealRow[] }>(activePipeline ? `/api/deals?${query}` : '/api/deals?closed=mesiac&pipeline=');
+  const { data, error } = useApi<{ items: DealRow[]; totals: StageTotal[]; truncated: boolean }>(activePipeline ? `/api/deals?${query}` : '/api/deals?closed=mesiac&pipeline=');
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params);
     if (v) p.set(k, v);
@@ -54,13 +59,16 @@ export function DealsPage() {
   };
 
   const items = data?.items ?? [];
-  const open = items.filter((d) => !d.closed_at);
+  const totals = data?.totals ?? [];
   const kpi = useMemo(() => {
-    const sum = open.reduce((s, d) => s + Number(d.value_eur ?? 0), 0);
-    const weighted = open.reduce((s, d) => s + Number(d.weighted_eur ?? 0), 0);
-    const attention = open.filter((d) => d.step_state === 'bez_kroku' || d.step_state === 'po_termine').length;
-    return { count: open.length, sum, weighted, attention };
-  }, [items]);
+    const open = totals.filter((t) => t.outcome === 'otvoreny');
+    return {
+      count: open.reduce((s, t) => s + t.count, 0),
+      sum: open.reduce((s, t) => s + Number(t.value_eur), 0),
+      weighted: open.reduce((s, t) => s + Number(t.weighted_eur), 0),
+      attention: open.reduce((s, t) => s + t.attention, 0),
+    };
+  }, [totals]);
 
   if (error) return <ErrorState error={error} />;
 
@@ -103,7 +111,7 @@ export function DealsPage() {
           value={data ? num(kpi.count, 0) : ''}
           sub={`${activePipeline?.name ?? ''}${owner === 'ja' ? ` · vlastník ${me.name}` : ''}`}
         />
-        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="súčet aktuálnych variantov" />
+        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="akceptovaný / hlavný variant, inak odhad" />
         <Kpi label="Vážená pridaná hodnota" value={data ? `${eur(kpi.weighted)} €` : ''} sub="podľa pravdepodobnosti štádia" />
         <Kpi label="Bez kroku / po termíne" value={data ? num(kpi.attention, 0) : ''} sub="zvýraznené" />
       </div>
@@ -132,14 +140,19 @@ export function DealsPage() {
             <TextInput value={q} onChange={setQ} placeholder="Hľadať obchod, firmu, IČO…" />
           </div>
         </div>
+        {data?.truncated && (
+          <div className="caption" style={{ padding: '8px 16px', color: 'var(--warning)' }}>
+            Zobrazených je prvých 1 000 obchodov – zúžte filter (vlastník, ďalší krok, hľadanie). Súčty a počty sú za všetky.
+          </div>
+        )}
         {!data || !activePipeline ? (
           <div style={{ padding: 16 }}>
             <Skeleton lines={6} />
           </div>
         ) : view === 'kanban' ? (
           <>
-            <Kanban items={items} stages={activePipeline.stages.filter((s) => s.outcome === 'otvoreny')} />
-            <ClosedThisMonth items={items} />
+            <Kanban items={items} totals={totals} stages={activePipeline.stages.filter((s) => s.outcome === 'otvoreny')} />
+            <ClosedThisMonth totals={totals} />
           </>
         ) : (
           <DealTable items={items} />
@@ -149,18 +162,18 @@ export function DealsPage() {
   );
 }
 
-function Kanban(props: { items: DealRow[]; stages: DealOptions['pipelines'][number]['stages'] }) {
+function Kanban(props: { items: DealRow[]; totals: StageTotal[]; stages: DealOptions['pipelines'][number]['stages'] }) {
   return (
     <div className="kanban">
       {props.stages.map((s) => {
         const col = props.items.filter((d) => d.stage_id === s.id);
-        const sum = col.reduce((t, d) => t + Number(d.value_eur ?? 0), 0);
+        const tot = props.totals.find((t) => t.stage_id === s.id);
         return (
           <section key={s.id} className="kanban-col" aria-label={s.name}>
             <div className="kanban-head">
               <strong>{s.name}</strong>
               <span className="caption">
-                {num(col.length, 0)} · {eur(sum)} €{s.probability !== null ? ` · ${Math.round(Number(s.probability) * 100)} %` : ''}
+                {num(tot?.count ?? 0, 0)} · {eur(tot?.value_eur ?? 0)} €{s.probability !== null ? ` · ${Math.round(Number(s.probability) * 100)} %` : ''}
               </span>
             </div>
             {col.map((d) => (
@@ -169,7 +182,9 @@ function Kanban(props: { items: DealRow[]; stages: DealOptions['pipelines'][numb
                 <div className="kanban-title">{d.name}</div>
                 <div className="caption">{text(d.customer_name)}</div>
                 <div className="kanban-meta">
-                  <span>PH {d.value_eur === null ? '–' : `≈ ${eur(d.value_eur)} €`}</span>
+                  <span title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined}>
+                    PH {d.value_eur === null ? '–' : `${d.value_source === 'odhad' ? '≈ ' : ''}${eur(d.value_eur)} €`}
+                  </span>
                   {d.step_state && d.step_state !== 'planovany' ? (
                     <Pill tone={STEP_STATE[d.step_state].tone}>{d.step_state === 'dnes' ? 'krok dnes' : STEP_STATE[d.step_state].label}</Pill>
                   ) : d.next_step_on ? (
@@ -243,7 +258,10 @@ function DealTable(props: { items: DealRow[] }) {
                 )}
               </td>
               <td>{date(d.expected_close)}</td>
-              <td className="num">{money(d.value_eur)}</td>
+              <td className="num" title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined}>
+                {money(d.value_eur)}
+                {d.value_source && d.value_source !== 'odhad' && <div className="sub">{VALUE_SOURCE[d.value_source]}</div>}
+              </td>
               <td className="num">{money(d.weighted_eur)}</td>
             </tr>
           ))}
@@ -253,21 +271,21 @@ function DealTable(props: { items: DealRow[] }) {
   );
 }
 
-function ClosedThisMonth(props: { items: DealRow[] }) {
-  const won = props.items.filter((d) => d.stage_outcome === 'vyhrany');
-  const lost = props.items.filter((d) => d.stage_outcome === 'prehrany');
+function ClosedThisMonth(props: { totals: StageTotal[] }) {
+  const won = props.totals.filter((t) => t.outcome === 'vyhrany');
+  const lost = props.totals.filter((t) => t.outcome === 'prehrany');
   const month = new Intl.DateTimeFormat('sk-SK', { month: 'long', timeZone: 'Europe/Bratislava' }).format(new Date());
   const reasons = new Map<string, number>();
-  for (const d of lost) reasons.set(d.lost_reason_label ?? 'iné', (reasons.get(d.lost_reason_label ?? 'iné') ?? 0) + 1);
+  for (const r of lost.flatMap((t) => t.lost_reasons)) reasons.set(r, (reasons.get(r) ?? 0) + 1);
   return (
     <div className="closed-month">
       <span className="kl">Uzavreté v {month.replace(/^\p{L}/u, (c) => c.toLowerCase())}</span>
       <span>
-        <Pill tone="positive">Vyhraté {won.length}</Pill>{' '}
-        <span className="caption">PH {eur(won.reduce((s, d) => s + Number(d.value_eur ?? 0), 0))} €</span>
+        <Pill tone="positive">Vyhraté {won.reduce((s, t) => s + t.count, 0)}</Pill>{' '}
+        <span className="caption">PH {eur(won.reduce((s, t) => s + Number(t.value_eur), 0))} €</span>
       </span>
       <span>
-        <Pill tone="negative">Prehraté {lost.length}</Pill>{' '}
+        <Pill tone="negative">Prehraté {lost.reduce((s, t) => s + t.count, 0)}</Pill>{' '}
         <span className="caption">{[...reasons].map(([r, n]) => `${r} ${n}`).join(' · ') || '–'}</span>
       </span>
     </div>

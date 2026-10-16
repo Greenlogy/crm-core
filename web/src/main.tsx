@@ -24,7 +24,7 @@ import { PriceListsPage } from './pages/PriceListsPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { ProgramsPage } from './pages/ProgramsPage';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
-import { MeProvider } from './lib/me';
+import { MeProvider, startPath, useMe } from './lib/me';
 import { AuditPage } from './pages/settings/AuditPage';
 import { CompanyPage } from './pages/settings/CompanyPage';
 import { CustomFieldsPage } from './pages/settings/CustomFieldsPage';
@@ -38,6 +38,7 @@ import { MailboxAccessPage } from './pages/settings/MailboxAccessPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ContractInputPage } from './pages/ContractInputPage';
 import { ContractMatchingPage } from './pages/ContractMatchingPage';
+import { HomePage } from './pages/HomePage';
 import { PricingPage } from './pages/settings/PricingPage';
 import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
@@ -51,11 +52,18 @@ function OldPersonRedirect() {
   return <Navigate to={`/osoby/${id}`} replace />;
 }
 
+/** Úvodná stránka podľa roly (Peter 16. 10.): obchodník (interný aj externý) a tím Sales_internal Domov, ostatní Zákazníci. */
+function StartRedirect() {
+  const me = useMe();
+  return <Navigate to={startPath(me)} replace />;
+}
+
 const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
-      { index: true, element: <Navigate to="/zakaznici" replace /> },
+      { index: true, element: <StartRedirect /> },
+      { path: 'domov', element: <HomePage /> },
       { path: 'zakaznici', element: <CustomersPage /> },
       { path: 'leady', element: <CustomersPage key="leady" leads /> },
       { path: 'kontakty', element: <ContactsPage /> },
@@ -105,7 +113,7 @@ const router = createBrowserRouter([
           { path: 'nocny-beh', element: <JobRunsPage /> },
         ],
       },
-      { path: '*', element: <Navigate to="/zakaznici" replace /> },
+      { path: '*', element: <StartRedirect /> },
     ],
   },
 ]);

@@ -69,12 +69,18 @@ export async function dailyContractRun(env: Env): Promise<void> {
   }
 }
 
-// Nočný beh obchodov (deal_daily_run, 0032): upozornenie v deň ďalšieho kroku (raz pre každý dátum kroku).
+// Nočný beh obchodov (deal_daily_run, 0032): upozornenie v deň ďalšieho kroku (raz pre každý dátum kroku); potom poistka PH (0052).
 export async function dailyDealRun(env: Env): Promise<void> {
   const sql = connect(env);
   try {
     const [row] = await sql<{ r: { dalsi_krok?: number; pripomienky?: number; chyba_oom_na_zmluve?: number } }[]>`SELECT deal_daily_run() AS r`;
     console.log(`Nočný beh obchodov: ďalší krok ${row?.r?.dalsi_krok ?? 0}, pripomienky ${row?.r?.pripomienky ?? 0}, OOM bez zmluvy ${row?.r?.chyba_oom_na_zmluve ?? 0}`);
+    // PH obchodov (0052): poistka – prepočet všetkých (aj PH závislá od cien dňa), rozdiely do denníka behu obchodov
+    const [ph] = await sql.begin(async (tx) => {
+      await tx`SET LOCAL statement_timeout = '300s'`;
+      return tx<{ r: { ph_prepocitane: number; ph_rozdiel: number } }[]>`SELECT deal_value_daily() AS r`;
+    });
+    console.log(`PH obchodov: prepočítané ${ph?.r?.ph_prepocitane ?? 0}, rozdiel ${ph?.r?.ph_rozdiel ?? 0}`);
   } catch (err) {
     const code = (err as { code?: string }).code ?? 'unknown';
     console.error(`Nočný beh obchodov zlyhal: ${(err as Error).name} ${code}`);

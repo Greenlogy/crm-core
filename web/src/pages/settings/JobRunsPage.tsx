@@ -23,6 +23,14 @@ const COUNTS: [string, string][] = [
   ['zakaznici', 'Prepočítaný stav zákazníka'],
 ];
 
+const DEAL_COUNTS: [string, string][] = [
+  ['dalsi_krok', 'Upozornenia na ďalší krok'],
+  ['pripomienky', 'Pripomienky platnosti ponúk'],
+  ['chyba_oom_na_zmluve', 'OOM bez zmluvy 14 dní po akceptácii'],
+  ['ph_prepocitane', 'Pridaná hodnota obchodov – prepočítané'],
+  ['ph_rozdiel', 'Pridaná hodnota obchodov – opravený rozdiel'],
+];
+
 const PRICE_COUNTS: [string, string][] = [
   ['ceny', 'Zapísané ceny dňa (BL / PL po rokoch dodávky)'],
   ['spot', '12-mesačný priemer SPOT'],
@@ -55,7 +63,7 @@ function Run({ j }: { j: JobRun }) {
   const errors = j.errors.length;
   return (
     <Card
-      title={j.job === 'ceny' ? `Ceny z Montelu k ${date(j.run_date)}` : `Beh k ${date(j.run_date)}`}
+      title={j.job === 'ceny' ? `Ceny z Montelu k ${date(j.run_date)}` : j.job === 'obchody' ? `Obchody k ${date(j.run_date)}` : `Beh k ${date(j.run_date)}`}
       aside={
         <span className="page-sub">
           {j.test_date && <Pill tone="info">ručný beh (Test)</Pill>}
@@ -72,7 +80,7 @@ function Run({ j }: { j: JobRun }) {
         </span>
       }
     >
-      <Rows rows={(j.job === 'ceny' ? PRICE_COUNTS : COUNTS).map(([k, l]) => [l, num(Number(j.result[k] ?? 0), 0)])} />
+      <Rows rows={(j.job === 'ceny' ? PRICE_COUNTS : j.job === 'obchody' ? DEAL_COUNTS : COUNTS).map(([k, l]) => [l, num(Number(j.result[k] ?? 0), 0)])} />
       {retro && retro.pocet > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="t-section-title">Cenník zapísaný spätne ({num(retro.pocet, 0)})</div>

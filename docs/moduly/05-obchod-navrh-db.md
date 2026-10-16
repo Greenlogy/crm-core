@@ -1645,6 +1645,17 @@ Podľa zadania 11, 13, návrhu časti 7 a obrazoviek 30, 32. Dva kroky, každý:
 - **Pre manažéra:** rozpad podľa obchodníkov (počet otvorených, PH, vážená PH, vyhraté v mesiaci, bez kroku / po termíne).
 - **Zoznamy:** Bez ďalšieho kroku / po termíne (filter Obchodov už je), Čaká na schválenie (Schvaľovanie), Čaká na zmluvu a Nespárované (Zmluvy k obchodom) – odkazy z Domova.
 
+**Hotové (16. 10., na Teste):**
+
+- `0049_domov_prehlady`: hlavný variant ponuky `offer_variant.is_main` (najviac jeden, inak prvý – `offer_main_variant`; označí `offer_variant_set_main` ten, kto smie upravovať obchod, aj pri odoslanej ponuke bez návratu do konceptu; `offer_new_version` ho preberie); `deal_value` (akceptovaný variant → hlavný variant poslednej odoslanej ponuky → odhad; záporná PH ostane); žiadosť o pomoc `deal_help_request` (notifikácia a e-mail z crm@ `pomoc_s_ponukou`, udalosť `pomoc_ziadost`, nie opakovane do 10 minút, poznámka do 500 znakov); Domov `trader_prices_home`, `trader_price_series` (iba cena pre obchodníka, od 1. 1. 2026 po dnes), `my_sales_terms` (minimálny aditív podľa typu predajcu, percento provízie).
+- `0050_kalkulacka_pomoc`: `calculator_fix_basis` – hranica FIX kalkulačky: odhad portfólia iba predajca typu manažér s právom vidieť maržu firmy (ako v ponuke), ostatní cena pre obchodníka; žiadosť o pomoc iba kto upravuje obchod a nie je v Sales_internal.
+- `0051_pomoc_admini`: bez aktívneho člena Sales_internal žiadosť dostanú aktívni admini (zvonček aj e-mail), v časovej osi `detail.komu` (`sales_internal` / `admini`) a počet príjemcov; príjemcovia podľa `crm_user_sees_org`.
+- `0052_ph_obchodu`: uložená PH obchodu `deal_value_cache` (RLS obchodu, aplikácia iba číta), prepočet spúšťačmi (obchod: založenie, odhad, akceptácia; ponuka: stav, odoslanie, nahradenie, zmazanie; hlavný variant; objemy OOM na obchode; rozhodnutie o výnimke), `deal_value` číta uloženú hodnotu; jadro výpočtu `offer_variant_values_core` bez kontroly prístupu (interné), `offer_variant_values` je obal s kontrolou ako predtým; nočná poistka `deal_value_daily` (po nočnom behu obchodov, rozdiely do denníka `ph_rozdiel`).
+- Meranie (lokálne, 2 000 obchodov, 3 000 ponúk, 30 obchodníkov): pred 0052 zoznam a Domov pre toho, kto vidí všetky obchody, 1,0–1,06 s; po 0052 0,15–0,29 s, externý obchodník do 0,43 s; nočná poistka 2 003 obchodov 0,63 s.
+- API: `routes/home.ts` (`GET /home`), `POST /deals/:id/help`, `POST /offer-variants/:id/main`, zoznam obchodov so súčtami z databázy cez všetky vyhovujúce obchody (`totals`, `truncated` pri limite 1 000), e-mail `pomoc_s_ponukou` v `email-jobs.ts`, poistka PH v `jobs.ts`.
+- Obrazovky: Domov (30) – dlaždice, graf, kalkulačka FIX / SPOT (záporná PH, provízia 0 €, „hranica: …“, „Vytvoriť obchod s touto cenou“), moje kroky, moje ponuky, tabuľka obchodníkov pre manažéra; úvodná stránka podľa roly; Obchody (32) – PH so zdrojom, súčty z databázy, upozornenie pri limite; karta obchodu – „Požiadať o pomoc s ponukou“, časová os; ponuka – hlavný variant; denník behov – počty behu obchodov.
+- Testy DB séria H0–H6 (`checks_domov.sql`), mutácie zachytené; test modulu 4 `checks_zmluvy_bilancia` opravuje trhové ceny všetkých rokov od 2026 (Montel načítava aj 2028+).
+
 ### 36.3 Otázky
 
 1. **Kľúč a spojenie:** pošlete mi (nie do chatu) cez `wrangler secret put MONTEL_API_KEY` pre `crm-core`; service binding na `greenlogy-montel-auth` pridám do `wrangler.toml`. Súhlas?

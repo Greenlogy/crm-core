@@ -25,6 +25,7 @@ const Icon = (props: { d: string }) => (
 );
 
 const ICONS = {
+  home: 'M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5',
   company: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1',
   leads: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
   customers: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
@@ -90,6 +91,10 @@ export function Layout() {
         </div>
 
         <div className="group-label t-group-label">Obchod</div>
+        <NavLink to="/domov" className={navClass}>
+          <Icon d={ICONS.home} />
+          Domov
+        </NavLink>
         <NavLink to="/zakaznici" className={navClass}>
           <Icon d={ICONS.company} />
           Zákazníci

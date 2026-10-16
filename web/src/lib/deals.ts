@@ -45,6 +45,7 @@ export type DealRow = {
   step_state: StepState;
   estimated_value_eur: string | null;
   value_eur: string | null;
+  value_source: 'akceptovany' | 'ponuka' | 'odhad' | null; // F6: odkiaľ je PH (deal_value)
   weighted_eur: string | null;
   lost_reason_code: string | null;
   lost_reason_label: string | null;
@@ -89,6 +90,7 @@ export type DealContact = {
 
 export type DealCard = DealRow & {
   can_edit: boolean;
+  can_request_help: boolean; // F6: upravuje obchod a nie je v Sales_internal
   can_change_owner: boolean;
   can_reopen: boolean;
   customer_owner_id: string | null;

@@ -105,6 +105,8 @@ REVOKE INSERT, UPDATE ON user_signature, user_signature_image FROM crm_app;
 REVOKE INSERT, UPDATE ON deal_contract_input FROM crm_app;
 -- 0047: 12-mesačný SPOT priemer zapisuje iba denný beh cien (market_price_daily_run)
 REVOKE INSERT, UPDATE ON spot_average_daily FROM crm_app;
+-- 0052: uloženú pridanú hodnotu obchodu prepočítava iba databáza (spúšťače, nočný beh)
+REVOKE INSERT, UPDATE ON deal_value_cache FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

@@ -48,7 +48,8 @@ function code(b: Body, key: string, label: string): string | null | undefined {
   return v;
 }
 
-/** Spoločné stĺpce zoznamu a karty: zákazník, štádium, ďalší krok, PH (do F2 odhad), výstrahy Finstatu. */
+/** Spoločné stĺpce zoznamu a karty: zákazník, štádium, ďalší krok, PH, výstrahy Finstatu.
+ *  PH (F6, 0049, uložená 0052): akceptovaný variant → hlavný variant poslednej odoslanej ponuky → odhad na obchode. */
 const DEAL_COLUMNS = (sql: Sql) => sql`
   d.id, d.name, d.company_id, d.person_id, d.org_id,
   coalesce(c.name, nullif(btrim(concat_ws(' ', p.first_name, p.last_name)), '')) AS customer_name,
@@ -64,8 +65,9 @@ const DEAL_COLUMNS = (sql: Sql) => sql`
        WHEN d.next_step_on = crm_today() THEN 'dnes'
        ELSE 'planovany' END AS step_state,
   d.estimated_value_eur,
-  d.estimated_value_eur AS value_eur,
-  round(coalesce(d.estimated_value_eur, 0) * coalesce(st.probability, 0), 2) AS weighted_eur,
+  dv.value_eur,
+  dv.source AS value_source,
+  round(coalesce(dv.value_eur, 0) * coalesce(st.probability, 0), 2) AS weighted_eur,
   d.lost_reason_code, lr.label AS lost_reason_label, d.lost_note,
   d.previous_contract_id, pk.number AS previous_contract_number,
   d.stage_changed_at, d.closed_at, d.created_at, d.note,
@@ -81,7 +83,8 @@ const DEAL_FROM = (sql: Sql) => sql`
   LEFT JOIN app_user u ON u.id = d.owner_id
   LEFT JOIN lookup_value src ON src.list_code = 'zdroj_obchodu' AND src.code = d.source_code AND (src.org_id IS NULL OR src.org_id = d.org_id)
   LEFT JOIN lookup_value lr ON lr.list_code = 'dovod_prehry' AND lr.code = d.lost_reason_code AND (lr.org_id IS NULL OR lr.org_id = d.org_id)
-  LEFT JOIN contract pk ON pk.id = d.previous_contract_id`;
+  LEFT JOIN contract pk ON pk.id = d.previous_contract_id
+  LEFT JOIN deal_value_cache dv ON dv.deal_id = d.id`;
 
 // Číselníky a pipelines pre formuláre (zdroj, dôvod prehry, roly kontaktu, štádiá)
 deals.get('/deals/options', async (c) => {
@@ -111,6 +114,9 @@ deals.get('/deals/owners', async (c) => {
   return c.json(items);
 });
 
+/** Najviac obchodov v zozname a kanbane; súčty sú vždy cez všetky vyhovujúce (F6). */
+const LIST_LIMIT = 1000;
+
 // Zoznam a kanban (obrazovka 32). Filtre: pipeline, vlastník, štádium, zdroj, ďalší krok, uzavreté, hľadanie.
 deals.get('/deals', async (c) => {
   const sql = c.var.sql;
@@ -123,9 +129,7 @@ deals.get('/deals', async (c) => {
   const closed = q.closed === 'mesiac' ? 'mesiac' : q.closed === 'vsetky' ? 'vsetky' : 'otvorene';
   const text = (q.q ?? '').trim().slice(0, 100);
   const like = `%${text.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-  const items = await sql`
-    SELECT ${DEAL_COLUMNS(sql)}
-    ${DEAL_FROM(sql)}
+  const where = sql`
      WHERE (${pipeline}::uuid IS NULL OR d.pipeline_id = ${pipeline})
        AND (${owner}::uuid IS NULL OR d.owner_id = ${owner})
        AND (${stage}::uuid IS NULL OR d.stage_id = ${stage})
@@ -141,10 +145,26 @@ deals.get('/deals', async (c) => {
              WHEN 'bez_alebo_po' THEN d.closed_at IS NULL AND (d.next_step_on IS NULL OR d.next_step_on < crm_today())
              ELSE true END
        AND (${text} = '' OR d.name ILIKE ${like} OR c.name ILIKE ${like} OR c.ico LIKE ${text.replace(/\s/g, '') + '%'}
-            OR concat_ws(' ', p.first_name, p.last_name) ILIKE ${like})
+            OR concat_ws(' ', p.first_name, p.last_name) ILIKE ${like})`;
+  const [items, totals] = await Promise.all([
+    sql`
+    SELECT ${DEAL_COLUMNS(sql)}
+    ${DEAL_FROM(sql)}
+    ${where}
      ORDER BY d.closed_at IS NOT NULL, st.sort_order, d.next_step_on NULLS FIRST, d.created_at DESC
-     LIMIT 1000`;
-  return c.json({ items });
+     LIMIT ${LIST_LIMIT}`,
+    // Súčty cez všetky vyhovujúce obchody (nie iba zobrazené): po štádiách, vážená PH, bez kroku / po termíne, dôvody prehry
+    sql`
+    SELECT d.stage_id, st.outcome, count(*)::int AS count,
+           coalesce(sum(dv.value_eur), 0) AS value_eur,
+           coalesce(round(sum(coalesce(dv.value_eur, 0) * coalesce(st.probability, 0)), 2), 0) AS weighted_eur,
+           count(*) FILTER (WHERE d.closed_at IS NULL AND (d.next_step_on IS NULL OR d.next_step_on < crm_today()))::int AS attention,
+           coalesce(jsonb_agg(coalesce(lr.label, 'iné')) FILTER (WHERE st.outcome = 'prehrany'), '[]') AS lost_reasons
+    ${DEAL_FROM(sql)}
+    ${where}
+     GROUP BY d.stage_id, st.outcome`,
+  ]);
+  return c.json({ items, totals, truncated: items.length >= LIST_LIMIT });
 });
 
 // Karta obchodu (obrazovka 33): obchod, OOM s objemami, kontakty s rolami, práva prihláseného
@@ -154,6 +174,9 @@ deals.get('/deals/:id', async (c) => {
   const [deal] = await sql`
     SELECT ${DEAL_COLUMNS(sql)},
            crm_deal_editable(d.company_id, d.person_id, d.owner_id) AS can_edit,
+           d.closed_at IS NULL AND crm_deal_editable(d.company_id, d.person_id, d.owner_id)
+             AND NOT EXISTS (SELECT 1 FROM app_user au JOIN team t ON t.id = au.team_id
+                              WHERE au.id = crm_active_user_id() AND t.code = 'sales_internal') AS can_request_help,
            crm_deal_manager() AS can_change_owner,
            (st.code = 'prehrane' AND (d.owner_id = crm_active_user_id() OR crm_is_admin()))
              OR (st.code = 'vyhrane' AND crm_is_admin()) AS can_reopen,
@@ -459,4 +482,14 @@ deals.post('/deals/:id/notes', async (c) => {
     VALUES ('poznamka', ${dealId}, ${d.company_id}, ${d.person_id}, ${c.var.userId}, now(), ${text}, 'crm')
     RETURNING id`;
   return c.json({ id: row.id }, 201);
+});
+
+// Žiadosť o pomoc s ponukou (F6, 0049 / 0050): tímu Sales_internal zvonček a e-mail z crm@; žiada, kto upravuje obchod
+// a nie je v Sales_internal (stráži databáza)
+deals.post('/deals/:id/help', async (c) => {
+  const dealId = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  const note = str(b, 'note', 'Poznámka', { max: 500, optional: true }) || null;
+  const [r] = await c.var.sql<{ n: number }[]>`SELECT deal_help_request(${dealId}, ${note}) AS n`;
+  return c.json({ recipients: r.n });
 });

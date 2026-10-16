@@ -131,6 +131,7 @@ export function OfferPage() {
             {o.variants.map((v) => (
               <button key={v.id} type="button" role="tab" className="tab" aria-selected={v.id === variant?.id} onClick={() => setTab(v.id)}>
                 {variantLetter(v.sort_order)} · {v.name}
+                {v.main && o.variants.length > 1 && <span className="caption" title="hlavný variant – počíta sa do súčtov PH"> · hlavný</span>}
               </button>
             ))}
             {editable && o.variants.length < 5 && (
@@ -139,6 +140,14 @@ export function OfferPage() {
               </button>
             )}
           </div>
+          {variant && !variant.main && o.can_edit && !o.closed_at && o.status !== 'nahradena' && o.status !== 'akceptovana' && (
+            <div className="caption" style={{ margin: '8px 0' }}>
+              Do súčtov pridanej hodnoty (Obchody, Domov) sa počíta hlavný variant, kým zákazník neakceptuje.{' '}
+              <button type="button" className="link-button" onClick={() => send('POST', `/api/offer-variants/${variant.id}/main`).then(reload)}>
+                Označiť variant {variantLetter(variant.sort_order)} ako hlavný
+              </button>
+            </div>
+          )}
           {adding && variant && (
             <AddVariant
               offer={o}

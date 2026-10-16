@@ -16,6 +16,11 @@ export function permission(me: Me, module: ModuleCode): Permission {
   return me.permissions[module] ?? { view: 'nic', edit: 'nic', archive: false, export: false, import: false, edit_active: false };
 }
 
+/** Úvodná stránka podľa roly (F6, Peter 16. 10.): obchodník (interný aj externý) a tím Sales_internal Domov, ostatní Zákazníci. */
+export function startPath(me: Me): string {
+  return me.seller_type || me.team_code === 'sales_internal' ? '/domov' : '/zakaznici';
+}
+
 export const ENVIRONMENT_LABEL: Record<string, string> = { test: 'Test', ostre: 'Ostré' };
 
 export function MeProvider(props: { children: ReactNode }) {

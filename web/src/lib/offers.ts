@@ -60,6 +60,7 @@ export type Variant = {
   id: string;
   offer_id: string;
   sort_order: number;
+  main: boolean; // hlavný variant pre prehľady (F6): označený, inak prvý
   name: string;
   price_kind: PriceKind;
   supply_from: string;
@@ -198,7 +199,7 @@ export type Offer = {
 };
 export type DealOffers = {
   items: { id: string; number: string; version: number; display_number: string; status: OfferState; state: OfferState; language: string; valid_until: string | null; sent_at: string | null; created_at: string; variants: number }[];
-  main: { id: string; name: string; sort_order: number; offer_id: string; display_number: string; accepted: boolean; summary: VariantSummary[] } | null;
+  main: { id: string; name: string; sort_order: number; offer_id: string; display_number: string; accepted: boolean; in_totals: boolean; summary: VariantSummary[] } | null;
 };
 
 /** Upraviť sa dá rozpracovaná verzia (koncept, čakajúca, pripravená – úprava ju vráti do konceptu). */

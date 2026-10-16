@@ -85,16 +85,19 @@ offers.get('/deals/:id/offers', async (c) => {
       FROM offer o
      WHERE o.deal_id = ${dealId}
      ORDER BY o.version DESC`;
-  // Hodnota obchodu (návrh 1.1): akceptovaný variant, inak variant A poslednej verzie (nie nahradenej)
+  // Hodnota obchodu (F6, deal_value 0049): akceptovaný variant, inak hlavný variant poslednej odoslanej ponuky; bez odoslanej
+  // ponuky na karte hlavný variant poslednej verzie (nie nahradenej), aby obchodník videl PH rozpracovanej ponuky
   const [main] = await sql`
     SELECT v.id, v.name, v.sort_order, o.id AS offer_id, offer_display_number(o) AS display_number,
-           d.accepted_variant_id = v.id AS accepted
+           d.accepted_variant_id = v.id AS accepted, (dv.variant_id = v.id) AS in_totals
       FROM deal d
+      LEFT JOIN LATERAL deal_value(d.id) dv ON true
       JOIN offer o ON o.deal_id = d.id
       JOIN offer_variant v ON v.offer_id = o.id
      WHERE d.id = ${dealId}
-       AND (v.id = d.accepted_variant_id OR (d.accepted_variant_id IS NULL AND o.status <> 'nahradena' AND v.sort_order = 1))
-     ORDER BY (v.id = d.accepted_variant_id) DESC, o.version DESC
+       AND (v.id = dv.variant_id
+            OR (dv.variant_id IS NULL AND o.status <> 'nahradena' AND v.id = offer_main_variant(o.id)))
+     ORDER BY (v.id = dv.variant_id) DESC, o.version DESC
      LIMIT 1`;
   const summary = main ? await sql`SELECT * FROM offer_variant_summary(${main.id})` : [];
   return c.json({ items, main: main ? { ...main, summary } : null });
@@ -113,7 +116,7 @@ offers.get('/offers/:id', async (c) => {
   const head = await offerHead(sql, offerId);
   if (!head) return c.json({ error: 'Ponuka neexistuje alebo ju nevidíte.' }, 404);
   const [variants, items, ooms, contacts, approvals, check, versions] = await Promise.all([
-    sql`SELECT v.*, (SELECT coalesce(jsonb_agg(m.year ORDER BY m.year), '[]') FROM
+    sql`SELECT v.*, v.id = offer_main_variant(v.offer_id) AS main, (SELECT coalesce(jsonb_agg(m.year ORDER BY m.year), '[]') FROM
                        (SELECT DISTINCT year FROM offer_variant_months(v)) m) AS years
           FROM offer_variant v WHERE v.offer_id = ${offerId} ORDER BY v.sort_order`,
     sql`SELECT i.id, i.variant_id, i.oom_id, i.year, i.slot, i.product_id, p.name AS product_name, i.price_model,
@@ -191,6 +194,12 @@ offers.post('/offers/:id/variants', async (c) => {
   const copy = 'copy_from' in b && b.copy_from ? id(String(b.copy_from)) : null;
   const [r] = await c.var.sql<{ id: string }[]>`SELECT offer_variant_add(${offerId}, ${kind}, ${copy}) AS id`;
   return c.json({ id: r.id }, 201);
+});
+
+// Hlavný variant ponuky pre prehľady (F6, 0049): označí obchodník; ponuka sa nevracia do konceptu
+offers.post('/offer-variants/:id/main', async (c) => {
+  await c.var.sql`SELECT offer_variant_set_main(${id(c.req.param('id'))})`;
+  return c.json({ ok: true });
 });
 
 offers.patch('/offer-variants/:id', async (c) => {

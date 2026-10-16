@@ -27,7 +27,7 @@ export function DealPage() {
   const timeline = useApi<{ items: TimelineItem[] }>(`/api/deals/${id}/timeline`);
   const offers = useApi<DealOffers>(`/api/deals/${id}/offers`);
   const navigate = useNavigate();
-  const [panel, setPanel] = useState<null | 'edit' | 'lost' | 'reopen' | 'step' | 'oom-add' | 'oom-new' | 'contact-add'>(null);
+  const [panel, setPanel] = useState<null | 'edit' | 'lost' | 'reopen' | 'step' | 'oom-add' | 'oom-new' | 'contact-add' | 'help'>(null);
   const [editOom, setEditOom] = useState<DealOom | null>(null);
   const [tlFilter, setTlFilter] = useState<'vsetko' | 'poznamka' | 'udalost'>('vsetko');
   const save = useSave();
@@ -98,6 +98,11 @@ export function DealPage() {
               Podklady pre zmluvu
             </Link>
           )}
+          {d.can_request_help && (
+            <button type="button" className="btn" onClick={() => setPanel('help')}>
+              Požiadať o pomoc s ponukou
+            </button>
+          )}
           {editable && (
             <button type="button" className="btn" onClick={() => setPanel('step')}>
               Ďalší krok
@@ -163,7 +168,7 @@ export function DealPage() {
         {mainTotal ? (
           <>
             <Kpi
-              label={`Pridaná hodnota – variant ${offers.data?.main ? String.fromCharCode(64 + offers.data.main.sort_order) : ''}${offers.data?.main?.accepted ? ' (akceptovaný)' : ''}`}
+              label={`Pridaná hodnota – variant ${offers.data?.main ? String.fromCharCode(64 + offers.data.main.sort_order) : ''}${offers.data?.main?.accepted ? ' (akceptovaný)' : ' (hlavný)'}`}
               value={`${eur(mainTotal.added_value_eur)} €`}
               sub={`${offers.data?.main?.display_number ?? ''}${mainYears ? ` · ${mainYears}` : ''}`}
             />
@@ -315,6 +320,7 @@ export function DealPage() {
 
       {panel === 'edit' && <EditPanel deal={d} options={opts} onClose={() => setPanel(null)} onSaved={() => { setPanel(null); refresh(); }} />}
       {panel === 'step' && <StepPanel deal={d} onClose={() => setPanel(null)} onSaved={() => { setPanel(null); refresh(); }} />}
+      {panel === 'help' && <HelpPanel dealId={d.id} onClose={() => setPanel(null)} onSaved={() => { setPanel(null); refresh(); }} />}
       {panel === 'lost' && lostStage && (
         <LostPanel dealId={d.id} stageId={lostStage.id} options={opts} onClose={() => setPanel(null)} onSaved={() => { setPanel(null); refresh(); }} />
       )}
@@ -361,6 +367,9 @@ function eventText(t: TimelineItem): string {
     case 'zmluva_sparovana': return `Zmluva ${String(t.detail?.number ?? '')} spárovaná ${t.detail?.method === 'rucne' ? 'ručne' : 'pri importe'}${t.detail?.bez_ponuky ? ' – spárované bez akceptovanej ponuky' : ''}`;
     case 'zmluva_odparovana': return `Zrušené spárovanie zmluvy ${String(t.detail?.number ?? '')}${t.detail?.reason ? ` – ${String(t.detail.reason)}` : ''}`;
     case 'predosla_zmluva': return `Predošlá zmluva ${String(t.detail?.number ?? '')} doplnená nočným behom`;
+    case 'pomoc_ziadost':
+      return `Žiadosť o pomoc s ponukou ${t.detail?.komu === 'admini' ? 'adminom (v tíme Sales_internal nie je nikto aktívny)' : 'tímu Sales_internal'}`
+        + ` · ${Number(t.detail?.prijemcovia ?? 0)} príjemcov${t.reason ? `: ${t.reason}` : ''}`;
     case 'potvrdenie_neodoslane': return `Potvrdenie akceptácie ponuky ${offerNo(t)} sa zákazníkovi neposlalo (vypnuté pri zázname)`;
     case 'schvalenie_ziadost': return `Žiadosť o schválenie (${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? ''}) – ponuka ${offerNo(t)}`;
     case 'schvalenie_rozhodnutie': return `${APPROVAL_KIND[String(t.detail?.kind ?? '')] ?? 'Žiadosť'} ${t.detail?.approved ? 'schválená' : 'zamietnutá'} – ponuka ${offerNo(t)}`;
@@ -815,6 +824,43 @@ function ContactAddPanel(props: { deal: DealCard; options: DealOptions | undefin
       <Check checked={primary} onChange={setPrimary}>
         Primárny kontakt (predvolená kontaktná osoba ponuky)
       </Check>
+    </SidePanel>
+  );
+}
+
+/** Žiadosť o pomoc s ponukou (F6): tímu Sales_internal upozornenie v zvončeku a e-mail z crm@ s odkazom na obchod. */
+function HelpPanel(props: { dealId: string; onClose: () => void; onSaved: () => void }) {
+  const [note, setNote] = useState('');
+  const save = useSave();
+  return (
+    <SidePanel
+      title="Požiadať o pomoc s ponukou"
+      onClose={props.onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={props.onClose}>
+            Zrušiť
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={save.busy}
+            onClick={async () => {
+              const ok = await save.run(() => send('POST', `/api/deals/${props.dealId}/help`, { note }));
+              if (ok) props.onSaved();
+            }}
+          >
+            Poslať žiadosť
+          </button>
+        </>
+      }
+    >
+      <p>Tím Sales_internal dostane upozornenie v CRM a e-mail s odkazom na tento obchod. Žiadosť sa zapíše do časovej osi.</p>
+      <Field label="S čím potrebujete pomôcť (nepovinné)">
+        <TextInput value={note} onChange={setNote} maxLength={500} />
+      </Field>
+      {save.error && <Notice tone="error">{save.error}</Notice>}
     </SidePanel>
   );
 }

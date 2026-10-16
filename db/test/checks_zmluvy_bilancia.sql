@@ -3,14 +3,14 @@
 -- hranicou“ (otázka 30), výnimka (hranica z databázy, schválenie, párovanie so zmluvou, Použitá, expirovaná sa
 -- nespáruje), prepis minimálneho aditívu výkupu Nákupom, práva (obchodník nevidí maržu ani snímku).
 -- Spúšťa sa iba cez db/test/run.sh po checks_zmluvy_import.sql. Predpoklad: skripty cenníkov 2026 a podnikatelia-2026,
--- východiskové cenové parametre z 0023/0027. Trhové ceny rokov 2026 a 2027 sa v transakcii testu označia ako opravené
--- a nahradia testovacími (na konci sa všetko vráti).
+-- východiskové cenové parametre z 0023/0027. Trhové ceny rokov 2026 a neskôr (aj z Montelu, F6) sa v transakcii testu
+-- označia ako opravené a nahradia testovacími (na konci sa všetko vráti).
 
 -- Trhové ceny: deň podpisu 12. 10. 2026 (BL 95, PL 110 → cena pre obchodníka 2027 = 106; odhad portfólia 97),
 -- dnes (odhad portfólia 2027 = 96, cena FVE 70), pred podpisom domácnosti (odhad portfólia 2026 = 200)
 SELECT set_config('crm.market_price_correction', 'on', true);
 UPDATE market_price_daily SET corrected_at = now()
- WHERE org_id = crm_default_org() AND delivery_year IN (2026, 2027) AND corrected_at IS NULL;
+ WHERE org_id = crm_default_org() AND delivery_year >= 2026 AND corrected_at IS NULL;
 SELECT set_config('crm.market_price_correction', '', true);
 INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh, source) VALUES
   (crm_default_org(), '2026-10-12', 2027, 95, 110, 97, NULL, 'historia'),

@@ -93,6 +93,7 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
   ponuka_zablokovana: { label: 'Verzia ponuky zablokovaná', tone: 'warning' },
   akceptacia_zrusena: { label: 'Akceptácia zrušená', tone: 'warning' },
   ponuka_odpoved: { label: 'Odpoveď na e-mail', tone: 'positive' },
+  pomoc_s_ponukou: { label: 'Pomoc s ponukou', tone: 'info' },
   ponuka_pripomienka: { label: 'Pripomienka platnosti', tone: 'info' },
   gmail_chyba: { label: 'Chyba Gmailu', tone: 'negative' },
   email_chyba: { label: 'Chyba e-mailu', tone: 'negative' },
