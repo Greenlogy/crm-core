@@ -119,7 +119,7 @@ export function PersonPage() {
                 ['E-mail', p.email ? <a href={`mailto:${p.email}`}>{p.email}</a> : text(null)],
                 ['Telefón', text(p.phone)],
                 ['Mobil', text(p.mobile)],
-                ['Oslovenie v e-maile', text(p.salutation ?? 'Dobrý deň (predvolené)')],
+                ['Oslovenie v e-maile', text(p.salutation ?? (p.address_form ? `Dobrý deň, ${p.address_form === 'pan' ? 'pán' : 'pani'} ${p.last_name}` : 'Dobrý deň'))],
                 ['Adresa', text(p.address)],
                 ['Pozícia', text(p.position)],
                 ['Vlastník', owner],

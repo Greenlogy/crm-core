@@ -230,6 +230,7 @@ export type PersonCard = CardBase & {
   mobile: string | null;
   position: string | null;
   salutation: string | null;
+  address_form: 'pan' | 'pani' | null;
   source: string | null;
   is_household: boolean;
   marketing_allowed: boolean;

@@ -9,7 +9,8 @@ import { Hono } from 'hono';
 import { asUser, connect } from '../db';
 import { deliver, type Payload, type Runner } from '../gmail/deliver';
 import { gmailCheck, gmailConfigured } from '../gmail/gmail';
-import { recipientsAllowed, type Signature, signatureHtml } from '../gmail/mime';
+import { base64, htmlToText, cleanText, recipientsAllowed, type Signature, signatureHtml } from '../gmail/mime';
+import { cleanSignatureHtml, MAX_SIGNATURE_IMAGE_BYTES, signatureImageType } from '../gmail/signature';
 import { sha256Hex } from '../render/pdf';
 import { type AppEnv, UUID } from '../types';
 import { BadRequest, type Body, EMAIL, Forbidden, oneOf, readBody, str } from '../validate';
@@ -82,7 +83,7 @@ emails.get('/emails/new', async (c) => {
   const sql = c.var.sql;
   const [r] = await sql<{ template_version_id: string | null; subject: string; body: string; to: string[]; gmail_enabled: boolean; mailbox: string }[]>`
     WITH k AS (
-      SELECT p.email, p.salutation FROM contact p
+      SELECT p.id, p.email FROM contact p
        WHERE p.id = coalesce(${person}::uuid,
                              (SELECT dc.contact_id FROM deal_contact dc WHERE dc.deal_id = ${deal}::uuid ORDER BY dc.is_primary DESC LIMIT 1),
                              (SELECT d.person_id FROM deal d WHERE d.id = ${deal}::uuid))
@@ -92,7 +93,7 @@ emails.get('/emails/new', async (c) => {
     )
     SELECT (SELECT id FROM t) AS template_version_id, coalesce((SELECT subject FROM t), '') AS subject,
            replace(coalesce((SELECT body FROM t), '«oslovenie»,' || chr(10) || chr(10) || chr(10) || '«podpis»'), '«oslovenie»',
-                   coalesce(nullif(btrim((SELECT salutation FROM k)), ''), 'Dobrý deň')) AS body,
+                   email_salutation((SELECT id FROM k), 'sk')) AS body,
            coalesce((SELECT to_jsonb(ARRAY[lower(btrim(email))]) FROM k WHERE email IS NOT NULL AND btrim(email) <> ''), '[]'::jsonb) AS to,
            u.gmail_enabled, u.email AS mailbox
       FROM app_user u WHERE u.id = ${c.var.userId}`;
@@ -230,7 +231,12 @@ emails.get('/profiles/:id', async (c) => {
   const [u] = await sql`SELECT id, name, email, phone, mobile, job_title, linkedin_url, gmail_enabled FROM app_user WHERE id = ${uid}`;
   if (!u) return c.json({ error: 'Používateľ neexistuje.' }, 404);
   const [s] = await sql<{ s: Signature }[]>`SELECT email_signature(${uid}) AS s`;
-  return c.json({ ...u, signature: s.s, signature_html: signatureHtml(s.s, s.s.has_photo ? 'foto' : null) });
+  const imgs = await sql<{ cid: string }[]>`SELECT cid FROM user_signature_image WHERE user_id = ${uid} ORDER BY cid`;
+  const [own] = await sql<{ mode: string; html: string | null }[]>`SELECT mode, html FROM user_signature WHERE user_id = ${uid}`;
+  return c.json({
+    ...u, signature: s.s, signature_html: signatureHtml(s.s, s.s.has_photo ? 'foto' : null),
+    custom: { mode: own?.mode ?? 'profil', html: own?.html ?? null, images: imgs.map((i) => i.cid) },
+  });
 });
 
 emails.patch('/profiles/:id', async (c) => {
@@ -287,6 +293,63 @@ emails.put('/profiles/:id/photo', async (c) => {
     INSERT INTO user_photo (user_id, mime, data, sha256) VALUES (${uid}, ${size.mime}, ${bin}, repeat('0', 64))
     ON CONFLICT (user_id) DO UPDATE SET mime = excluded.mime, data = excluded.data`;
   return c.json({ ok: true });
+});
+
+// Vlastný podpis (0044): HTML vložené cez Ctrl+V alebo ako kód → vyčistenie, obrázky (https / data:) sa stiahnu
+// a uložia k podpisu (cid:), textová verzia sa vytvorí automaticky. mode = profil vráti podpis z profilu.
+emails.put('/profiles/:id/signature', async (c) => {
+  const uid = profileId(c);
+  const b = await readBody(c.req);
+  const mode = oneOf(b, 'mode', 'Podpis', ['profil', 'vlastny'] as const) ?? 'profil';
+  if (mode === 'profil') {
+    await c.var.sql`SELECT user_signature_set(${uid}, 'profil', NULL, NULL, '[]'::jsonb)`;
+    return c.json({ ok: true, mode });
+  }
+  const raw = typeof b.html === 'string' ? b.html : '';
+  if (!raw.trim()) throw new BadRequest('Vložte podpis.');
+  if (raw.length > 2_000_000) throw new BadRequest('Podpis je príliš veľký.');
+  const clean = cleanSignatureHtml(raw);
+  if (!clean.html) throw new BadRequest('Z podpisu po vyčistení nič neostalo alebo je príliš dlhý.');
+  let html = clean.html;
+  const images: { cid: string; mime: string; data_base64: string }[] = [];
+  const failed: string[] = [];
+  for (const img of clean.images) {
+    let data: Uint8Array | null = null;
+    try {
+      if (img.src.startsWith('data:')) {
+        data = Uint8Array.from(atob(img.src.slice(img.src.indexOf(',') + 1)), (ch) => ch.charCodeAt(0));
+      } else {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 8000);
+        const res = await fetch(img.src, { signal: ctrl.signal, redirect: 'follow', headers: { Accept: 'image/png,image/jpeg,image/gif' } });
+        clearTimeout(t);
+        const len = Number(res.headers.get('content-length') ?? '0');
+        if (res.ok && len <= MAX_SIGNATURE_IMAGE_BYTES) data = new Uint8Array(await res.arrayBuffer());
+      }
+    } catch {
+      data = null;
+    }
+    const mime = data && data.length <= MAX_SIGNATURE_IMAGE_BYTES ? signatureImageType(data) : null;
+    if (!data || !mime) {
+      failed.push(img.cid);
+      html = html.replace(new RegExp(`<img src="cid:${img.cid}"[^>]*>`, 'g'), '');
+      continue;
+    }
+    images.push({ cid: img.cid, mime, data_base64: base64(data) });
+  }
+  const text = cleanText(htmlToText(html.replace(/<\/td>/gi, ' </td>')).replace(/\u00a0/g, ' '));
+  await c.var.sql`SELECT user_signature_set(${uid}, 'vlastny', ${html}, ${text}, ${c.var.sql.json(images)})`;
+  return c.json({ ok: true, mode, removed: clean.dropped, images: images.length, images_failed: failed.length });
+});
+
+// Obrázok vlastného podpisu (náhľad v profile; sám alebo admin – RLS)
+emails.get('/profiles/:id/signature-images/:cid', async (c) => {
+  const cid = c.req.param('cid');
+  if (!/^sig[1-5]$/.test(cid)) throw new BadRequest('Neplatný obrázok.');
+  const [i] = await c.var.sql<{ mime: string; data: Uint8Array }[]>`
+    SELECT mime, data FROM user_signature_image WHERE user_id = ${profileId(c)} AND cid = ${cid}`;
+  if (!i) return c.json({ error: 'Obrázok nie je.' }, 404);
+  return new Response(new Uint8Array(i.data), { headers: { 'Content-Type': i.mime, 'Cache-Control': 'no-store' } });
 });
 
 emails.delete('/profiles/:id/photo', async (c) => {

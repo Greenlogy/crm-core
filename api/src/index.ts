@@ -3,6 +3,7 @@
 // → transakcia s app.user_id, takže platia práva tímu a spoločností priamo v databáze.
 // Do logu nejdú osobné údaje: iba cesta, stav a kód chyby.
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { accessEmail } from './auth';
 import { asUser, connect, type Env } from './db';
@@ -39,7 +40,7 @@ import {
 } from './queries/customers';
 import { listOom, OOM_CHIPS, OOM_TYPES, oomCard, oomFilters } from './queries/oom';
 import { nightlyRun } from './jobs';
-import { emailRun } from './email-jobs';
+import { emailKick, emailRun } from './email-jobs';
 import { jobRuns } from './routes/job-runs';
 import { notifications } from './routes/notifications';
 
@@ -73,6 +74,8 @@ app.use('*', async (c, next) => {
     c.executionCtx.waitUntil(sql.end());
   }
   c.header('Cache-Control', 'no-store');
+  // po úspešnom zápise (transakcia je už potvrdená) hneď odošli e-maily, ktoré zápis zaradil (F4)
+  if (c.req.method !== 'GET' && c.res.status < 400) c.executionCtx.waitUntil(emailKick(c.env));
 });
 
 // Prihlásenie: kto nie je aktívny používateľ CRM, nedostane nič (návrh Nastavení, časť 5).
@@ -239,7 +242,17 @@ app.onError((err, c) => {
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // */5: e-maily (F4); ostatné časy: nočný beh
-    ctx.waitUntil(controller.cron === '*/5 * * * *' ? emailRun(env) : nightlyRun(env));
+    // každú minútu: e-maily (F4); ostatné časy: nočný beh
+    ctx.waitUntil(controller.cron === '* * * * *' ? emailRun(env) : nightlyRun(env));
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Interné prepojenie pre Worker crm-ponuka (service binding, bez verejnej adresy): po akceptácii klikom hneď odošle
+ * potvrdenie zákazníkovi a interný e-mail obchodníkovi. Nič neprijíma, iba spustí odoslanie zaradených e-mailov.
+ */
+export class EmailKick extends WorkerEntrypoint<Env> {
+  async kick(): Promise<void> {
+    await emailKick(this.env);
+  }
+}

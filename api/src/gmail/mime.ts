@@ -344,6 +344,7 @@ export function buildMime(m: MimeInput): string {
 export type Signature = {
   name: string; job_title: string | null; email: string; phone: string | null; mobile: string | null;
   linkedin: string | null; company: string; address: string | null; web: string | null; has_photo: boolean;
+  mode?: 'profil' | 'vlastny'; custom_html?: string | null; custom_text?: string | null;
 };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -377,13 +378,15 @@ export function signatureHtml(s: Signature, photoCid: string | null): string {
 /** Text a HTML e-mailu z uloženého textu: doplní odkaz a podpis, HTML bez sledovacích prvkov. */
 export function renderBody(body: string, link: string | null, sig: Signature | null, photoCid: string | null): { text: string; html: string } {
   const linkText = link ?? '';
-  const text = body.replace(/«odkaz na ponuku»/g, linkText).replace(/«podpis»/g, sig ? signatureText(sig) : '');
+  // vlastný podpis (0044): vyčistené HTML s obrázkami cid:sigN a jeho textová verzia
+  const custom = sig?.mode === 'vlastny' && sig.custom_html ? { html: sig.custom_html, text: sig.custom_text ?? '' } : null;
+  const text = body.replace(/«odkaz na ponuku»/g, linkText).replace(/«podpis»/g, custom ? custom.text : sig ? signatureText(sig) : '');
   const parts = body.split(/(«odkaz na ponuku»|«podpis»)/);
   const html = parts.map((p) => {
     if (p === '«odkaz na ponuku»') {
       return link ? `<a href="${esc(link)}" style="display:inline-block;padding:10px 18px;background:#2f7d4f;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">Zobraziť ponuku</a>` : '';
     }
-    if (p === '«podpis»') return sig ? signatureHtml(sig, photoCid) : '';
+    if (p === '«podpis»') return custom ? custom.html : sig ? signatureHtml(sig, photoCid) : '';
     return esc(p).replace(/\n/g, '<br>');
   }).join('');
   return { text, html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#222">${html}</div>` };

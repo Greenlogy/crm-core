@@ -1,4 +1,4 @@
-// Modul 5, F4 – beh na pozadí e-mailov (Cron */5, wrangler.toml). Beží bez prihláseného používateľa ako crm_app;
+// Modul 5, F4 – beh na pozadí e-mailov (Cron každú minútu, wrangler.toml; okamžité odoslanie emailKick). Beží bez prihláseného používateľa ako crm_app;
 // volá iba funkcie databázy pre beh na pozadí (crm_background_only). Poradie:
 //   1. dokončenie nedokončených odoslaní podľa ID z Gmailu, neisté bez ID → Chyba (email_pending_recover),
 //   2. fronta e-mailov zákazníkom (potvrdenie akceptácie) – email_queue_claim → deliver,
@@ -82,6 +82,28 @@ async function checkThread(env: Env, sql: Sql, w: WatchItem): Promise<number> {
   }
   await sql`SELECT email_thread_checked(${w.thread_id}, 'ok', NULL)`;
   return n;
+}
+
+/**
+ * Okamžité odoslanie (Peter 16. 10.): fronta zákazníkom a interné e-maily z crm@ hneď po zápise, ktorý ich vytvoril
+ * (každý úspešný zápis v CRM, akceptácia na stránke ponuky cez interné prepojenie Workerov). Bez kontroly odpovedí.
+ * Prevzatie s jednorazovým kľúčom (SKIP LOCKED) – súbežný beh ani Cron nič neodošle dvakrát.
+ */
+export async function emailKick(env: Env): Promise<void> {
+  if (!gmailConfigured(env)) return;
+  const sql = connect(env);
+  const run: Runner = (fn) => sql.begin((tx) => fn(tx as unknown as Sql)) as never;
+  try {
+    const [q] = await sql<{ q: Payload[] }[]>`SELECT email_queue_claim(10) AS q`;
+    for (const p of q.q) await deliver(env, run, p, null);
+    const [ob] = await sql<{ q: OutboxItem[] }[]>`SELECT email_outbox_claim(20) AS q`;
+    for (const o of ob.q) await sendOutbox(env, sql, o);
+    if (q.q.length || ob.q.length) console.log(`E-maily hneď: fronta ${q.q.length}, interné ${ob.q.length}`);
+  } catch (err) {
+    console.error(`E-maily hneď: ${(err as Error).name} ${(err as { code?: string }).code ?? 'unknown'}`);
+  } finally {
+    await sql.end();
+  }
 }
 
 export async function emailRun(env: Env): Promise<void> {

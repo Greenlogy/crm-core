@@ -62,14 +62,18 @@ export async function deliver(env: Env, run: Runner, p: Payload, link: string | 
   let sent: { id: string; threadId: string };
   const messageId = `<crm-${p.id}-${crypto.randomUUID().slice(0, 8)}@greenlogy.com>`;
   try {
-    const { sig, photo } = await run(async (sql) => {
+    const { sig, photo, sigImages } = await run(async (sql) => {
       const [s] = p.signature_user_id
         ? await sql<{ s: Signature | null }[]>`SELECT email_signature(${p.signature_user_id}) AS s`
         : [{ s: null }];
-      const ph = s?.s?.has_photo
+      const custom = s?.s?.mode === 'vlastny' && s.s.custom_html;
+      const ph = !custom && s?.s?.has_photo
         ? (await sql<{ mime: string; data: Uint8Array }[]>`SELECT mime, data FROM user_photo_get(${p.signature_user_id})`)[0]
         : undefined;
-      return { sig: s?.s ?? null, photo: ph };
+      const imgs = custom
+        ? await sql<{ cid: string; mime: string; data: Uint8Array }[]>`SELECT cid, mime, data FROM user_signature_images_get(${p.signature_user_id})`
+        : [];
+      return { sig: s?.s ?? null, photo: ph, sigImages: imgs };
     });
     const photoCid = photo ? `podpis-${p.id}@greenlogy.com` : null;
     const { text, html } = renderBody(p.body, link, sig, photoCid);
@@ -87,7 +91,10 @@ export async function deliver(env: Env, run: Runner, p: Payload, link: string | 
       messageId,
       inReplyTo: p.references.at(-1) ?? null,
       references: p.references,
-      inline: photo ? [{ filename: 'podpis.' + (photo.mime === 'image/png' ? 'png' : 'jpg'), mime: photo.mime, data: new Uint8Array(photo.data), cid: photoCid! }] : [],
+      inline: [
+        ...(photo ? [{ filename: 'podpis.' + (photo.mime === 'image/png' ? 'png' : 'jpg'), mime: photo.mime, data: new Uint8Array(photo.data), cid: photoCid! }] : []),
+        ...sigImages.map((i) => ({ filename: `${i.cid}.${i.mime.split('/')[1]}`, mime: i.mime, data: new Uint8Array(i.data), cid: i.cid })),
+      ],
       attachments: files,
     });
     sent = await gmailSend(env, mailbox, mime, [...p.to, ...p.cc], p.gmail_thread_id);

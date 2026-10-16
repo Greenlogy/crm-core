@@ -246,6 +246,7 @@ export function PersonFormPanel(props: {
   const [mobile, setMobile] = useState(p?.mobile ?? '');
   const [position, setPosition] = useState(p?.position ?? '');
   const [salutation, setSalutation] = useState(p?.salutation ?? '');
+  const [addressForm, setAddressForm] = useState<'pan' | 'pani' | ''>(p?.address_form ?? '');
   const [address, setAddress] = useState(p?.address ?? '');
   const [source, setSource] = useState(p?.source ?? '');
   const [owner, setOwner] = useState(p ? (p.owner_id ?? '') : me.id);
@@ -287,7 +288,7 @@ export function PersonFormPanel(props: {
   const submit = async () => {
     const body: Record<string, unknown> = servis
       ? { email, phone, mobile, address }
-      : { title, first_name: first, last_name: last, email, phone, mobile, position, salutation, address, source: source || null };
+      : { title, first_name: first, last_name: last, email, phone, mobile, position, salutation, address_form: addressForm || null, address, source: source || null };
     if (!p) {
       body.is_household = isHousehold;
       body.owner_id = owner || null;
@@ -407,7 +408,11 @@ export function PersonFormPanel(props: {
         <Field label="Pozícia">
           <TextInput value={position} onChange={setPosition} maxLength={100} disabled={servis} />
         </Field>
-        <Field label="Oslovenie v e-maile" hint="Napr. „Dobrý deň, pán Mráz“. Prázdne = „Dobrý deň“.">
+        <Field label="Oslovujeme" hint={`V e-maile: ${addressForm ? `„Dobrý deň, ${addressForm === 'pan' ? 'pán' : 'pani'} ${last || 'Priezvisko'}“` : '„Dobrý deň“'}`}>
+          <Select value={addressForm} onChange={(v) => setAddressForm(v as 'pan' | 'pani' | '')} disabled={servis}
+            options={[{ value: '', label: 'Neuvádzať' }, { value: 'pan', label: 'Pán' }, { value: 'pani', label: 'Pani' }]} />
+        </Field>
+        <Field label="Vlastné oslovenie (nepovinné)" hint="Má prednosť, napr. „Ahoj Pavol“.">
           <TextInput value={salutation} onChange={setSalutation} maxLength={200} disabled={servis} />
         </Field>
         <Field label="Zdroj">

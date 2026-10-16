@@ -48,9 +48,10 @@ ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 
 # Naplánované úlohy (api/src/jobs.ts): denná aktivácia Pripravovaných OOM o 0:05 Europe/Bratislava.
 # Cron beží v UTC – dva časy pokryjú zimný aj letný čas; druhé spustenie nič nezmení.
-# */5: e-maily (api/src/email-jobs.ts) – dokončenie odoslaní, fronta, interné e-maily, odpovede vo vláknach CRM.
+# * * * * *: e-maily každú minútu (api/src/email-jobs.ts) – dokončenie odoslaní, fronta, interné e-maily, odpovede vo
+# vláknach CRM (aktívne za 2 dni každú minútu, staršie raz za 15 minút). Odosielanie beží aj hneď po zápise (emailKick).
 [triggers]
-crons = ["5 22 * * *", "5 23 * * *", "*/5 * * * *"]
+crons = ["5 22 * * *", "5 23 * * *", "* * * * *"]
 
 [observability]
 enabled = true

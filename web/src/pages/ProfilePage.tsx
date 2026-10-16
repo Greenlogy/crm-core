@@ -2,16 +2,17 @@
 // Fotku prehliadač oreže na štvorec (stred), zmenší na 256 × 256 px a uloží ako JPEG do 300 kB; databáza overí typ,
 // rozmer a veľkosť. Mení ju používateľ sám (admin aj v Nastaveniach → Používatelia). Náhľad podpisu ako v e-maile.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { SignaturePreview } from '../components/email';
-import { Field, Notice, TextInput, useSave } from '../components/form';
+import { CustomSignatureFrame, SignaturePreview } from '../components/email';
+import { Field, Notice, Segmented, TextInput, useSave } from '../components/form';
 import { Card, ErrorState, PageSkeleton, Pill } from '../components/ui';
 import { send, useApi } from '../lib/api';
 
 type Profile = {
   id: string; name: string; email: string; phone: string | null; mobile: string | null; job_title: string | null;
   linkedin_url: string | null; gmail_enabled: boolean; signature: { has_photo: boolean };
+  custom: { mode: 'profil' | 'vlastny'; html: string | null; images: string[] };
 };
 
 const SIZE = 256;
@@ -119,11 +120,61 @@ export function ProfileForm(props: { userId: string; onSaved?: () => void }) {
           )}
         </div>
       </Card>
+      <CustomSignatureCard profile={p} userId={p.id} onSaved={(t) => done(t)} />
       <Card title="Náhľad podpisu">
         <SignaturePreview key={sigKey} userId={props.userId} />
         <p className="caption">Meno, e-mail, spoločnosť, adresa a web sa berú z CRM (meno a e-mail mení admin, údaje spoločnosti v Nastaveniach → Spoločnosť).</p>
       </Card>
     </>
+  );
+}
+
+/**
+ * Vlastný podpis (0044): vloženie cez Ctrl+V (napr. podpis skopírovaný z Gmailu) alebo HTML kód. CRM ho pri uložení
+ * vyčistí, obrázky stiahne a uloží k podpisu; náhľad ukazuje uložený (vyčistený) podpis.
+ */
+function CustomSignatureCard(props: { profile: Profile; userId: string; onSaved: (text: string) => void }) {
+  const p = props.profile;
+  const [mode, setMode] = useState<'profil' | 'vlastny'>(p.custom.mode);
+  const [tab, setTab] = useState<'vlozit' | 'kod'>('vlozit');
+  const [code, setCode] = useState('');
+  const pasteRef = useRef<HTMLDivElement>(null);
+  const save = useSave();
+  const submit = () => save.run(async () => {
+    const html = mode === 'vlastny' ? (tab === 'kod' ? code : pasteRef.current?.innerHTML ?? '') : null;
+    const r = await send<{ removed?: number; images?: number; images_failed?: number }>('PUT', `/api/profiles/${props.userId}/signature`, { mode, html });
+    if (pasteRef.current) pasteRef.current.innerHTML = '';
+    setCode('');
+    props.onSaved(mode === 'profil'
+      ? 'Používa sa podpis z profilu.'
+      : `Vlastný podpis uložený${r.images ? ` · obrázky: ${r.images}` : ''}${r.images_failed ? ` · nepodarilo sa stiahnuť: ${r.images_failed}` : ''}${r.removed ? ` · odstránené nepovolené prvky: ${r.removed}` : ''}.`);
+  });
+  return (
+    <Card title="Podpis e-mailu">
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      <Segmented label="Druh podpisu" value={mode} onChange={setMode} options={[{ value: 'profil', label: 'Z profilu' }, { value: 'vlastny', label: 'Vlastný (firemná norma)' }]} />
+      {mode === 'vlastny' && (
+        <>
+          <p className="caption">
+            Skopírujte firemný podpis (napr. z Gmailu → Nastavenia → Podpis) a vložte ho sem cez Ctrl+V, alebo vložte HTML kód. CRM odstráni
+            skripty a sledovacie prvky, obrázky (najviac 5) stiahne a pošle ich ako súčasť e-mailu.
+            {p.custom.mode === 'vlastny' ? ' Uložený podpis je v náhľade nižšie; nové vloženie ho nahradí.' : ''}
+          </p>
+          <Segmented label="Spôsob vloženia" small value={tab} onChange={setTab} options={[{ value: 'vlozit', label: 'Vložiť (Ctrl+V)' }, { value: 'kod', label: 'HTML kód' }]} />
+          {tab === 'vlozit' ? (
+            <div ref={pasteRef} className="inp sig-paste" contentEditable suppressContentEditableWarning aria-label="Sem vložte podpis (Ctrl+V)" />
+          ) : (
+            <textarea className="inp mail-body mono" rows={10} value={code} onChange={(e) => setCode(e.target.value)} aria-label="HTML kód podpisu" />
+          )}
+        </>
+      )}
+      <div className="row-actions">
+        <button type="button" className="btn primary" disabled={save.busy} onClick={submit}>
+          {save.busy ? 'Ukladám…' : mode === 'profil' ? 'Používať podpis z profilu' : 'Uložiť vlastný podpis'}
+        </button>
+      </div>
+      {p.custom.mode === 'vlastny' && p.custom.html && <CustomSignatureFrame userId={props.userId} html={p.custom.html} />}
+    </Card>
   );
 }
 

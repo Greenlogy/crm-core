@@ -15,6 +15,8 @@ type Env = {
   RL_VIEW: RateLimit;
   RL_BAD: RateLimit;
   RL_ACCEPT: RateLimit;
+  // interné prepojenie na crm-core (F4): po akceptácii hneď odošle potvrdenie zákazníkovi a e-mail obchodníkovi
+  CRM?: Fetcher & { kick(): Promise<void> };
 };
 type View = {
   mode: 'aktivna' | 'len_citanie' | 'neplatny';
@@ -222,7 +224,7 @@ function errKey(e: unknown): ErrKey {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const ip = req.headers.get('CF-Connecting-IP') ?? '0.0.0.0';
     const lang: Lang = url.searchParams.get('lang') === 'en' ? 'en' : 'sk';
@@ -263,6 +265,8 @@ export default {
             });
             await tx`SELECT verejne.ponuka_potvrdenie_ulozit(${hash}, ${r.acceptance_id}, ${r.confirmation_key}, ${fileSha})`;
           });
+          // e-maily zaradené akceptáciou (potvrdenie, upozornenie obchodníka) odíde hneď; inak ich odošle Cron v crm-core
+          if (env.CRM) ctx.waitUntil(env.CRM.kick().catch(() => undefined));
           return back('ok=1');
         } catch (e) {
           return back(`err=${errKey(e)}`);

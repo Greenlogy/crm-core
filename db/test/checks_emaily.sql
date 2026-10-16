@@ -92,6 +92,10 @@ GRANT EXECUTE ON FUNCTION user_profile_set(uuid, text, text, text, text), email_
   email_queue_claim(integer), email_outbox_claim(integer), email_outbox_result(uuid, uuid, text, text),
   gmail_read_authorize(uuid, text, text, text, text), offer_acceptance_confirmation_off(uuid), email_watch_threads(integer), email_thread_checked(uuid, text, text),
   email_message_received(uuid, jsonb) TO crm_rls_test;
+-- 0044
+GRANT SELECT ON user_signature, user_signature_image TO crm_rls_test;
+GRANT EXECUTE ON FUNCTION email_salutation(uuid, offer_language), user_signature_set(uuid, text, text, text, jsonb),
+  user_signature_images_get(uuid) TO crm_rls_test;
 
 -- ============================================================================
 -- E0. Šablóny e-mailov: prvé verzie, premenné, mení admin a Marketing, platná sa nemení
@@ -452,8 +456,8 @@ DECLARE
   v_th  uuid := (SELECT t.id FROM email_thread t WHERE t.gmail_thread_id = 'abc123def4560001');
   v_n   bigint;
 BEGIN
+  v_n := (SELECT count(*) FROM mailbox_access_log);   -- ako admin (_u): celý denník
   PERFORM pg_temp.e_as(NULL);
-  v_n := (SELECT count(*) FROM mailbox_access_log);
   ASSERT gmail_read_authorize(pg_temp.e_id('u', 1), 'abc123def4560001', NULL, 'threads.get', 'full') = v_th, 'beh na pozadí: threads.get sledovaného vlákna';
   BEGIN
     PERFORM gmail_read_authorize(pg_temp.e_id('u', 1), 'abc123def4560001', NULL, 'messages.list', 'full');
@@ -809,3 +813,95 @@ BEGIN
 END;
 $$;
 RESET ROLE;
+
+-- ============================================================================
+-- E9. Oslovenie (pán / pani / neuvádzať, vlastné má prednosť, bez titulu), vlastný podpis (vyčistené HTML, obrázky
+--     cid:), častejšia kontrola nedávno aktívnych vlákien (0044)
+-- ============================================================================
+UPDATE contact SET address_form = 'pan', salutation = NULL, title = 'Ing.' WHERE id = '00000000-0000-4000-8000-0000000e0402';
+DO $$
+BEGIN
+  ASSERT email_salutation(pg_temp.e_id('k', 2), 'sk') = 'Dobrý deň, pán Bezoslovenia', 'pán + priezvisko, bez titulu: ' || email_salutation(pg_temp.e_id('k', 2), 'sk');
+  ASSERT email_salutation(pg_temp.e_id('k', 2), 'en') = 'Dear Mr Bezoslovenia', 'EN';
+  UPDATE contact SET address_form = 'pani' WHERE id = pg_temp.e_id('k', 2);
+  ASSERT email_salutation(pg_temp.e_id('k', 2), 'sk') = 'Dobrý deň, pani Bezoslovenia', 'pani';
+  UPDATE contact SET address_form = NULL WHERE id = pg_temp.e_id('k', 2);
+  ASSERT email_salutation(pg_temp.e_id('k', 2), 'sk') = 'Dobrý deň' AND email_salutation(NULL, 'sk') = 'Dobrý deň', 'neuvádzať';
+  ASSERT email_salutation(pg_temp.e_id('k', 1), 'sk') = 'Pozdravujem, pani Testovacia', 'vlastné oslovenie má prednosť';
+  UPDATE contact SET address_form = 'pan' WHERE id = pg_temp.e_id('k', 2);
+  ASSERT email_offer_vars((SELECT id FROM offer WHERE deal_id = pg_temp.e_id('d', 3)))->>'oslovenie' = 'Dobrý deň, pán Bezoslovenia', 'e-mail k ponuke';
+  BEGIN
+    UPDATE contact SET address_form = 'pán' WHERE id = pg_temp.e_id('k', 2);
+    RAISE EXCEPTION 'CHYBA: neznáma voľba oslovenia';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  RAISE NOTICE 'OK: E9 oslovenie: pán / pani s priezviskom bez titulu, neuvádzať = Dobrý deň, vlastné má prednosť, EN, e-mail k ponuke';
+END;
+$$;
+SET LOCAL ROLE crm_rls_test;
+DO $$
+DECLARE
+  img jsonb := jsonb_build_array(jsonb_build_object('cid', 'sig1', 'mime', 'image/png', 'data_base64', encode('\x89504e47'::bytea, 'base64')));
+  bad text;
+BEGIN
+  PERFORM pg_temp.e_as(pg_temp.e_id('u', 1));
+  PERFORM user_signature_set(pg_temp.e_id('u', 1), 'vlastny', '<table><tr><td><img src="cid:sig1" width="80"></td><td style="color:#1b3a2b"><b>Obchodník E</b><br><a href="https://greenlogy.com">greenlogy.com</a></td></tr></table>', 'Obchodník E', img);
+  ASSERT email_signature(pg_temp.e_id('u', 1))->>'mode' = 'vlastny' AND email_signature(pg_temp.e_id('u', 1))->>'custom_html' LIKE '%cid:sig1%', 'vlastný podpis';
+  ASSERT (SELECT count(*) FROM user_signature_images_get(pg_temp.e_id('u', 1))) = 1, 'obrázok podpisu';
+  FOREACH bad IN ARRAY ARRAY[
+    '<script>alert(1)</script>', '<img src="https://sledovanie.example/px.gif">', '<img src=data:image/png;base64,AAA>',
+    '<a href="javascript:alert(1)">x</a>', '<td onclick="x()">x</td>', '<div style="background:url(https://x.example/a.png)">x</div>',
+    '<iframe src="cid:sig1"></iframe>', '<STYLE>td{}</STYLE>', '<img src=''//x.example/a.png''>'] LOOP
+    BEGIN
+      PERFORM user_signature_set(pg_temp.e_id('u', 1), 'vlastny', bad, 'x', img);
+      RAISE EXCEPTION 'CHYBA: podpis prešiel: %', bad;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  END LOOP;
+  BEGIN
+    PERFORM user_signature_set(pg_temp.e_id('u', 1), 'vlastny', '<img src="cid:sig2">', 'x', img);
+    RAISE EXCEPTION 'CHYBA: chýbajúci obrázok';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM user_signature_set(pg_temp.e_id('u', 1), 'vlastny', '<b>x</b>', 'x',
+      (SELECT jsonb_agg(jsonb_build_object('cid', 'sig' || n, 'mime', 'image/png', 'data_base64', 'AAAA')) FROM generate_series(1, 6) n));
+    RAISE EXCEPTION 'CHYBA: 6 obrázkov';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM user_signature_set(pg_temp.e_id('u', 3), 'vlastny', '<b>x</b>', 'x', '[]');
+    RAISE EXCEPTION 'CHYBA: cudzí podpis';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO user_signature (user_id, mode, html) VALUES (pg_temp.e_id('u', 1), 'vlastny', '<b>x</b>');
+    RAISE EXCEPTION 'CHYBA: priamy zápis podpisu';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM pg_temp.e_as(pg_temp.e_id('u', 3));
+  ASSERT NOT EXISTS (SELECT 1 FROM user_signature WHERE user_id = pg_temp.e_id('u', 1)), 'cudzí podpis nevidí';
+  PERFORM pg_temp.e_as(pg_temp.e_id('u', 2));
+  PERFORM user_signature_set(pg_temp.e_id('u', 1), 'profil', NULL, NULL, '[]');
+  ASSERT email_signature(pg_temp.e_id('u', 1))->>'mode' = 'profil' AND email_signature(pg_temp.e_id('u', 1))->'custom_html' = 'null'::jsonb, 'admin vrátil podpis z profilu';
+  ASSERT NOT EXISTS (SELECT 1 FROM user_signature_images_get(pg_temp.e_id('u', 1))), 'obrázky iba pri vlastnom podpise';
+  PERFORM pg_temp.e_as(NULL);
+  RAISE NOTICE 'OK: E9 vlastný podpis: sám alebo admin, obrázky iba cid: (najviac 5, každý cid má obrázok), bez skriptov, udalostí, vonkajších obrázkov, url() a štýlov; priamy zápis nie';
+END;
+$$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_th uuid := (SELECT id FROM email_thread WHERE gmail_thread_id = 'abc123def4560002');
+BEGIN
+  UPDATE app_user SET gmail_enabled = true WHERE id = pg_temp.e_id('u', 1);
+  UPDATE email_thread SET watch_until = crm_today() + 10, last_message_at = now() - interval '5 days', last_checked_at = now() - interval '5 minutes' WHERE id = v_th;
+  ASSERT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(email_watch_threads(200)) x WHERE (x->>'thread_id')::uuid = v_th), 'staré vlákno skontrolované pred 5 min – nie';
+  UPDATE email_thread SET last_checked_at = now() - interval '16 minutes' WHERE id = v_th;
+  ASSERT EXISTS (SELECT 1 FROM jsonb_array_elements(email_watch_threads(200)) x WHERE (x->>'thread_id')::uuid = v_th), 'staré vlákno po 15 min – áno';
+  UPDATE email_thread SET last_message_at = now() - interval '1 hour', last_checked_at = now() - interval '1 minute' WHERE id = v_th;
+  ASSERT EXISTS (SELECT 1 FROM jsonb_array_elements(email_watch_threads(200)) x WHERE (x->>'thread_id')::uuid = v_th), 'aktívne vlákno každú minútu';
+  RAISE NOTICE 'OK: E9 kontrola odpovedí: vlákna s aktivitou za 2 dni každý beh (minúta), staršie raz za 15 minút';
+END;
+$$;
+

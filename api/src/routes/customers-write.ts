@@ -6,7 +6,7 @@
 import { Hono } from 'hono';
 import type { Sql } from '../db';
 import { type AppEnv, UUID } from '../types';
-import { BadRequest, bool, EMAIL, Forbidden, readBody, str, uuid, type Body } from '../validate';
+import { BadRequest, bool, EMAIL, Forbidden, oneOf, readBody, str, uuid, type Body } from '../validate';
 
 export const customersWrite = new Hono<AppEnv>();
 
@@ -196,6 +196,8 @@ function personValues(b: Body, creating: boolean): Record<string, unknown> {
     v.email = v.email.toLowerCase();
     if (!EMAIL.test(v.email as string)) throw new BadRequest('E-mail nemá správny tvar.');
   }
+  // oslovenie v e-maile: pán / pani / neuvádzať (0044)
+  if ('address_form' in b) v.address_form = b.address_form === null || b.address_form === '' ? null : oneOf(b, 'address_form', 'Oslovenie', ['pan', 'pani'] as const);
   const household = bool(b, 'is_household', 'Domácnosť');
   if (household !== undefined) v.is_household = household;
   if (b.owner_id !== undefined) v.owner_id = b.owner_id === null ? null : uuid(b, 'owner_id', 'Vlastník');

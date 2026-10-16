@@ -20,7 +20,7 @@ type Signature = {
   name: string; job_title: string | null; email: string; phone: string | null; mobile: string | null; linkedin: string | null;
   company: string; address: string | null; web: string | null; has_photo: boolean;
 };
-type Profile = { id: string; signature: Signature };
+type Profile = { id: string; signature: Signature; custom: { mode: 'profil' | 'vlastny'; html: string | null; images: string[] } };
 
 export const EMAIL_STATUS: Record<string, { label: string; tone: 'neutral' | 'positive' | 'warning' | 'negative' | 'info' }> = {
   koncept: { label: 'Koncept', tone: 'neutral' },
@@ -37,10 +37,27 @@ const KIND_LABEL: Record<string, string> = {
 const splitAddresses = (v: string) => v.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join('');
 
-/** Podpis z profilu (náhľad ako v e-maile). */
+/** Vlastný podpis (vyčistené HTML) v izolovanom rámci bez skriptov; obrázky cid: z úložiska podpisu. */
+export function CustomSignatureFrame(props: { userId: string; html: string }) {
+  const doc = props.html.replace(/src="cid:(sig[1-5])"/g, (_m, cid: string) => `src="/api/profiles/${props.userId}/signature-images/${cid}"`);
+  return (
+    <iframe className="mail-sig-frame" title="Náhľad podpisu" sandbox="allow-same-origin"
+      srcDoc={`<!doctype html><meta charset="utf-8"><body style="margin:8px;font-family:Arial,sans-serif;font-size:13px;color:#222;background:#fff">${doc}</body>`} />
+  );
+}
+
+/** Podpis z profilu alebo vlastný (náhľad ako v e-maile). */
 export function SignaturePreview(props: { userId?: string }) {
   const { data } = useApi<Profile>(`/api/profiles/${props.userId ?? 'me'}`);
   if (!data) return null;
+  if (data.custom.mode === 'vlastny' && data.custom.html) {
+    return (
+      <div className="mail-sig mail-sig-custom">
+        <CustomSignatureFrame userId={data.id} html={data.custom.html} />
+        <span className="caption">vlastný podpis</span>
+      </div>
+    );
+  }
   const s = data.signature;
   return (
     <div className="mail-sig">

@@ -39,6 +39,13 @@ name = "RL_ACCEPT"
 namespace_id = "5103"
 simple = { limit = 5, period = 60 }
 
+# Interné prepojenie na crm-core (F4): iba metóda kick() – po akceptácii hneď odošle zaradené e-maily.
+# crm-ponuka nemá žiadne tajomstvá Gmailu; odosiela crm-core.
+[[services]]
+binding = "CRM"
+service = "crm-core"
+entrypoint = "EmailKick"
+
 [vars]
 ENVIRONMENT = "test"
 

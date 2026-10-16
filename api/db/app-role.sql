@@ -99,6 +99,8 @@ GRANT UPDATE (active) ON offer_asset TO crm_app;
 -- denník čítania sa nemení ani nemaže); šablóny e-mailov (admin a Marketing) a fotka do podpisu (sám alebo admin) priamo cez RLS.
 REVOKE INSERT, UPDATE ON email_thread, email_message, email_outbox, gmail_mailbox_state, mailbox_access_log FROM crm_app;
 GRANT DELETE ON email_template_version, user_photo TO crm_app;
+-- 0044: vlastný podpis a jeho obrázky mení iba funkcia user_signature_set (vyčistené HTML, sám alebo admin)
+REVOKE INSERT, UPDATE ON user_signature, user_signature_image FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

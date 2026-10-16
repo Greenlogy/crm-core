@@ -7568,7 +7568,7 @@ CREATE FUNCTION public.email_offer_vars(p_offer uuid) RETURNS jsonb
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT jsonb_build_object(
-           'oslovenie', coalesce(nullif(btrim(k.salutation), ''), CASE o.language WHEN 'en' THEN 'Dear Sir or Madam' ELSE 'Dobrý deň' END),
+           'oslovenie', email_salutation(coalesce(o.contact_id, d.person_id), o.language),
            'názov zákazníka', coalesce(c.name, btrim(p.first_name || ' ' || p.last_name)),
            'číslo ponuky', offer_display_number(o),
            'zhrnutie variantov', offer_variants_summary_text(o.id),
@@ -7578,7 +7578,6 @@ CREATE FUNCTION public.email_offer_vars(p_offer uuid) RETURNS jsonb
     JOIN app_user u ON u.id = d.owner_id
     LEFT JOIN company c ON c.id = d.company_id
     LEFT JOIN contact p ON p.id = d.person_id
-    LEFT JOIN contact k ON k.id = coalesce(o.contact_id, d.person_id)
    WHERE o.id = p_offer
 $$;
 
@@ -7777,6 +7776,28 @@ BEGIN
                            attempts = 0, send_key = NULL, pending = NULL, sending_started_at = NULL, error = NULL
    WHERE id = m.id;
 END;
+$$;
+
+
+--
+-- Name: email_salutation(uuid, public.offer_language); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.email_salutation(p_contact uuid, p_lang public.offer_language) RETURNS text
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT coalesce(
+           nullif(btrim(k.salutation), ''),
+           CASE p_lang
+             WHEN 'en' THEN CASE k.address_form WHEN 'pan' THEN 'Dear Mr ' || btrim(k.last_name)
+                                                WHEN 'pani' THEN 'Dear Ms ' || btrim(k.last_name)
+                                                ELSE 'Dear Sir or Madam' END
+             ELSE 'Dobrý deň' || CASE k.address_form WHEN 'pan' THEN ', pán ' || btrim(k.last_name)
+                                                     WHEN 'pani' THEN ', pani ' || btrim(k.last_name)
+                                                     ELSE '' END
+           END)
+    FROM (SELECT 1) one
+    LEFT JOIN contact k ON k.id = p_contact
 $$;
 
 
@@ -8116,9 +8137,13 @@ CREATE FUNCTION public.email_signature(p_user uuid) RETURNS jsonb
            'name', u.name, 'job_title', u.job_title, 'email', u.email, 'phone', u.phone, 'mobile', u.mobile,
            'linkedin', u.linkedin_url, 'company', coalesce(g.legal_name, 'Greenlogy a.s.'), 'address', g.address,
            'company_phone', g.support_phone, 'web', coalesce(g.web, 'www.greenlogy.com'),
-           'has_photo', EXISTS (SELECT 1 FROM user_photo p WHERE p.user_id = u.id))
+           'has_photo', EXISTS (SELECT 1 FROM user_photo p WHERE p.user_id = u.id),
+           'mode', coalesce(s.mode, 'profil'),
+           'custom_html', CASE WHEN s.mode = 'vlastny' THEN s.html END,
+           'custom_text', CASE WHEN s.mode = 'vlastny' THEN s.text_version END)
     FROM app_user u
     LEFT JOIN org g ON g.id = crm_default_org()
+    LEFT JOIN user_signature s ON s.user_id = u.id
    WHERE u.id = p_user
 $$;
 
@@ -8375,6 +8400,9 @@ BEGIN
     FROM (SELECT t.id, t.mailbox_user_id, u.email, t.gmail_thread_id
             FROM email_thread t JOIN app_user u ON u.id = t.mailbox_user_id
            WHERE t.gmail_thread_id IS NOT NULL AND t.watch_until >= crm_today() AND u.status = 'aktivny' AND u.gmail_enabled
+             AND (t.last_checked_at IS NULL
+                  OR t.last_message_at > now() - interval '2 days'
+                  OR t.last_checked_at < now() - interval '15 minutes')
            ORDER BY t.last_checked_at NULLS FIRST LIMIT greatest(least(p_limit, 200), 1)) x;
   RETURN res;
 END;
@@ -14269,6 +14297,64 @@ $$;
 
 
 --
+-- Name: user_signature_images_get(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_signature_images_get(p_user uuid) RETURNS TABLE(cid text, mime text, data bytea)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT i.cid, i.mime, i.data FROM user_signature_image i
+    JOIN user_signature s ON s.user_id = i.user_id AND s.mode = 'vlastny'
+   WHERE i.user_id = p_user
+   ORDER BY i.cid
+$$;
+
+
+--
+-- Name: user_signature_set(uuid, text, text, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_signature_set(p_user uuid, p_mode text, p_html text, p_text text, p_images jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  i      jsonb;
+  v_cid  text;
+  v_data bytea;
+BEGIN
+  IF crm_active_user_id() IS NULL OR NOT (p_user = crm_active_user_id() OR crm_is_admin()) THEN
+    RAISE EXCEPTION 'Podpis mení používateľ sám alebo admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_mode NOT IN ('profil', 'vlastny') THEN
+    RAISE EXCEPTION 'Neznámy druh podpisu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF jsonb_typeof(coalesce(p_images, '[]')) <> 'array' OR jsonb_array_length(coalesce(p_images, '[]')) > 5 THEN
+    RAISE EXCEPTION 'Podpis môže mať najviac 5 obrázkov.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_mode = 'vlastny' THEN
+    FOR v_cid IN SELECT m[1] FROM regexp_matches(coalesce(p_html, ''), 'cid:([A-Za-z0-9]+)', 'g') m LOOP
+      IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(p_images, '[]')) x WHERE x->>'cid' = v_cid) THEN
+        RAISE EXCEPTION 'Podpis odkazuje na chýbajúci obrázok.' USING ERRCODE = 'check_violation';
+      END IF;
+    END LOOP;
+  END IF;
+  INSERT INTO user_signature (user_id, mode, html, text_version, updated_by)
+  VALUES (p_user, p_mode, nullif(p_html, ''), nullif(p_text, ''), crm_active_user_id())
+  ON CONFLICT (user_id) DO UPDATE SET mode = excluded.mode, html = excluded.html, text_version = excluded.text_version,
+                                      updated_by = excluded.updated_by;
+  DELETE FROM user_signature_image WHERE user_id = p_user;
+  FOR i IN SELECT * FROM jsonb_array_elements(coalesce(p_images, '[]')) LOOP
+    v_data := decode(i->>'data_base64', 'base64');
+    INSERT INTO user_signature_image (user_id, cid, mime, data, sha256)
+    VALUES (p_user, i->>'cid', i->>'mime', v_data, encode(sha256(v_data), 'hex'));
+  END LOOP;
+END;
+$$;
+
+
+--
 -- Name: working_days_before(uuid, date, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -14873,6 +14959,8 @@ CREATE TABLE public.contact (
     op_person_id uuid,
     created_by_import uuid,
     salutation text,
+    address_form text,
+    CONSTRAINT contact_address_form_check CHECK ((address_form = ANY (ARRAY['pan'::text, 'pani'::text]))),
     CONSTRAINT contact_email_format_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
     CONSTRAINT contact_marketing_opt_out_check CHECK (((marketing_opt_out_at IS NULL) = (marketing_opt_out_source IS NULL))),
     CONSTRAINT contact_name_check CHECK (((btrim(first_name) <> ''::text) AND (btrim(last_name) <> ''::text))),
@@ -14949,7 +15037,14 @@ COMMENT ON COLUMN public.contact.created_by_import IS 'založený importom zmlú
 -- Name: COLUMN contact.salutation; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.contact.salutation IS 'oslovenie v e-maile (napr. „Pozdravujem Vás, pani Hrobáriková“); prázdne = „Dobrý deň“ – 0042';
+COMMENT ON COLUMN public.contact.salutation IS 'vlastné oslovenie v e-maile (má prednosť pred pán / pani), napr. „Ahoj Pavol“; prázdne = podľa address_form – 0042, 0044';
+
+
+--
+-- Name: COLUMN contact.address_form; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contact.address_form IS 'oslovenie v e-maile: pan / pani / NULL = neuvádzať („Dobrý deň“); vyberá obchodník – 0044';
 
 
 --
@@ -17739,6 +17834,58 @@ COMMENT ON TABLE public.user_photo IS 'fotka do podpisu e-mailu (štvorec, do 30
 
 
 --
+-- Name: user_signature; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_signature (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    mode text DEFAULT 'profil'::text NOT NULL,
+    html text,
+    text_version text,
+    updated_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_signature_check CHECK (((mode = 'profil'::text) OR ((html IS NOT NULL) AND (btrim(html) <> ''::text)))),
+    CONSTRAINT user_signature_html_check CHECK (((html IS NULL) OR ((length(html) <= 100000) AND (html !~* '<\s*/?\s*(script|iframe|frame|object|embed|applet|form|input|button|textarea|select|meta|link|base|style|svg|math|video|audio|source)\M'::text) AND (html !~* '\son[a-z]+\s*='::text) AND (html !~* '(javascript|vbscript|data)\s*:'::text) AND (html !~* 'url\s*\('::text) AND (html !~* 'expression\s*\('::text) AND (html !~* '\ssrc\s*=\s*["'']?(?!["'']|cid:)'::text)))),
+    CONSTRAINT user_signature_mode_check CHECK ((mode = ANY (ARRAY['profil'::text, 'vlastny'::text]))),
+    CONSTRAINT user_signature_text_version_check CHECK (((text_version IS NULL) OR (length(text_version) <= 20000)))
+);
+
+
+--
+-- Name: TABLE user_signature; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.user_signature IS 'podpis e-mailu: z profilu alebo vlastný HTML (vyčistený; obrázky iba cid: z user_signature_image) – 0044';
+
+
+--
+-- Name: user_signature_image; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_signature_image (
+    user_id uuid NOT NULL,
+    cid text NOT NULL,
+    mime text NOT NULL,
+    data bytea NOT NULL,
+    sha256 text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_signature_image_cid_check CHECK ((cid ~ '^sig[1-5]$'::text)),
+    CONSTRAINT user_signature_image_data_check CHECK ((octet_length(data) <= 307200)),
+    CONSTRAINT user_signature_image_mime_check CHECK ((mime = ANY (ARRAY['image/png'::text, 'image/jpeg'::text, 'image/gif'::text]))),
+    CONSTRAINT user_signature_image_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: TABLE user_signature_image; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.user_signature_image IS 'obrázky vlastného podpisu (najviac 5, do 300 kB) – v e-maile ako vložené prílohy cid:, bez načítania zvonka – 0044';
+
+
+--
 -- Name: voucher; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -19043,6 +19190,30 @@ ALTER TABLE ONLY public.user_commission_rate
 
 ALTER TABLE ONLY public.user_photo
     ADD CONSTRAINT user_photo_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: user_signature_image user_signature_image_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature_image
+    ADD CONSTRAINT user_signature_image_pkey PRIMARY KEY (user_id, cid);
+
+
+--
+-- Name: user_signature user_signature_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature
+    ADD CONSTRAINT user_signature_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_signature user_signature_user_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature
+    ADD CONSTRAINT user_signature_user_id_key UNIQUE (user_id);
 
 
 --
@@ -20730,6 +20901,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.user_commiss
 
 
 --
+-- Name: user_signature trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.user_signature FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: voucher trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -21945,6 +22123,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.team_permission FOR EA
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.user_commission_rate FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_signature trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.user_signature FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -23755,6 +23940,30 @@ ALTER TABLE ONLY public.user_photo
 
 
 --
+-- Name: user_signature_image user_signature_image_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature_image
+    ADD CONSTRAINT user_signature_image_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_signature user_signature_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature
+    ADD CONSTRAINT user_signature_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: user_signature user_signature_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_signature
+    ADD CONSTRAINT user_signature_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id) ON DELETE CASCADE;
+
+
+--
 -- Name: voucher voucher_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -25538,6 +25747,32 @@ CREATE POLICY user_photo_write ON public.user_photo USING (((user_id = public.cr
 
 
 --
+-- Name: user_signature; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_signature ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: user_signature_image; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_signature_image ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: user_signature_image user_signature_image_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_signature_image_select ON public.user_signature_image FOR SELECT USING (((user_id = public.crm_active_user_id()) OR public.crm_is_admin()));
+
+
+--
+-- Name: user_signature user_signature_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_signature_select ON public.user_signature FOR SELECT USING (((user_id = public.crm_active_user_id()) OR public.crm_is_admin()));
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -25590,4 +25825,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0040'),
     ('0041'),
     ('0042'),
-    ('0043');
+    ('0043'),
+    ('0044');
