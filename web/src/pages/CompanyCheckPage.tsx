@@ -65,8 +65,11 @@ const stamp = (v: string) =>
 export function CompanyCheckPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [mode, setMode] = useState<'ico' | 'nazov'>(params.get('ico') ? 'ico' : 'ico');
-  const [q, setQ] = useState(params.get('ico') ?? '');
+  // ?q= z hľadania na Domove: IČO sa overí hneď, názov sa vpíše do hľadania podľa názvu
+  const initialQ = params.get('q')?.trim() ?? '';
+  const qIsIco = /^\d{6,8}$/.test(initialQ.replace(/\s/g, ''));
+  const [mode, setMode] = useState<'ico' | 'nazov'>(initialQ && !qIsIco ? 'nazov' : 'ico');
+  const [q, setQ] = useState(params.get('ico') ?? (qIsIco ? initialQ.replace(/\s/g, '') : initialQ));
   const [suggest, setSuggest] = useState<SearchResult | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [dealPanel, setDealPanel] = useState(false);
@@ -80,7 +83,7 @@ export function CompanyCheckPage() {
     });
 
   useEffect(() => {
-    const ico = params.get('ico');
+    const ico = params.get('ico') ?? (qIsIco ? initialQ.replace(/\s/g, '') : null);
     if (ico && /^\d{6,8}$/.test(ico)) void check(ico);
   }, []);
 

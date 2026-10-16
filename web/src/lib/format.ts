@@ -61,6 +61,19 @@ export function dec(v: Num | undefined, min: number, max = min): string {
   return `${m[1]}${int}${frac ? `,${frac}` : ''}`;
 }
 
+/** Zaokrúhli na `places` desatinných miest (polovica nahor, bez chýb plávajúcej čiarky) a zobrazí ako `dec`.
+ * Iba na zobrazenie – cena pre obchodníka na Domove (Peter 16. 10. 2026: 2 desatinné miesta). */
+export function decRound(v: Num | undefined, places: number): string {
+  if (v === null || v === undefined || v === '') return EMPTY;
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(v).trim());
+  if (!m) return EMPTY;
+  const digits = BigInt(m[2] + (m[3] ?? '').padEnd(places + 1, '0').slice(0, places + 1));
+  const r = (digits + 5n) / 10n;
+  const str = r.toString().padStart(places + 1, '0');
+  const neg = m[1] && r !== 0n ? '-' : '';
+  return dec(`${neg}${str.slice(0, -places) || '0'}.${str.slice(-places)}`, places, places);
+}
+
 // 'YYYY-MM-DD' alebo ISO čas → „8. 10. 2026“ (čas v Europe/Bratislava).
 export function date(v: string | null | undefined): string {
   if (!v) return EMPTY;

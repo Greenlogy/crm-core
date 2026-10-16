@@ -2705,3 +2705,57 @@ a.tab {
     font-size: 16px;
   }
 }
+
+/* Domov: hľadanie firmy a tlačidlá v hlavičke (dizajn 01) */
+.hero-name {
+  color: var(--gl-brand-blue);
+}
+.home-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 780px;
+  min-width: 0;
+}
+.home-check {
+  display: flex;
+  gap: 10px;
+  flex: 1 1 380px;
+  min-width: 0;
+}
+.home-check-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.home-check-input input {
+  font-size: var(--gl-fs-body);
+}
+.home-check-hint {
+  flex-basis: 100%;
+  text-align: right;
+  font-size: var(--gl-fs-caption);
+  color: var(--gl-ink-2);
+}
+@media (max-width: 760px) {
+  .gl-hero--home {
+    padding-bottom: 104px;
+  }
+  .home-hero-actions {
+    justify-content: flex-start;
+    flex-basis: 100%;
+  }
+  .home-hero-actions .btn {
+    padding: 10px 14px;
+  }
+  .home-check {
+    flex-basis: 100%;
+  }
+  .home-check-hint {
+    text-align: left;
+  }
+  .home-check-input input {
+    font-size: 16px;
+  }
+}

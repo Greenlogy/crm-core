@@ -12,7 +12,7 @@ import { PageHero } from '../components/hero';
 import { Icon, ICONS } from '../components/Layout';
 import { Card, DateTile, Empty, ErrorState, Pill, Skeleton } from '../components/ui';
 import { useApi } from '../lib/api';
-import { date, dec, EMPTY, eur, num } from '../lib/format';
+import { date, dec, decRound, EMPTY, eur, num } from '../lib/format';
 import { useMe } from '../lib/me';
 
 type Home = {
@@ -45,29 +45,66 @@ function parse(v: string): number | null {
   return Number(s);
 }
 
+/** Pozdrav podľa času v Bratislave (Peter 16. 10. 2026: pozdrav ako v návrhu): do 10:00 ráno, do 18:00 deň, potom večer. */
+function greeting(now: Date): string {
+  const h = Number(new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', hour: 'numeric', hourCycle: 'h23' }).format(now));
+  return h < 10 ? 'Dobré ráno' : h < 18 ? 'Dobrý deň' : 'Dobrý večer';
+}
+
+/** „piatok 16. 10. 2026“ */
+const todayLabel = (now: Date) =>
+  `${new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', weekday: 'long' }).format(now)} ${date(now.toISOString())}`;
+
 export function HomePage() {
   const me = useMe();
+  const navigate = useNavigate();
   const { data, error } = useApi<Home>('/api/home');
+  const [q, setQ] = useState('');
+  const [newDeal, setNewDeal] = useState(false);
   if (error) return <ErrorState error={error} />;
+  const now = new Date();
+  const firstName = me.name.split(' ')[0];
   return (
     <>
       <PageHero
         size="home"
-        title="Domov"
-        sub={`${me.name} · ceny, kalkulačka a moje obchody`}
-        actions={
+        above={todayLabel(now)}
+        title={
           <>
-            <Link className="btn" to="/overenie-firmy">
-              <Icon d={ICONS.check} />
-              Overiť firmu
-            </Link>
+            {greeting(now)}, <span className="hero-name">{firstName}</span>
+          </>
+        }
+        actions={
+          <div className="home-hero-actions">
+            <form
+              className="home-check"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                navigate(q.trim() ? `/overenie-firmy?q=${encodeURIComponent(q.trim())}` : '/overenie-firmy');
+              }}
+            >
+              <div className="gl-search home-check-input">
+                <Icon d={ICONS.search} />
+                <input type="search" placeholder="IČO alebo názov firmy…" aria-label="IČO alebo názov firmy" value={q} onChange={(e) => setQ(e.target.value)} />
+              </div>
+              <button type="submit" className="btn">
+                Overiť firmu
+              </button>
+            </form>
             <Link className="btn" to="/obchody?owner=ja">
               <Icon d={ICONS.deals} />
               Moje obchody
             </Link>
-          </>
+            <button type="button" className="btn primary" onClick={() => setNewDeal(true)}>
+              <Icon d={ICONS.plus} />
+              Nový obchod
+            </button>
+            <div className="home-check-hint">Finstat + CRM: vlastník, otvorené obchody, dlhy, rating, Z-skóre</div>
+          </div>
         }
       />
+      {newDeal && <NewDealPanel onClose={() => setNewDeal(false)} onSaved={(id) => navigate(`/obchody/${id}`)} />}
       {!data ? (
         <div className="gl-overlap card card-body" style={{ paddingTop: 20 }}>
           <Skeleton lines={10} />
@@ -90,7 +127,7 @@ function HomeBody({ d }: { d: Home }) {
             main={i === 0}
             color={i > 0 ? COLORS[i % COLORS.length] : undefined}
             label={`Cena pre obchodníka FIX ${p.delivery_year}`}
-            value={p.trader_price ? dec(p.trader_price, 2, 2) : ''}
+            value={p.trader_price ? decRound(p.trader_price, 2) : ''}
             meta={p.price_date ? `€/MWh · stav k ${date(p.price_date)}` : 'cena dňa chýba'}
           />
         ))}
@@ -238,7 +275,7 @@ function PriceChart({ series }: { series: Home['series'] }) {
   const summary = ends
     .slice()
     .sort((a, b) => a.year - b.year)
-    .map((e) => `CAL ${e.year} ${dec(e.value, 2, 2)} €/MWh`)
+    .map((e) => `CAL ${e.year} ${decRound(e.value, 2)} €/MWh`)
     .join(', ');
   const main = series[0] ? pts(series[0]) : [];
   return (
@@ -293,7 +330,7 @@ function PriceChart({ series }: { series: Home['series'] }) {
           fontWeight={e.i === 0 ? 600 : 400}
           fill={e.i === 0 ? 'var(--gl-ink)' : 'var(--gl-ink-muted)'}
         >
-          {dec(e.value, 2, 2)}
+          {decRound(e.value, 2)}
         </text>
       ))}
     </svg>
@@ -360,7 +397,7 @@ function Calculator({ d }: { d: Home }) {
       {kind === 'fix' && b?.basis === 'odhad_portfolia' && (
         <div className="caption" style={{ marginBottom: 8 }}>Ako manažér máte pri FIX hranicu odhad portfólia – rovnako ako v ponuke.</div>
       )}
-      <button type="button" className="btn primary calc-cta" disabled={!r} onClick={() => setCreating(true)}>
+      <button type="button" className="btn calc-cta" disabled={!r} onClick={() => setCreating(true)}>
         <Icon d={ICONS.plus} />
         Vytvoriť obchod s touto cenou
       </button>
