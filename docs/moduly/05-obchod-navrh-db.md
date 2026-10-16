@@ -1619,7 +1619,7 @@ Podľa zadania 9 a 10, návrhu časti 2 a obrazoviek 38, 40 (úprava 25, 26). Dv
 - **Nočný beh obchodov:** pri zapnutom `deal_matching` obchod v Akceptácii / Vyhraté, ktorého akceptovaný variant má OOM bez zmluvy obchodu aj 14 dní po akceptácii → upozornenie **`chyba_oom_na_zmluve`** obchodníkovi raz.
 - Testy F8, F9; test modulu 4 Z4-1 upravený (pri firme Obnova namiesto „Končí do 4 mesiacov“). Mutácie zachytené; `down` vráti schému z `dev` (0045).
 
-## 36. Plán F6 – Domov obchodníka a prehľady (schválený 16. 10. 2026)
+## 36. Plán F6 – Domov obchodníka a prehľady (schválený 16. 10. 2026, F6 uzavretá 16. 10.)
 
 Podľa zadania 11, 13, návrhu časti 7 a obrazoviek 30, 32. Dva kroky, každý: migrácia nanečisto → `dev` → API a obrazovky → Test.
 
