@@ -14,7 +14,7 @@ const handoff = readFileSync(src, 'utf8');
 // Hodnoty z docs/design-handoff/styles/components.css a DESIGN_SPEC.md, ktoré nemajú vlastný token.
 const extra: [string, string][] = [
   ['gl-on-primary', '#ffffff'], // text na primárnom tlačidle a zvolenom čipe
-  ['gl-chip-count-on', '#dcebf5'], // počet na zvolenom čipe
+  ['gl-chip-count-on', 'var(--gl-on-primary)'], // počet na zvolenom čipe; návrh #dcebf5 mal na modrej iba 3,92:1
   ['gl-chip-ink', '#3d5566'], // text nezvoleného čipu
   ['gl-rail-hover', '#eef5f8'], // hover položky menu
   ['gl-btn-hover-bg', '#f7fbfd'], // hover sekundárneho tlačidla

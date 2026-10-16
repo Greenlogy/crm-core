@@ -1,4 +1,5 @@
-// Zoznam zákazníkov podľa docs/dizajn/obrazovky/08-zoznam-zakaznikov.html (modul Zákazníci, čl. 9):
+// Zoznam zákazníkov podľa docs/dizajn/obrazovky/08-zoznam-zakaznikov.html (modul Zákazníci, čl. 9), vzhľad podľa
+// docs/design-handoff/reference/02-zakaznici.html (hlavička s krajinou, filter stavu v sklenenej lište):
 // firmy a domácnosti, filter stavu s počtami, segment, vlastník; predvolene bez marketingových kontaktov a archívu.
 // Položka menu „Leady“ = tento zoznam s filtrom Záujemca + Ponuka.
 
@@ -7,8 +8,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CustomerStatus } from '../components/customer';
 import { CompanyFormPanel, PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
 import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-fields';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
 import { permission, useMe } from '../lib/me';
-import { Avatar, Card, ErrorState, Skeleton, Source } from '../components/ui';
+import { Avatar, Card, ErrorState, Skeleton, Source, WithUnit } from '../components/ui';
 import { useApi, type CustomerList, type CustomerListItem, type Owner } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
 import { CUSTOMER_STATUS } from '../lib/labels';
@@ -106,47 +109,84 @@ export function CustomersPage(props: { leads?: boolean }) {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">{props.leads ? 'Leady' : 'Zákazníci'}</h1>
-          <div className="page-sub">
-            <span>
-              {props.leads
-                ? 'záujemcovia a firmy či domácnosti s odoslanou ponukou'
-                : `${counts ? num(counts.visible, 0) : '…'} · firmy a domácnosti`}
-            </span>
-            <Source />
+      <PageHero
+        title={props.leads ? 'Leady' : 'Zákazníci'}
+        sub={
+          <>
+            {props.leads ? (
+              'záujemcovia a firmy či domácnosti s odoslanou ponukou'
+            ) : (
+              <>
+                <b className="hero-count">{counts ? num(counts.visible, 0) : '…'}</b> · firmy a domácnosti
+              </>
+            )}{' '}
+            · <Source />
+          </>
+        }
+        actions={
+          <>
+            {canExport && (
+              <a className="btn" href={`/api/customers/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+                <Icon d={ICONS.download} />
+                Export
+              </a>
+            )}
+            {canCreate && (
+              <>
+                <button className="btn" type="button" onClick={() => setCreating('person')}>
+                  Nová domácnosť
+                </button>
+                <button className="btn primary" type="button" onClick={() => setCreating('company')}>
+                  <Icon d={ICONS.plus} />
+                  Nová firma
+                </button>
+              </>
+            )}
+          </>
+        }
+      />
+
+      {!props.leads && (
+        <GlassBar
+          label="Filter podľa stavu"
+          aside={
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) =>
+                  update({ vsetko: e.target.checked ? '1' : '', stav: !e.target.checked && HIDDEN_CHIPS.includes(chip) ? '' : chip, page: '1' })
+                }
+              />
+              Zobraziť aj marketingové kontakty{counts ? ` (${num(counts.byStatus.marketingovy_kontakt, 0)})` : ''} a archív
+              {counts ? ` (${num(counts.archived, 0)})` : ''}
+            </label>
+          }
+        >
+          <div className="chips" role="group" aria-label="Stav">
+            {chipButton('', 'Všetci', counts ? (showAll ? counts.all : counts.visible) : undefined)}
+            {STATUS_CHIPS.map((s) => chipButton(s, CUSTOMER_STATUS[s].label, counts?.byStatus[s]))}
+            {showAll &&
+              HIDDEN_CHIPS.map((s) =>
+                chipButton(s, s === 'zruseny_zakaznik' ? 'Archív' : CUSTOMER_STATUS[s].label, s === 'zruseny_zakaznik' ? counts?.archived : counts?.byStatus[s]),
+              )}
           </div>
-        </div>
-        <div className="head-actions">
-          {canExport && (
-            <a className="btn" href={`/api/customers/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
-              Export
-            </a>
-          )}
-          {canCreate && (
-            <>
-              <button className="btn" type="button" onClick={() => setCreating('person')}>
-                Nová domácnosť
-              </button>
-              <button className="btn primary" type="button" onClick={() => setCreating('company')}>
-                Nová firma
-              </button>
-            </>
-          )}
-        </div>
-      </header>
+        </GlassBar>
+      )}
 
       <Card flush label="Zoznam zákazníkov">
         <div className="toolbar">
-          <input
-            className="input grow"
-            type="search"
-            placeholder="Názov, IČO/OIB, e-mail alebo telefón…"
-            aria-label="Hľadať zákazníka"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
+          <div className="gl-search list-search">
+            <Icon d={ICONS.search} />
+            <input
+              className="input"
+              type="search"
+              placeholder="Názov, IČO/OIB, e-mail alebo telefón…"
+              aria-label="Hľadať zákazníka"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
           <select className="input select" aria-label="Segment" value={segment} onChange={(e) => update({ segment: e.target.value, page: '1' })}>
             {SEGMENTS.map(([value, name]) => (
               <option key={value} value={value}>
@@ -178,30 +218,6 @@ export function CustomersPage(props: { leads?: boolean }) {
             onChange={(v) => update({ cf: Object.keys(v).length ? JSON.stringify(v) : '', page: '1' })}
           />
         </div>
-
-        {!props.leads && (
-          <div className="toolbar chips-bar">
-            <div className="chips" role="group" aria-label="Filter podľa stavu">
-              {chipButton('', 'Všetci', counts ? (showAll ? counts.all : counts.visible) : undefined)}
-              {STATUS_CHIPS.map((s) => chipButton(s, CUSTOMER_STATUS[s].label, counts?.byStatus[s]))}
-              {showAll &&
-                HIDDEN_CHIPS.map((s) =>
-                  chipButton(s, s === 'zruseny_zakaznik' ? 'Archív' : CUSTOMER_STATUS[s].label, s === 'zruseny_zakaznik' ? counts?.archived : counts?.byStatus[s]),
-                )}
-            </div>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={showAll}
-                onChange={(e) =>
-                  update({ vsetko: e.target.checked ? '1' : '', stav: !e.target.checked && HIDDEN_CHIPS.includes(chip) ? '' : chip, page: '1' })
-                }
-              />
-              Zobraziť aj marketingové kontakty{counts ? ` (${num(counts.byStatus.marketingovy_kontakt, 0)})` : ''} a archív
-              {counts ? ` (${num(counts.archived, 0)})` : ''}
-            </label>
-          </div>
-        )}
 
         {error ? (
           <div style={{ padding: '0 16px 16px' }}>
@@ -273,7 +289,7 @@ export function CustomersPage(props: { leads?: boolean }) {
                       </span>
                     </td>
                     <td className="num">{num(c.active_oom_count, 0)}</td>
-                    <td className={`num${Number(c.annual_mwh) ? '' : ' muted'}`}>{Number(c.annual_mwh) ? mwh(c.annual_mwh) : '–'}</td>
+                    <td className={`num${Number(c.annual_mwh) ? '' : ' muted'}`}>{Number(c.annual_mwh) ? <WithUnit value={mwh(c.annual_mwh)} /> : '–'}</td>
                     <td>{text(c.owner_name)}</td>
                     {multiOrg && <td>{c.org_name}</td>}
                     {listDefs.map((d) => (
@@ -294,17 +310,17 @@ export function CustomersPage(props: { leads?: boolean }) {
             <span className="caption">
               {data.total === 0
                 ? '0'
-                : `${num((page - 1) * data.pageSize + 1, 0)}–${num(Math.min(page * data.pageSize, data.total), 0)} z ${num(data.total, 0)}`}
+                : `${num((page - 1) * data.pageSize + 1, 0)}–${num(Math.min(page * data.pageSize, data.total), 0)} z ${num(data.total, 0)} · stav a segment sa počítajú z OOM, dealov a zmlúv`}
             </span>
             {pages > 1 && (
-              <>
+              <div className="pager-actions">
                 <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                   ← Predchádzajúca
                 </button>
                 <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
                   Ďalšia →
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}

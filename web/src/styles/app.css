@@ -832,8 +832,11 @@ a:hover {
   color: inherit;
 }
 .name-link {
-  color: var(--brand-text);
-  font-weight: 500;
+  color: var(--gl-ink);
+  font-weight: var(--gl-fw-medium);
+}
+a:hover .name-link {
+  text-decoration: underline;
 }
 .pills {
   display: inline-flex;
@@ -2758,4 +2761,35 @@ a.tab {
   .home-check-input input {
     font-size: 16px;
   }
+}
+
+/* Zoznamy (dizajn 02, 03, 05): hľadanie s lupou, počet v hlavičke, jednotka, stránkovanie */
+.hero-count {
+  font-weight: var(--gl-fw-semibold);
+  color: var(--gl-brand-blue);
+}
+.list-search {
+  flex: 1 1 320px;
+  max-width: 520px;
+  min-width: 0;
+}
+.list-search .input {
+  width: 100%;
+  min-width: 0;
+  padding-left: 42px;
+}
+.unit {
+  color: var(--gl-ink-muted);
+}
+.pager-actions {
+  display: flex;
+  gap: 8px;
+}
+.gl-glassbar .check {
+  color: var(--gl-ink-2);
+}
+.gl-glassbar .check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gl-blue-600);
 }
