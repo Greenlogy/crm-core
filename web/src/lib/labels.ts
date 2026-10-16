@@ -68,6 +68,10 @@ export const CONTRACT_FLAG: Record<string, { label: string; tone: Tone }> = {
   pod_hranicou_bez_vynimky: { label: 'Pod hranicou bez výnimky', tone: 'negative' },
   nad_30_mwh: { label: 'Nad 30 MWh v regulácii', tone: 'warning' },
   objem_xm: { label: 'Objem ≠ XM Trade', tone: 'warning' },
+  // párovanie s obchodmi (0045)
+  cena_ina_ako_v_ponuke: { label: 'Cena iná ako v ponuke', tone: 'negative' },
+  nesparovana: { label: 'Nespárovaná s obchodom', tone: 'warning' },
+  bez_obchodu: { label: 'Bez obchodu', tone: 'neutral' },
 };
 
 // Upozornenia (zvonček, 0028)
@@ -92,6 +96,8 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
   ponuka_pripomienka: { label: 'Pripomienka platnosti', tone: 'info' },
   gmail_chyba: { label: 'Chyba Gmailu', tone: 'negative' },
   email_chyba: { label: 'Chyba e-mailu', tone: 'negative' },
+  nesparovana_zmluva: { label: 'Nespárovaná zmluva', tone: 'warning' },
+  cena_ina_ako_v_ponuke: { label: 'Cena iná ako v ponuke', tone: 'negative' },
 };
 
 // Kroky nočného behu zmlúv (denník, 0028)

@@ -178,6 +178,8 @@ export function ContractPage() {
         )}
       </section>
 
+      <DealMatchCard k={k} onChanged={reload} />
+
       {openFlags.length > 0 && (
         <Card title="Na kontrolu">
           {openFlags.map((f) => (
@@ -186,7 +188,7 @@ export function ContractPage() {
               title={<Pill tone={CONTRACT_FLAG[f.code]?.tone ?? 'neutral'}>{CONTRACT_FLAG[f.code]?.label ?? f.code}</Pill>}
               meta={`${f.detail ?? ''} · od ${date(f.raised_at)}`}
               side={
-                f.code === 'pod_hranicou_bez_vynimky' ? (
+                f.code === 'pod_hranicou_bez_vynimky' || f.code === 'cena_ina_ako_v_ponuke' ? (
                   k.can_resolve_threshold ? (
                     <button type="button" className="btn" disabled={save.busy} onClick={() => setClosing(f.id)}>
                       Uzavrieť s poznámkou
@@ -207,8 +209,8 @@ export function ContractPage() {
             />
           ))}
           <div className="caption">
-            „Chýba cena“ zmizne sama, keď cena pribudne (import, balík VIWA, cenník). „Pod hranicou bez výnimky“ uzatvára iba
-            schvaľovateľ cien s poznámkou, alebo sa uzavrie sama schválenou výnimkou.
+            „Chýba cena“ zmizne sama, keď cena pribudne (import, balík VIWA, cenník). „Pod hranicou bez výnimky“ a „Cena iná ako
+            v ponuke“ uzatvára iba schvaľovateľ cien s poznámkou; „Pod hranicou“ sa uzavrie aj sama schválenou výnimkou.
           </div>
         </Card>
       )}
@@ -601,3 +603,102 @@ function XmCell(props: { o: ContractCard['ooms'][number]; months: number }) {
     </>
   );
 }
+
+const MATCH_LABEL: Record<string, string> = { auto: 'automaticky pri importe', rucne: 'ručne' };
+const STAGE_LABEL: Record<string, string> = {
+  prilezitost: 'Príležitosť', cenova_ponuka: 'Cenová ponuka', vyjednavanie: 'Vyjednávanie', akceptacia: 'Akceptácia', vyhrane: 'Vyhraté', prehrane: 'Prehraté',
+};
+
+/** Obchod k zmluve (F5, 0045): spárovaný obchod a ponuka, nespárovaná s kandidátmi, bez obchodu; ručné rozhodnutia. */
+function DealMatchCard(props: { k: ContractCard; onChanged: () => void }) {
+  const { k } = props;
+  const [panel, setPanel] = useState<null | 'unlink' | 'none'>(null);
+  const [note, setNote] = useState('');
+  const save = useSave();
+  if (!k.deal_match && !k.deal_id) return null;
+  const act = (fn: () => Promise<unknown>) =>
+    save.run(async () => {
+      await fn();
+      setPanel(null);
+      setNote('');
+      props.onChanged();
+    });
+  return (
+    <Card title="Obchod">
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+      {k.deal_id ? (
+        <Rows
+          rows={[
+            ['Obchod', <><Link to={`/obchody/${k.deal_id}`}>{k.deal_name}</Link>{k.deal_stage ? ` · ${STAGE_LABEL[k.deal_stage] ?? k.deal_stage}` : ''}</>],
+            ['Ponuka', k.offer_id ? <Link to={`/ponuky/${k.offer_id}`}>{k.offer_number} · variant {k.offer_variant}</Link> : 'spárované bez akceptovanej ponuky'],
+            ['Spárované', k.deal_match ? `${MATCH_LABEL[k.deal_match] ?? k.deal_match}${k.deal_matched_at ? ` ${date(k.deal_matched_at)}` : ''}${k.deal_matched_by_name ? ` · ${k.deal_matched_by_name}` : ''}` : 'pred zavedením párovania'],
+          ]}
+        />
+      ) : k.deal_match === 'bez_obchodu' ? (
+        <p>
+          <Pill>Bez obchodu</Pill> {k.deal_matched_by_name ? `označil ${k.deal_matched_by_name}` : 'automaticky'}
+          {k.deal_matched_at ? ` ${date(k.deal_matched_at)}` : ''}{k.deal_match_note ? ` – ${k.deal_match_note}` : ''}
+        </p>
+      ) : (
+        <>
+          <p>
+            <Pill tone="warning">Nespárovaná</Pill> Import nenašiel jednoznačne obchod toho istého zákazníka, ktorého OOM sa zhodujú so zmluvou.
+            {k.deal_match_note ? ` (${k.deal_match_note})` : ''}
+          </p>
+          {(k.deal_candidates ?? []).length === 0 ? (
+            <Empty>Žiadny otvorený obchod zákazníka v Akceptácii ani vo Vyjednávaní.</Empty>
+          ) : (
+            (k.deal_candidates ?? []).map((d) => (
+              <Item
+                key={d.deal_id}
+                title={<Link to={`/obchody/${d.deal_id}`}>{d.name}</Link>}
+                meta={`${STAGE_LABEL[d.stage] ?? d.stage} · zhoda EIC ${d.eic_match} / ${d.eic_total}${d.ok ? '' : ' (nie všetky)'}`}
+                side={k.can_decide_deal ? (
+                  <button type="button" className="btn" disabled={save.busy} onClick={() => act(() => send('POST', `/api/contracts/${k.id}/deal`, { deal_id: d.deal_id }))}>
+                    Vybrať obchod
+                  </button>
+                ) : undefined}
+              />
+            ))
+          )}
+          {k.can_decide_deal && (
+            <div className="row-actions">
+              <button type="button" className="btn" onClick={() => setPanel('none')}>Bez obchodu</button>
+            </div>
+          )}
+          {!k.can_decide_deal && <div className="caption">O obchode k zmluve rozhoduje vlastník zákazníka alebo admin.</div>}
+        </>
+      )}
+      {k.is_admin && (k.deal_match === 'auto' || k.deal_match === 'rucne' || k.deal_match === 'bez_obchodu') && (
+        <div className="row-actions">
+          <button type="button" className="btn" onClick={() => setPanel('unlink')}>Zrušiť spárovanie</button>
+        </div>
+      )}
+      {panel && (
+        <SidePanel
+          title={panel === 'unlink' ? 'Zrušiť spárovanie' : 'Bez obchodu'}
+          onClose={() => setPanel(null)}
+          footer={
+            <button type="button" className="btn primary" disabled={save.busy || (panel === 'unlink' && !note.trim())}
+              onClick={() => act(() => panel === 'unlink'
+                ? send('POST', `/api/contracts/${k.id}/unlink`, { reason: note })
+                : send('POST', `/api/contracts/${k.id}/no-deal`, { note }))}>
+              {panel === 'unlink' ? 'Zrušiť spárovanie' : 'Označiť bez obchodu'}
+            </button>
+          }
+        >
+          {save.error && <Notice tone="error">{save.error}</Notice>}
+          <p>
+            {panel === 'unlink'
+              ? 'Zmluva sa vráti medzi nespárované. Ak obchod nemá inú spárovanú zmluvu, vráti sa do štádia, z ktorého bol spárovaný (Akceptácia alebo Vyjednávanie). Výnimky z ponuky a príznak „Cena iná ako v ponuke“ pri zmluve sa zrušia.'
+              : 'Zmluva nepatrí k žiadnemu obchodu (napr. domácnosť z webu). Je to rozhodnutie, nie problém – v zozname zmlúv bude filter „Bez obchodu“.'}
+          </p>
+          <Field label={panel === 'unlink' ? 'Dôvod' : 'Poznámka (nepovinné)'}>
+            <TextInput value={note} maxLength={500} onChange={setNote} />
+          </Field>
+        </SidePanel>
+      )}
+    </Card>
+  );
+}
+
