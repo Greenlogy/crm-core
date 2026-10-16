@@ -4,7 +4,7 @@
 //  - aliasy starých názvov (--brand, --ink…) podľa DESIGN_SPEC.md § 9, kým sa všetky štýly neprepíšu na --gl-*.
 // Spúšťa sa pred dev, build a typecheck. Hodnoty sa do CSS ručne nevpisujú.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const web = resolve(import.meta.dirname, '..');
@@ -27,6 +27,7 @@ const extra: [string, string][] = [
   ['gl-chip-hover', 'rgba(255, 255, 255, .8)'], // hover čipu na skle
   ['gl-mobile-bar-bg', 'rgba(255, 255, 255, .94)'], // spodná lišta na mobile
   ['gl-backdrop', 'rgba(29, 58, 79, .28)'], // podklad bočného panelu a okna
+  ['gl-hero-h-detail', '290px'], // výška hlavičky detailu obchodu (§ 5.2)
   ['gl-shadow-pop', '0 8px 24px rgba(29, 58, 79, .14)'], // rozbaľovacie menu, našepkávač
 ];
 
@@ -95,4 +96,8 @@ const css = [
 ].join('\n');
 
 writeFileSync(join(web, 'src/styles/tokens.css'), css);
+
+// Krajina do hlavičky sa vkladá inline (?raw) – kópia bez zmeny, aby Vite nečítal mimo web/.
+mkdirSync(join(web, 'src/assets'), { recursive: true });
+copyFileSync(join(web, '../docs/design-handoff/assets/landscape-hero.svg'), join(web, 'src/assets/landscape-hero.svg'));
 console.log(`tokens.css: podklady + ${extra.length} doplnkových tokenov + ${alias.length} aliasov`);

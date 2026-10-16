@@ -1,2 +1,3 @@
-# generované z docs/dizajn/system/tokens.json (npm run tokens)
+# generované z docs/design-handoff/ (npm run tokens)
 src/styles/tokens.css
+src/assets/landscape-hero.svg
