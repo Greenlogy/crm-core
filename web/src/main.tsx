@@ -44,6 +44,7 @@ import { TariffMappingPage } from './pages/settings/TariffMappingPage';
 import { TeamsPage } from './pages/settings/TeamsPage';
 import { UsersPage } from './pages/settings/UsersPage';
 import './styles/tokens.css';
+import './styles/components.css';
 import './styles/app.css';
 
 // Staré adresy kariet domácnosti z prvej verzie prototypu.

@@ -1,4 +1,4 @@
-/* Vzhľad aplikácie podľa docs/dizajn/ (system/README.md, komponenty, obrazovky). Iba premenné z tokens.css. */
+/* Vzhľad aplikácie podľa docs/design-handoff/ (DESIGN_SPEC.md, smer „Krajina moderná A“). Iba premenné z tokens.css. */
 
 *,
 *::before,
@@ -9,26 +9,100 @@
 html,
 body {
   margin: 0;
-  background: var(--surface-page);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 14px;
+  background: var(--gl-surface-page);
+  color: var(--gl-ink);
+  font-family: var(--gl-font-sans);
+  font-size: var(--gl-fs-body);
+  font-weight: var(--gl-fw-regular);
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: var(--brand-text);
+  color: var(--gl-brand-blue);
   text-decoration: none;
 }
 a:hover {
-  color: var(--brand-hover);
   text-decoration: underline;
 }
 
 :focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: var(--gl-focus);
+  outline-offset: var(--gl-focus-offset);
+}
+
+/* --- Typografia (pôvodné štýly t-*; veľkosti sa dorovnajú pri komponentoch) --- */
+
+.t-page-title {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.t-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.t-kpi-xl {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+.t-kpi-lg {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.t-body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-body-strong {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.t-nav {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.t-button {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.t-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.t-caption {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-group-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+.t-pill {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.t-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 /* --- Rozloženie --- */
@@ -679,7 +753,7 @@ a:hover {
 .btn.primary {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff;
+  color: var(--gl-on-primary);
 }
 .btn.primary:hover:not(:disabled) {
   background: var(--brand-hover);
@@ -1015,11 +1089,11 @@ textarea.inp {
 .btn.btn-danger-solid {
   background: var(--negative);
   border-color: var(--negative);
-  color: #fff;
+  color: var(--gl-on-primary);
 }
 .btn.btn-danger-solid:disabled {
   opacity: 0.5;
-  color: #fff;
+  color: var(--gl-on-primary);
 }
 .link-button {
   border: 0;
@@ -1053,7 +1127,7 @@ textarea.inp {
 .panel-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.28);
+  background: var(--gl-backdrop);
   display: flex;
   justify-content: flex-end;
   z-index: 50;
@@ -2243,7 +2317,7 @@ a.tab {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.28);
+  background: var(--gl-backdrop);
   display: flex;
   justify-content: center;
   align-items: flex-start;

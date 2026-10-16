@@ -47,3 +47,7 @@ Stav k 13. 10. 2026 (doplnené obrazovky modulu Produkty a cenníky 20–24). Zd
 | `22-produkty.html` | Produkty – katalóg (kategória, sadzby, DPH, cenové modely, stav) |
 | `23-programy.html` | Programy – VBattery a Green VIWA s parametrami balíkov |
 | `24-nastavenia-parovanie-sadzieb.html` | Nastavenia – Párovanie sadzieb (produkt ↔ sadzba podľa PDS, ukážka) |
+
+## Nahradené novým vzhľadom (16. 10. 2026)
+
+Od 16. 10. 2026 platí pre vzhľad `docs/design-handoff/` (DESIGN_SPEC.md, tokeny, komponenty, referenčné obrazovky 01–05). Hodnoty z `system/tokens.json` sa už nepoužívajú. Obrazovky v `obrazovky/` ostávajú predlohou rozloženia a obsahu jednotlivých modulov.
