@@ -1,7 +1,9 @@
-// Nastavenia – Cenové parametre (dizajn 29; modul 4, F1a; migrácie 0023, 0024).
+// Nastavenia – Cenové parametre (dizajn 29; modul 4, F1a; migrácie 0023, 0024; modul 5 F6: 0047, 0048).
 // Otvorí admin alebo „schvaľuje ceny“ (obchodný riaditeľ). Nová hodnota platí od zvoleného dňa (dnes a neskôr),
-// staré ostávajú v histórii. Ceny dňa (BL, PL, odhad portfólia, cena FVE) sa zadávajú ručne, kým nebude API Cockpitu;
-// chybná cena sa opraví novým záznamom – pôvodný ostane v histórii ako „opravené“ (kto a kedy).
+// staré ostávajú v histórii. Ceny dňa (BL, PL) načítava Montel po – pi o 7:00 a 13:00; ručné zadanie (aj odhad portfólia
+// a cena FVE) ostáva ako záloha. Chybná cena sa opraví novým záznamom – pôvodný ostane v histórii ako „opravené“ (kto a kedy).
+// Pri každom dni zdroj (Montel / ručne, kto a kedy). Admin zmaže ručnú cenu dňa s dôvodom (ďalší beh ju načíta z Montelu)
+// a jednorazovo načíta históriu z Montelu od 1. 1. 2026.
 
 import { Fragment, useMemo, useState } from 'react';
 import { Field, Notice, Select, SidePanel, TextInput, useSave } from '../../components/form';
@@ -41,6 +43,8 @@ type TodayRow = {
   portfolio_eur_mwh: string | null;
   spot_fve_eur_mwh: string | null;
   source: string;
+  created_at: string;
+  changed_by_name: string | null;
 };
 type HistoryRow = {
   id: string;
@@ -56,6 +60,7 @@ type HistoryRow = {
   corrected_at: string | null;
   corrected_by_name: string | null;
   is_corrected: boolean;
+  removed_reason: string | null;
 };
 type Pricing = {
   org_id: string;
@@ -64,6 +69,8 @@ type Pricing = {
   parameters: ParamRow[];
   is_admin: boolean;
   approves_prices: boolean;
+  montel: { started_at: string; result: { ceny?: number; spot?: number }; errors: number } | null;
+  spot: { on_date: string; avg_12m_eur_mwh: string } | null;
 };
 
 /** Parametre v poradí obrazovky 29; adminOnly = mení iba admin (zadanie modulu 4, časť 6). */
@@ -95,10 +102,19 @@ function dateTime(v: string | null): string {
   return `${date(v)} ${dt.toLocaleTimeString('sk-SK', { timeZone: 'Europe/Bratislava', hour: '2-digit', minute: '2-digit' })}`;
 }
 
+/** Zdroj ceny dňa: Montel (denný beh / história) alebo ručne s menom a časom zadania. */
+function sourceText(r: { source: string; changed_by_name: string | null; created_at: string }): string {
+  if (r.source === 'cockpit') return `Montel · ${dateTime(r.created_at)}`;
+  if (r.source === 'historia') return 'Montel (história)';
+  return `Ručne · ${r.changed_by_name ?? EMPTY} · ${dateTime(r.created_at)}`;
+}
+
 type Panel =
   | { kind: 'param'; code?: ParamCode; year?: number }
   | { kind: 'edit'; row: ParamRow }
   | { kind: 'price'; correct?: TodayRow }
+  | { kind: 'remove'; row: { id: string; on_date: string; delivery_year: number } }
+  | { kind: 'history' }
   | null;
 
 export function PricingPage() {
@@ -132,7 +148,7 @@ export function PricingPage() {
 
   if (data.error) return <ErrorState error={data.error} />;
   const d = data.data;
-  const corrected = d?.history.filter((h) => h.is_corrected) ?? [];
+  const isAdmin = !!d?.is_admin;
 
   return (
     <>
@@ -219,10 +235,23 @@ export function PricingPage() {
           <section className="card" aria-label="Cena pre obchodníka">
             <div className="card-head">
               <h2 className="t-section-title">Cena pre obchodníka dnes</h2>
-              <span className="caption">ceny dňa zadané ručne, kým nebude napojenie na Cockpit</span>
+              <span className="caption">
+                ceny dňa z Montelu po – pi o 7:00 a 13:00
+                {d.montel && (
+                  <>
+                    {' · '}posledné načítanie {dateTime(d.montel.started_at)}{' '}
+                    {d.montel.errors > 0 ? <Pill tone="negative">chyba</Pill> : <Pill tone="positive">v poriadku</Pill>}
+                  </>
+                )}
+              </span>
               <span className="grow" />
+              {isAdmin && (
+                <button type="button" className="btn" onClick={() => setPanel({ kind: 'history' })}>
+                  Načítať históriu z Montelu
+                </button>
+              )}
               <button type="button" className="btn" onClick={() => setPanel({ kind: 'price' })}>
-                Zadať ceny dňa
+                Zadať ceny dňa ručne
               </button>
             </div>
             <div className="table-wrap">
@@ -245,7 +274,10 @@ export function PricingPage() {
                   {d.today.map((t) => (
                     <tr key={t.id}>
                       <td>{t.delivery_year}</td>
-                      <td className="muted">{date(t.on_date)}</td>
+                      <td>
+                        <span className="muted">{date(t.on_date)}</span>
+                        <div className="sub">{sourceText(t)}</div>
+                      </td>
                       <td className="num">{dec(t.bl_eur_mwh, 2, 4)}</td>
                       <td className="num">{dec(t.pl_eur_mwh, 2, 4)}</td>
                       <td className="num">
@@ -264,13 +296,18 @@ export function PricingPage() {
                             Opraviť
                           </button>
                         )}
+                        {isAdmin && t.source === 'rucne' && (
+                          <button type="button" className="link-button" style={{ marginLeft: 8 }} onClick={() => setPanel({ kind: 'remove', row: t })}>
+                            Zmazať
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
                   {d.today.length === 0 && (
                     <tr>
                       <td colSpan={10} className="muted">
-                        Zatiaľ nie sú zadané ceny dňa. Cena pre obchodníka sa vypočíta po zadaní BL a PL.
+                        Zatiaľ nie sú ceny dňa. Cena pre obchodníka sa vypočíta po načítaní BL a PL z Montelu alebo po ručnom zadaní.
                       </td>
                     </tr>
                   )}
@@ -280,49 +317,77 @@ export function PricingPage() {
             <div className="card-foot caption">
               Cena pre obchodníka = (BL × pomer + PL × zvyšok) / 100 + riziková prirážka + naša marža. Ak ceny z dnešného dňa
               chýbajú, použijú sa posledné najviac 7 dní staré. Opravená cena platí od opravy; pôvodný záznam ostane v histórii.
+              Ručne zadaná cena dňa sa načítaním z Montelu neprepíše; ak ju admin zmaže, ďalší beh deň načíta z Montelu.
+              {d.spot && (
+                <>
+                  {' '}Priemerná SPOT cena za 12 mesiacov: <strong>{dec(d.spot.avg_12m_eur_mwh, 2, 2)} €/MWh</strong> (k {date(d.spot.on_date)}).
+                </>
+              )}
             </div>
           </section>
 
-          {corrected.length > 0 && (
-            <section className="card" aria-label="Opravené ceny dňa">
-              <div className="card-head">
-                <h2 className="t-section-title">Opravené ceny dňa</h2>
-                <span className="caption">posledných 60 dní</span>
-              </div>
-              <div className="table-wrap">
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>Deň</th>
-                      <th>Rok dodávky</th>
-                      <th className="num">BL</th>
-                      <th className="num">PL</th>
-                      <th className="num">Odhad portfólia</th>
-                      <th>Zadal</th>
-                      <th>Opravil</th>
+          <section className="card" aria-label="Ceny dňa za 60 dní">
+            <div className="card-head">
+              <h2 className="t-section-title">Ceny dňa – história</h2>
+              <span className="caption">posledných 60 dní: zdroj, opravy a zmazania</span>
+            </div>
+            <div className="table-wrap" style={{ maxHeight: 480, overflowY: 'auto' }}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Deň</th>
+                    <th>Rok dodávky</th>
+                    <th className="num">BL</th>
+                    <th className="num">PL</th>
+                    <th className="num">Odhad portfólia</th>
+                    <th>Zdroj</th>
+                    <th>Stav</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.history.map((h) => (
+                    <tr key={h.id} className={h.is_corrected ? 'muted' : undefined}>
+                      <td>{date(h.on_date)}</td>
+                      <td>{h.delivery_year}</td>
+                      <td className="num">{dec(h.bl_eur_mwh, 2, 4)}</td>
+                      <td className="num">{dec(h.pl_eur_mwh, 2, 4)}</td>
+                      <td className="num">{dec(h.portfolio_eur_mwh, 2, 4)}</td>
+                      <td className="caption">{sourceText(h)}</td>
+                      <td className="caption">
+                        {h.removed_reason ? (
+                          <>
+                            <Pill tone="negative">zmazané</Pill>
+                            <div className="sub">{h.corrected_by_name ?? EMPTY} · {dateTime(h.corrected_at)}</div>
+                            <div className="sub">{h.removed_reason}</div>
+                          </>
+                        ) : h.is_corrected ? (
+                          <>
+                            <Pill tone="warning">opravené</Pill>
+                            <div className="sub">{h.corrected_by_name ?? 'Montel'} · {dateTime(h.corrected_at)}</div>
+                          </>
+                        ) : (
+                          <Pill tone="positive">platná</Pill>
+                        )}
+                      </td>
+                      <td>
+                        {isAdmin && !h.is_corrected && h.source === 'rucne' && (
+                          <button type="button" className="link-button" onClick={() => setPanel({ kind: 'remove', row: h })}>
+                            Zmazať
+                          </button>
+                        )}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {corrected.map((h) => (
-                      <tr key={h.id}>
-                        <td>{date(h.on_date)}</td>
-                        <td>{h.delivery_year}</td>
-                        <td className="num">{dec(h.bl_eur_mwh, 2, 4)}</td>
-                        <td className="num">{dec(h.pl_eur_mwh, 2, 4)}</td>
-                        <td className="num">{dec(h.portfolio_eur_mwh, 2, 4)}</td>
-                        <td>
-                          {h.changed_by_name ?? (h.source === 'historia' ? 'história' : EMPTY)} · {dateTime(h.created_at)}
-                        </td>
-                        <td>
-                          <Pill tone="warning">opravené</Pill> {h.corrected_by_name ?? EMPTY} · {dateTime(h.corrected_at)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
+                  ))}
+                  {d.history.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="muted">Za posledných 60 dní nie sú žiadne ceny dňa.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       )}
 
@@ -345,6 +410,22 @@ export function PricingPage() {
             setPanel(null);
             data.reload();
           }}
+        />
+      )}
+      {panel?.kind === 'remove' && (
+        <RemovePanel
+          row={panel.row}
+          onClose={() => setPanel(null)}
+          onSaved={() => {
+            setPanel(null);
+            data.reload();
+          }}
+        />
+      )}
+      {panel?.kind === 'history' && (
+        <HistoryPanel
+          onClose={() => setPanel(null)}
+          onSaved={() => data.reload()}
         />
       )}
       {panel?.kind === 'price' && d && (
@@ -547,6 +628,86 @@ function PricePanel(props: { orgId: string; correct?: TodayRow; onClose: () => v
       {c && (
         <Notice tone="ok">
           Oprava sa uloží ako nový záznam a platí hneď. Pôvodné ceny ostanú v histórii označené „opravené“ s vaším menom a časom.
+        </Notice>
+      )}
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+    </SidePanel>
+  );
+}
+
+/** Zmazanie ručne zadanej ceny dňa (admin, s dôvodom; 0048). */
+function RemovePanel(props: { row: { id: string; on_date: string; delivery_year: number }; onClose: () => void; onSaved: () => void }) {
+  const [reason, setReason] = useState('');
+  const save = useSave();
+  const submit = async () => {
+    const ok = await save.run(() => send('POST', `/api/pricing/market-prices/${props.row.id}/remove`, { reason }));
+    if (ok) props.onSaved();
+  };
+  return (
+    <SidePanel
+      title={`Zmazať ručnú cenu – ${date(props.row.on_date)} · ${props.row.delivery_year}`}
+      onClose={props.onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={props.onClose}>
+            Zrušiť
+          </button>
+          <button type="button" className="btn primary" disabled={save.busy || reason.trim().length < 3} onClick={submit}>
+            Zmazať
+          </button>
+        </>
+      }
+    >
+      <p>
+        Ručne zadaná cena dňa sa zmaže a ostane v histórii ako „zmazané“ s vaším menom, časom a dôvodom (aj v audite). Deň
+        potom nemá platnú cenu tohto roka – ďalší beh (po – pi o 7:00 a 13:00) ju načíta z Montelu. Dovtedy sa pre cenu pre
+        obchodníka použije posledná cena najviac 7 dní stará.
+      </p>
+      <Field label="Dôvod zmazania">
+        <TextInput value={reason} onChange={setReason} maxLength={500} />
+      </Field>
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+    </SidePanel>
+  );
+}
+
+/** Jednorazové načítanie histórie cien z Montelu od 1. 1. 2026 (admin; dni s cenou sa nemenia). */
+function HistoryPanel(props: { onClose: () => void; onSaved: () => void }) {
+  const save = useSave();
+  const [result, setResult] = useState<{ dni: number; riadky: number } | null>(null);
+  const submit = () =>
+    save.run(async () => {
+      const r = await send<{ dni: number; riadky: number }>('POST', '/api/pricing/market-history', {});
+      setResult(r);
+      props.onSaved();
+    });
+  return (
+    <SidePanel
+      title="Načítať históriu z Montelu"
+      onClose={props.onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={props.onClose}>
+            {result ? 'Zavrieť' : 'Zrušiť'}
+          </button>
+          {!result && (
+            <button type="button" className="btn primary" disabled={save.busy} onClick={submit}>
+              {save.busy ? 'Načítavam…' : 'Načítať'}
+            </button>
+          )}
+        </>
+      }
+    >
+      <p>
+        Načíta BL a PL ročných produktov (settlement) po dňoch od 1. 1. 2026 do dnes. Settlement obchodného dňa je cenou
+        nasledujúceho dňa – rovnako ako pri dennom načítaní ráno. Dni, ktoré už cenu majú (z Montelu aj ručne zadané), sa
+        nemenia, takže načítanie môžete bezpečne zopakovať. Do CRM sa ukladajú iba ceny, nie odpovede Montelu.
+      </p>
+      {result && (
+        <Notice tone="ok">
+          Hotovo: {result.dni} dní, doplnených {result.riadky} cien (rok dodávky × deň).
         </Notice>
       )}
       {save.error && <Notice tone="error">{save.error}</Notice>}

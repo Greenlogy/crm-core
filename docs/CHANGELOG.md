@@ -2,6 +2,7 @@
 
 ## 2026-10-16
 
+- Modul 5: **F6 krok 1 uzavretý** – ceny z Montelu. `0047_ceny_spot` (BL / PL rokov dodávky a 12-mesačný SPOT priemer, denný beh iba na pozadí, história od 1. 1. 2026 iba admin, ručná cena dňa sa neprepíše, surové ceny iba admin a kto vidí maržu, obchodník iba cenu pre obchodníka a SPOT priemer; spúšťač `trg_flag_check` – príznak importu nenastaví aplikácia) a `0048_ceny_rucne_zmazanie` (admin zmaže ručnú cenu dňa s dôvodom, história a audit) na `dev`. `api/src/montel.ts` (service binding, iba tri GET adresy, kontrola v `npm run typecheck`), Cron `0 5,6,11,12 * * 1-5` s behom iba o 7:00 a 13:00 v Bratislave, Nastavenia → Cenové parametre (zdroj ceny, história 60 dní, zmazanie, načítanie histórie), denník behov „Ceny z Montelu“. Testy DB 250 kontrol (séria S), testy API 22. Nasadené na Test, Peter otestoval.
 - Modul 5: **F5 uzavretá** – `0045`, `0046` na `dev`, Peter otestoval; testovacie zmluvy pre Obnovu v `db/test-data/zmluvy-f5*`.
 - Modul 5, F5 krok 2 (nenasadené): `0046_obnova_nocny_beh` overená nanečisto, 243 kontrol – nočný beh zmlúv zakladá obchod Obnova (alebo doplní predošlú zmluvu otvorenému obchodu), upozornenie „Obnova“ namiesto „Končí do 4 mesiacov“; nočný beh obchodov upozorní 14 dní po akceptácii na OOM bez zmluvy. Test modulu 4 Z4-1 upravený (firmy dostanú Obnovu).
 - Modul 5: **F5 krok 1 uzavretý** – `0045` na `dev`, API a obrazovky 38, 40 na Teste, Peter otestoval; vymyslené testovacie exporty a skript `db/test-data/zmluvy-f5.sh`.

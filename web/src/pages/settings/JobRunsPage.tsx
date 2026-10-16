@@ -1,6 +1,7 @@
 // Nastavenia – Nočný beh (modul Zmluvy F4, 0028): denník nočných behov zmlúv. Počty po krokoch, zmluvy so spätne
 // zapísaným cenníkom (pre Nákup) a chyby jednotlivých zmlúv (krok, kód, text so skráteným EIC). Zmluva s chybou
 // sa skúsi znova ďalšiu noc. Iba čítanie – vidí admin a Nákup. Beh s iným ako dnešným dátumom = ručný beh na Teste.
+// F6 (0047): beh cien z Montelu (po – pi 7:00 a 13:00) – zapísané ceny dňa, 12-mesačný priemer SPOT, chyby Montelu.
 
 import { Link } from 'react-router-dom';
 import { Card, Empty, ErrorState, Pill, Rows, Skeleton } from '../../components/ui';
@@ -22,11 +23,16 @@ const COUNTS: [string, string][] = [
   ['zakaznici', 'Prepočítaný stav zákazníka'],
 ];
 
+const PRICE_COUNTS: [string, string][] = [
+  ['ceny', 'Zapísané ceny dňa (BL / PL po rokoch dodávky)'],
+  ['spot', '12-mesačný priemer SPOT'],
+];
+
 export function JobRunsPage() {
   const { data, error } = useApi<{ items: JobRun[] }>('/api/job-runs');
   return (
     <>
-      <SettingsHead title="Nočný beh" sub="denník nočných behov zmlúv (každú noc o 0:05)" />
+      <SettingsHead title="Nočný beh" sub="denník nočných behov zmlúv (každú noc o 0:05) a načítania cien z Montelu (po – pi 7:00 a 13:00)" />
       {error ? (
         <ErrorState error={error} />
       ) : !data ? (
@@ -49,7 +55,7 @@ function Run({ j }: { j: JobRun }) {
   const errors = j.errors.length;
   return (
     <Card
-      title={`Beh k ${date(j.run_date)}`}
+      title={j.job === 'ceny' ? `Ceny z Montelu k ${date(j.run_date)}` : `Beh k ${date(j.run_date)}`}
       aside={
         <span className="page-sub">
           {j.test_date && <Pill tone="info">ručný beh (Test)</Pill>}
@@ -66,7 +72,7 @@ function Run({ j }: { j: JobRun }) {
         </span>
       }
     >
-      <Rows rows={COUNTS.map(([k, l]) => [l, num(Number(j.result[k] ?? 0), 0)])} />
+      <Rows rows={(j.job === 'ceny' ? PRICE_COUNTS : COUNTS).map(([k, l]) => [l, num(Number(j.result[k] ?? 0), 0)])} />
       {retro && retro.pocet > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="t-section-title">Cenník zapísaný spätne ({num(retro.pocet, 0)})</div>
@@ -110,7 +116,9 @@ function Run({ j }: { j: JobRun }) {
               ))}
             </tbody>
           </table>
-          <div className="caption">Zmluva s chybou sa ďalšiu noc skúsi znova.</div>
+          <div className="caption">
+            {j.job === 'ceny' ? 'Ceny sa skúsia načítať znova pri ďalšom behu; dovtedy platí posledná cena najviac 7 dní stará.' : 'Zmluva s chybou sa ďalšiu noc skúsi znova.'}
+          </div>
         </div>
       )}
     </Card>

@@ -40,7 +40,8 @@ import {
   type CustomerKind,
 } from './queries/customers';
 import { listOom, OOM_CHIPS, OOM_TYPES, oomCard, oomFilters } from './queries/oom';
-import { nightlyRun } from './jobs';
+import { nightlyRun, pricesRun } from './jobs';
+import { PRICE_CRON } from './schedule';
 import { emailKick, emailRun } from './email-jobs';
 import { jobRuns } from './routes/job-runs';
 import { notifications } from './routes/notifications';
@@ -244,8 +245,10 @@ app.onError((err, c) => {
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // každú minútu: e-maily (F4); ostatné časy: nočný beh
-    ctx.waitUntil(controller.cron === '* * * * *' ? emailRun(env) : nightlyRun(env));
+    // každú minútu: e-maily (F4); po – pi ráno a na obed: ceny z Montelu (F6, iba 7:00 a 13:00 v Bratislave); inak nočný beh
+    if (controller.cron === '* * * * *') ctx.waitUntil(emailRun(env));
+    else if (controller.cron === PRICE_CRON) ctx.waitUntil(pricesRun(env, controller.scheduledTime));
+    else ctx.waitUntil(nightlyRun(env));
   },
 } satisfies ExportedHandler<Env>;
 

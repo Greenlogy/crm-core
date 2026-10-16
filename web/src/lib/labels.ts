@@ -104,6 +104,7 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
 
 // Kroky nočného behu zmlúv (denník, 0028)
 export const JOB_STEP: Record<string, string> = {
+  montel: 'Montel',
   regulacia: 'Regulácia',
   cennik: 'Cenník',
   prolongacia: 'Prolongácia',

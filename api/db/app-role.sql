@@ -103,6 +103,8 @@ GRANT DELETE ON email_template_version, user_photo TO crm_app;
 REVOKE INSERT, UPDATE ON user_signature, user_signature_image FROM crm_app;
 -- 0045: podklady pre zmluvu mení iba funkcia deal_contract_input_save (k firme, zástupcovi, OOM a obchodu naraz)
 REVOKE INSERT, UPDATE ON deal_contract_input FROM crm_app;
+-- 0047: 12-mesačný SPOT priemer zapisuje iba denný beh cien (market_price_daily_run)
+REVOKE INSERT, UPDATE ON spot_average_daily FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

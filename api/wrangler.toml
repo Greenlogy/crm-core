@@ -50,8 +50,16 @@ ACCESS_AUD = "77e1765d06e7bb16d2fd0276482565d15897d8f1d197c4a4a537f7243fa74491"
 # Cron beží v UTC – dva časy pokryjú zimný aj letný čas; druhé spustenie nič nezmení.
 # * * * * *: e-maily každú minútu (api/src/email-jobs.ts) – dokončenie odoslaní, fronta, interné e-maily, odpovede vo
 # vláknach CRM (aktívne za 2 dni každú minútu, staršie raz za 15 minút). Odosielanie beží aj hneď po zápise (emailKick).
+# 0 5,6,11,12 * * 1-5: ceny z Montelu po – pi; kód (api/src/schedule.ts) pustí beh iba o 7:00 a 13:00 v Bratislave
+# (zima 6 a 12 UTC, leto 5 a 11 UTC).
+# Ceny z Montelu (F6): interné prepojenie na Worker greenlogy-montel-auth (bez verejnej adresy). Kľúč MONTEL_API_KEY
+# iba cez `wrangler secret put MONTEL_API_KEY`; povolené adresy v api/src/montel.ts.
+[[services]]
+binding = "MONTEL"
+service = "greenlogy-montel-auth"
+
 [triggers]
-crons = ["5 22 * * *", "5 23 * * *", "* * * * *"]
+crons = ["5 22 * * *", "5 23 * * *", "* * * * *", "0 5,6,11,12 * * 1-5"]
 
 [observability]
 enabled = true

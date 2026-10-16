@@ -9917,6 +9917,60 @@ $$;
 
 
 --
+-- Name: market_price_daily_run(jsonb, numeric, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_daily_run(p_quotes jsonb, p_spot_avg numeric, p_errors jsonb DEFAULT '[]'::jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_org   uuid := crm_default_org();
+  v_today date := crm_today();
+  v_run   uuid;
+  v_n     integer := 0;
+  v_spot  integer := 0;
+BEGIN
+  PERFORM crm_background_only();
+  INSERT INTO job_run (job, run_date) VALUES ('ceny', v_today) RETURNING id INTO v_run;
+  v_n := market_price_import(v_org, v_today, coalesce(p_quotes, '[]'), 'cockpit', false);
+  IF p_spot_avg IS NOT NULL AND p_spot_avg BETWEEN 0 AND 10000
+     AND NOT EXISTS (SELECT 1 FROM spot_average_daily WHERE org_id = v_org AND on_date = v_today AND source = 'rucne') THEN
+    INSERT INTO spot_average_daily (org_id, on_date, avg_12m_eur_mwh, source) VALUES (v_org, v_today, round(p_spot_avg, 4), 'cockpit')
+    ON CONFLICT (org_id, on_date) DO UPDATE SET avg_12m_eur_mwh = excluded.avg_12m_eur_mwh
+     WHERE spot_average_daily.avg_12m_eur_mwh IS DISTINCT FROM excluded.avg_12m_eur_mwh;
+    v_spot := 1;
+  END IF;
+  UPDATE job_run SET finished_at = now(), result = jsonb_build_object('ceny', v_n, 'spot', v_spot),
+                     errors = CASE WHEN jsonb_typeof(p_errors) = 'array' THEN p_errors ELSE '[]' END
+   WHERE id = v_run;
+  IF jsonb_array_length(CASE WHEN jsonb_typeof(p_errors) = 'array' THEN p_errors ELSE '[]' END) > 0 THEN
+    PERFORM notification_add(ARRAY(SELECT id FROM app_user WHERE is_admin AND status = 'aktivny'), 'nocny_beh_chyba', NULL, NULL, v_run, v_today,
+                             'Načítanie cien z Montelu skončilo s chybou');
+  END IF;
+  RETURN jsonb_build_object('ceny', v_n, 'spot', v_spot);
+END;
+$$;
+
+
+--
+-- Name: market_price_flag_check(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_flag_check() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF (current_setting('crm.market_price_import', true) = 'on' OR current_setting('crm.market_price_correction', true) = 'on')
+     AND NOT crm_internal_call() THEN
+    RAISE EXCEPTION 'Trhové ceny z Montelu zapisuje iba denný beh alebo načítanie histórie.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END;
+$$;
+
+
+--
 -- Name: market_price_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -9928,6 +9982,11 @@ BEGIN
   IF TG_OP = 'UPDATE' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
      AND current_setting('crm.market_price_correction', true) = 'on' THEN
     RETURN NEW;                                   -- označenie opravy z tejto funkcie (nižšie)
+  END IF;
+  -- 0047: načítanie z Montelu (market_price_import) – funkcia vlastníka označí zdroj a zachová ručné hodnoty dňa
+  IF TG_OP = 'INSERT' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
+     AND current_setting('crm.market_price_import', true) = 'on' THEN
+    RETURN NEW;
   END IF;
   IF crm_owner_session() THEN
     IF TG_OP = 'INSERT' THEN
@@ -9959,6 +10018,117 @@ BEGIN
    WHERE org_id = NEW.org_id AND on_date = NEW.on_date AND delivery_year = NEW.delivery_year AND corrected_at IS NULL;
   PERFORM set_config('crm.market_price_correction', '', true);
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: market_price_history_import(jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_history_import(p_days jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d     jsonb;
+  v_org uuid := crm_default_org();
+  v_n   integer := 0;
+  v_d   integer := 0;
+BEGIN
+  IF crm_active_user_id() IS NULL OR NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Históriu cien načítava admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF jsonb_typeof(coalesce(p_days, '[]')) <> 'array' OR jsonb_array_length(coalesce(p_days, '[]')) > 2000 THEN
+    RAISE EXCEPTION 'Neplatná história cien.' USING ERRCODE = 'check_violation';
+  END IF;
+  FOR d IN SELECT * FROM jsonb_array_elements(p_days) LOOP
+    IF (d->>'on_date')::date BETWEEN '2026-01-01' AND crm_today() THEN
+      v_n := v_n + market_price_import(v_org, (d->>'on_date')::date, d->'rows', 'historia', true);
+      v_d := v_d + 1;
+    END IF;
+  END LOOP;
+  RETURN jsonb_build_object('dni', v_d, 'riadky', v_n);
+END;
+$$;
+
+
+--
+-- Name: market_price_import(uuid, date, jsonb, text, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_import(p_org uuid, p_on date, p_rows jsonb, p_source text, p_keep_existing boolean) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  r     jsonb;
+  cur   market_price_daily;
+  v_y   smallint;
+  v_bl  numeric;
+  v_pl  numeric;
+  v_n   integer := 0;
+BEGIN
+  IF p_source NOT IN ('cockpit', 'historia') OR jsonb_typeof(coalesce(p_rows, '[]')) <> 'array' OR p_on IS NULL THEN
+    RAISE EXCEPTION 'Neplatné údaje cien.' USING ERRCODE = 'check_violation';
+  END IF;
+  FOR r IN SELECT * FROM jsonb_array_elements(p_rows) LOOP
+    v_y := (r->>'year')::smallint;
+    v_bl := round((r->>'bl')::numeric, 4);
+    v_pl := round((r->>'pl')::numeric, 4);
+    IF v_y IS NULL OR v_y NOT BETWEEN 2000 AND 2100 OR v_bl IS NULL OR v_pl IS NULL OR v_bl < 0 OR v_pl < 0 OR v_bl > 10000 OR v_pl > 10000 THEN
+      CONTINUE;
+    END IF;
+    SELECT * INTO cur FROM market_price_daily
+     WHERE org_id = p_org AND on_date = p_on AND delivery_year = v_y AND corrected_at IS NULL;
+    IF cur.id IS NOT NULL AND (p_keep_existing OR (cur.source = 'rucne' AND cur.bl_eur_mwh IS NOT NULL)
+                               OR (cur.bl_eur_mwh = v_bl AND cur.pl_eur_mwh = v_pl)) THEN
+      CONTINUE;
+    END IF;
+    IF cur.id IS NOT NULL THEN
+      PERFORM set_config('crm.market_price_correction', 'on', true);
+      UPDATE market_price_daily SET corrected_at = now(), corrected_by = NULL WHERE id = cur.id;
+      PERFORM set_config('crm.market_price_correction', '', true);
+    END IF;
+    PERFORM set_config('crm.market_price_import', 'on', true);
+    INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh, source)
+    VALUES (p_org, p_on, v_y, v_bl, v_pl, cur.portfolio_eur_mwh, cur.spot_fve_eur_mwh, p_source);
+    PERFORM set_config('crm.market_price_import', '', true);
+    v_n := v_n + 1;
+  END LOOP;
+  RETURN v_n;
+END;
+$$;
+
+
+--
+-- Name: market_price_manual_remove(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_manual_remove(p_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  m      market_price_daily;
+  v_user uuid := crm_active_user_id();
+BEGIN
+  IF v_user IS NULL OR NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Ručne zadanú cenu dňa maže iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) NOT BETWEEN 3 AND 500 THEN
+    RAISE EXCEPTION 'Zadajte dôvod zmazania.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO m FROM market_price_daily WHERE id = p_id AND org_id = ANY (crm_user_orgs()) FOR UPDATE;
+  IF m.id IS NULL THEN
+    RAISE EXCEPTION 'Cena dňa neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF m.corrected_at IS NOT NULL OR m.source <> 'rucne' THEN
+    RAISE EXCEPTION 'Zmazať sa dá iba platná ručne zadaná cena dňa.' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM set_config('crm.market_price_correction', 'on', true);
+  UPDATE market_price_daily SET corrected_at = now(), corrected_by = v_user, removed_reason = btrim(p_reason) WHERE id = m.id;
+  PERFORM set_config('crm.market_price_correction', '', true);
 END;
 $$;
 
@@ -15211,6 +15381,20 @@ COMMENT ON FUNCTION public.small_business_volume(p_on date, p_company_id uuid) I
 
 
 --
+-- Name: spot_average_on(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.spot_average_on(p_org uuid, p_on date) RETURNS TABLE(on_date date, avg_12m_eur_mwh numeric)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT s.on_date, s.avg_12m_eur_mwh FROM spot_average_daily s
+   WHERE crm_session_ok() AND p_org = ANY (crm_user_orgs()) AND s.org_id = p_org AND s.on_date BETWEEN p_on - 7 AND p_on
+   ORDER BY s.on_date DESC LIMIT 1
+$$;
+
+
+--
 -- Name: tariff_base(text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -17152,7 +17336,7 @@ CREATE TABLE public.job_run (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT job_run_errors_check CHECK ((jsonb_typeof(errors) = 'array'::text)),
-    CONSTRAINT job_run_job_check CHECK ((job = ANY (ARRAY['zmluvy'::text, 'obchody'::text])))
+    CONSTRAINT job_run_job_check CHECK ((job = ANY (ARRAY['zmluvy'::text, 'obchody'::text, 'ceny'::text])))
 );
 
 
@@ -17325,6 +17509,7 @@ CREATE TABLE public.market_price_daily (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     corrected_at timestamp with time zone,
     corrected_by uuid,
+    removed_reason text,
     CONSTRAINT market_price_corrected_check CHECK (((corrected_by IS NULL) OR (corrected_at IS NOT NULL))),
     CONSTRAINT market_price_daily_bl_eur_mwh_check CHECK ((bl_eur_mwh >= (0)::numeric)),
     CONSTRAINT market_price_daily_check CHECK ((num_nonnulls(bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh) >= 1)),
@@ -17333,7 +17518,8 @@ CREATE TABLE public.market_price_daily (
     CONSTRAINT market_price_daily_pl_eur_mwh_check CHECK ((pl_eur_mwh >= (0)::numeric)),
     CONSTRAINT market_price_daily_portfolio_eur_mwh_check CHECK ((portfolio_eur_mwh >= (0)::numeric)),
     CONSTRAINT market_price_daily_source_check CHECK ((source = ANY (ARRAY['cockpit'::text, 'rucne'::text, 'historia'::text]))),
-    CONSTRAINT market_price_daily_spot_fve_eur_mwh_check CHECK ((spot_fve_eur_mwh >= (0)::numeric))
+    CONSTRAINT market_price_daily_spot_fve_eur_mwh_check CHECK ((spot_fve_eur_mwh >= (0)::numeric)),
+    CONSTRAINT market_price_removed_check CHECK (((removed_reason IS NULL) OR ((corrected_at IS NOT NULL) AND ((length(btrim(removed_reason)) >= 3) AND (length(btrim(removed_reason)) <= 500)))))
 );
 
 
@@ -17349,6 +17535,13 @@ COMMENT ON TABLE public.market_price_daily IS 'ceny BL/PL (CAL), odhad nákupnej
 --
 
 COMMENT ON COLUMN public.market_price_daily.corrected_at IS 'záznam opravený novším záznamom toho istého dňa (platí najnovší); NULL = platný';
+
+
+--
+-- Name: COLUMN market_price_daily.removed_reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.market_price_daily.removed_reason IS 'dôvod zmazania ručne zadanej ceny dňa adminom (0048); riadok ostane v histórii';
 
 
 --
@@ -18636,6 +18829,29 @@ CREATE TABLE public.sla_record (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: spot_average_daily; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.spot_average_daily (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    on_date date NOT NULL,
+    avg_12m_eur_mwh numeric(12,4) NOT NULL,
+    source text DEFAULT 'cockpit'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT spot_average_daily_source_check CHECK ((source = ANY (ARRAY['cockpit'::text, 'rucne'::text])))
+);
+
+
+--
+-- Name: TABLE spot_average_daily; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.spot_average_daily IS 'priemerná SPOT cena OKTE za posledných 12 mesiacov (Montel spotAvg365) ku dňu – 0047';
 
 
 --
@@ -20129,6 +20345,22 @@ ALTER TABLE ONLY public.sla_record
 
 ALTER TABLE ONLY public.sla_record
     ADD CONSTRAINT sla_record_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: spot_average_daily spot_average_daily_org_id_on_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.spot_average_daily
+    ADD CONSTRAINT spot_average_daily_org_id_on_date_key UNIQUE (org_id, on_date);
+
+
+--
+-- Name: spot_average_daily spot_average_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.spot_average_daily
+    ADD CONSTRAINT spot_average_daily_pkey PRIMARY KEY (id);
 
 
 --
@@ -21938,6 +22170,13 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.sla_record F
 
 
 --
+-- Name: spot_average_daily trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.spot_average_daily FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
 -- Name: supplier_switch trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -22257,6 +22496,13 @@ CREATE TRIGGER trg_fill BEFORE INSERT OR UPDATE ON public.contract_oom FOR EACH 
 --
 
 CREATE TRIGGER trg_fill BEFORE INSERT OR UPDATE ON public.contract_price FOR EACH ROW EXECUTE FUNCTION public.contract_price_fill();
+
+
+--
+-- Name: market_price_daily trg_flag_check; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_flag_check BEFORE INSERT OR UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.market_price_flag_check();
 
 
 --
@@ -23181,6 +23427,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.segment FOR EACH ROW E
 --
 
 CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.sla_record FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: spot_average_daily trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.spot_average_daily FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -25025,6 +25278,14 @@ ALTER TABLE ONLY public.sla_record
 
 
 --
+-- Name: spot_average_daily spot_average_daily_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.spot_average_daily
+    ADD CONSTRAINT spot_average_daily_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
 -- Name: supplier_switch supplier_switch_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -26839,6 +27100,19 @@ CREATE POLICY settings_update ON public.team_permission FOR UPDATE USING (( SELE
 
 
 --
+-- Name: spot_average_daily; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.spot_average_daily ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: spot_average_daily spot_average_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY spot_average_read ON public.spot_average_daily FOR SELECT USING ((public.crm_session_ok() AND (org_id = ANY (public.crm_user_orgs())) AND (public.crm_is_admin() OR public.crm_can_see_margin())));
+
+
+--
 -- Name: supplier_switch; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -26984,4 +27258,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0043'),
     ('0044'),
     ('0045'),
-    ('0046');
+    ('0046'),
+    ('0047'),
+    ('0048');

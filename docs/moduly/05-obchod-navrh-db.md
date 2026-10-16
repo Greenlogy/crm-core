@@ -1619,3 +1619,45 @@ Podľa zadania 9 a 10, návrhu časti 2 a obrazoviek 38, 40 (úprava 25, 26). Dv
 - **Nočný beh obchodov:** pri zapnutom `deal_matching` obchod v Akceptácii / Vyhraté, ktorého akceptovaný variant má OOM bez zmluvy obchodu aj 14 dní po akceptácii → upozornenie **`chyba_oom_na_zmluve`** obchodníkovi raz.
 - Testy F8, F9; test modulu 4 Z4-1 upravený (pri firme Obnova namiesto „Končí do 4 mesiacov“). Mutácie zachytené; `down` vráti schému z `dev` (0045).
 
+## 36. Plán F6 – Domov obchodníka a prehľady (schválený 16. 10. 2026)
+
+Podľa zadania 11, 13, návrhu časti 7 a obrazoviek 30, 32. Dva kroky, každý: migrácia nanečisto → `dev` → API a obrazovky → Test.
+
+### 36.1 Krok 1 – ceny z Workera Montel (`0047_ceny_spot`)
+
+- **Spojenie:** service binding na Worker `greenlogy-montel-auth` (rovnaký účet Cloudflare), kľúč `MONTEL_API_KEY` iba cez `wrangler secret`. Iba GET `/forwards/quotes`, `/forwards/ohlc/history`, `/spot/aggregates` – zoznam povolených ciest v jednej funkcii (`api/src/montel.ts`) s testom a kontrolou v `npm run typecheck`, ako pri Gmaile.
+- **Denný beh** (Cron po pracovných dňoch 7:00 a 13:00 Europe/Bratislava): BL a PL (base / peak) rokov 2027–2030 → `market_price_daily` so zdrojom `cockpit` (ručná hodnota dňa sa neprepíše); `spotAvg365` → nová tabuľka `spot_average_daily (org_id, on_date, avg_12m_eur_mwh, source)`. Do denníka nočných behov (`job_run`, obrazovka Nastavenia → Nočný beh).
+- **História od 1. 1. 2026:** jednorazovo tlačidlom v Nastaveniach → Cenové parametre („Načítať históriu z Montelu“, admin) cez `/forwards/ohlc/history` (settlement BL/PL po dňoch, zdroj `historia`; existujúce hodnoty dňa sa neprepíšu). Ručné zadávanie cien (obrazovka 29) ostáva ako záloha.
+
+**Hotové (16. 10., Peter otestoval na Teste):**
+
+- `0047_ceny_spot`: `spot_average_daily` (RLS: admin a kto vidí maržu, aplikácia nezapisuje); `market_price_import` (interná – iba BL / PL s oboma hodnotami, ručne zadaná BL / PL dňa sa neprepíše, zhodná hodnota sa nezapíše znova, odhad portfólia a SPOT pre FVE z platného záznamu dňa sa prenesú); `market_price_daily_run` (iba beh na pozadí, `job_run` job `ceny`, chyby Montelu ako `{krok: 'montel', kod, text}` a upozornenie adminom); `market_price_history_import` (iba admin, dni 1. 1. 2026 – dnes, dni s cenou sa nemenia); `spot_average_on` (SPOT priemer pre Domov, posledný najviac 7 dní starý, vidí každý prihlásený). Strážca `market_price_guard` prijme zápis importu iba z funkcie vlastníka – nový spúšťač `trg_flag_check` (bez SECURITY DEFINER) odmietne príznaky `crm.market_price_import` / `crm.market_price_correction` nastavené aplikáciou.
+- `0048_ceny_rucne_zmazanie`: `market_price_daily.removed_reason`, `market_price_manual_remove(id, dôvod)` – iba admin, iba platná ručná cena; riadok sa označí ako opravený (kto, kedy, dôvod), ostane v histórii a audite; ďalší beh deň načíta z Montelu.
+- História: settlement obchodného dňa T = cena dňa T + 1 (ako denný beh ráno; Peter 16. 10.).
+- Kód: `api/src/montel.ts` (`MONTEL_PATHS`, `montelGet` – jediné volanie GET s `X-API-Key`, chyba iba s kódom; výber hodnôt `extractQuotes`, `extractSpotAvg`, `extractHistory`), `montel-fake.ts` (lokálne `MONTEL_FAKE=1`), `schedule.ts` (Cron `0 5,6,11,12 * * 1-5`, `isPriceSlot` = po – pi 7:00 a 13:00 Bratislava), `jobs.ts` `pricesRun`, `routes/pricing.ts` (zdroj a história, `POST /pricing/market-prices/:id/remove`, `POST /pricing/market-history`), kontrola `scripts/check-montel.mjs`, testy `test/montel.test.ts`.
+- Testy DB séria S0–S6 (`checks_ceny_spot.sql`), mutácie zachytené; `down` 0047 aj 0048 vráti schému 0046.
+
+### 36.2 Krok 2 – Domov a prehľady (`0049_domov_prehlady`; číslo 0048 použila oprava ručnej ceny v kroku 1)
+
+- **Domov (obrazovka 30, nová úvodná stránka):** dlaždice ceny pre obchodníka FIX na 3 nasledujúce roky (`trader_price` k dnešku, „stav k … · settlement z …“; cez víkend a sviatky posledná hodnota s poznámkou), priemerná SPOT za 12 mesiacov, minimálny aditív podľa typu predajcu; **graf** vývoja ceny pre obchodníka po rokoch od 1. 1. 2026; **kalkulačka** (FIX / SPOT, rok, objem, moja cena / aditív → pridaná hodnota a odhad provízie s mojím percentom, „Vytvoriť obchod s touto cenou“); **overenie firmy**; **moje ďalšie kroky** (po termíne, dnes, zajtra); **moje ponuky** (čakajú na schválenie, odoslané / otvorené, vyprší dnes, akceptované čakajú na zmluvu, PH otvorených a vážená).
+- **Žiadosť o pomoc s ponukou** (externí obchodníci): tlačidlo na obchode → upozornenie obchodnému riaditeľovi s odkazom na obchod a poznámkou.
+- **Pridaná hodnota obchodu v prehľadoch:** akceptovaný variant, inak najvyšší variant poslednej platnej ponuky, inak odhad PH na obchode (dnes sa používa iba odhad). Kanban a zoznam (32): súčty PH a vážená PH podľa pravdepodobnosti štádia, stĺpec „Uzavreté v mesiaci“ (Vyhraté / Prehraté).
+- **Pre manažéra:** rozpad podľa obchodníkov (počet otvorených, PH, vážená PH, vyhraté v mesiaci, bez kroku / po termíne).
+- **Zoznamy:** Bez ďalšieho kroku / po termíne (filter Obchodov už je), Čaká na schválenie (Schvaľovanie), Čaká na zmluvu a Nespárované (Zmluvy k obchodom) – odkazy z Domova.
+
+### 36.3 Otázky
+
+1. **Kľúč a spojenie:** pošlete mi (nie do chatu) cez `wrangler secret put MONTEL_API_KEY` pre `crm-core`; service binding na `greenlogy-montel-auth` pridám do `wrangler.toml`. Súhlas?
+2. **Žiadosť o pomoc:** komu – všetkým so „schvaľuje ceny“ (obchodný riaditeľ)? Iba zvonček, alebo aj e-mail z crm@ (nahrádza mailto zo Sales portálu – **odporúčam aj e-mail**)?
+3. **Pridaná hodnota obchodu** v súčtoch podľa 36.2 (akceptovaný variant → najvyšší variant poslednej ponuky → odhad). Súhlas, alebo radšej priemer variantov?
+4. **Kalkulačka SPOT:** pridaná hodnota = (môj aditív − minimálny aditív podľa typu predajcu) × objem. Súhlas?
+5. **Domov ako úvodná stránka** po prihlásení pre všetkých (dnes je to Zákazníci), alebo iba pre obchodníkov?
+
+**Odpovede (Peter, 16. 10.):**
+
+1. Áno, service binding, iba tri adresy s testom, kľúč zadá Peter. Obchodníci (aj externí) vidia na Domove, v grafe aj v kalkulačke **iba cenu pre obchodníka**, nikdy surové BL a PL (z nich a zo vzorca by sa dala dopočítať riziková prirážka a marža). Surové BL, PL a históriu z Montelu vidí iba „vidieť maržu firmy“ a admin. Do CRM iba potrebné hodnoty. Overiť testom API aj práv v DB. Doplnky: Cron 7:00 a 13:00 Bratislava v letnom aj zimnom čase s testom; zdroj ceny pri každom dni, zmazanie ručnej ceny adminom s dôvodom. SPOT priemer na Domove pre obchodníkov áno; surové BL / PL pre Nákup a Marketing v poriadku (modul 4).
+2. Žiadosť o pomoc s ponukou: tímu **Sales_internal** (zvonček + e-mail z crm@), nie všetkým so „schvaľuje ceny“.
+3. PH v súčtoch: **akceptovaný variant; inak hlavný variant poslednej odoslanej ponuky** (predvolene prvý, obchodník ho môže v ponuke označiť); inak odhad na obchode. Nie najvyšší variant.
+4. Kalkulačka SPOT: (môj aditív − minimálny aditív podľa typu predajcu) × objem. Zápornú PH ukázať, provízia je vtedy 0 €.
+5. Domov ako úvodná stránka pre rolu obchodník (interný aj externý) a tím Sales_internal; ostatní Zákazníci.
+

@@ -5,8 +5,9 @@ import postgres from 'postgres';
 import type { AuthEnv } from './auth';
 import type { FinstatEnv } from './finstat';
 import type { GmailEnv } from './gmail/gmail';
+import type { MontelEnv } from './montel';
 
-export type Env = AuthEnv & FinstatEnv & GmailEnv & {
+export type Env = AuthEnv & FinstatEnv & GmailEnv & MontelEnv & {
   HYPERDRIVE: Hyperdrive;
   BROWSER: Fetcher;        // Browser Run – PDF ponuky (F3)
   DOCS: R2Bucket;          // R2 crm-dokumenty-* (jurisdikcia EÚ): PDF ponúk, podpísané ponuky

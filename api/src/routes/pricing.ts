@@ -1,11 +1,14 @@
-// Modul 4 Zmluvy, F1a – Nastavenia → Cenové parametre (obrazovka 29; migrácie 0023, 0024).
+// Modul 4 Zmluvy, F1a – Nastavenia → Cenové parametre (obrazovka 29; migrácie 0023, 0024; modul 5 F6: 0047, 0048).
 // Otvorí admin alebo používateľ so „schvaľuje ceny“ (obchodný riaditeľ). Pravidlá stráži databáza pre každú rolu:
 // kto smie ktorý parameter, „platí od“ iba dnes a neskôr, riadok sa nemení (iba autorov budúci), trhová cena
 // sa neprepisuje – oprava je nový záznam toho istého dňa a pôvodný ostane v histórii ako „opravené“.
+// F6: ceny dňa načítava Montel (Cron po – pi 7:00 a 13:00); pri každom dni zdroj (Montel / ručne, kto a kedy);
+// admin zmaže ručne zadanú cenu dňa s dôvodom (ďalší beh ju načíta z Montelu) a jednorazovo načíta históriu od 1. 1. 2026.
 
 import { Hono } from 'hono';
 import type { Sql } from '../db';
 import { type AppEnv, UUID } from '../types';
+import { extractHistory, HISTORY_FROM, historyDays, MontelError, montelGet } from '../montel';
 import { BadRequest, Forbidden, readBody, str, type Body } from '../validate';
 import { price } from './pricelists-write';
 
@@ -80,18 +83,26 @@ pricing.get('/pricing', async (c) => {
      WHERE p.org_id = ${org}
      ORDER BY p.code, p.delivery_year NULLS FIRST, p.valid_from DESC`;
   const today = await sql`
-    SELECT id, delivery_year, on_date, bl_eur_mwh, pl_eur_mwh, bl_ratio_pct, mix_eur_mwh, risk_eur_mwh, margin_eur_mwh,
-           trader_price_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh, source
-      FROM trader_price_today_v
-     WHERE org_id = ${org}
-     ORDER BY delivery_year`;
+    SELECT t.id, t.delivery_year, t.on_date, t.bl_eur_mwh, t.pl_eur_mwh, t.bl_ratio_pct, t.mix_eur_mwh, t.risk_eur_mwh, t.margin_eur_mwh,
+           t.trader_price_eur_mwh, t.portfolio_eur_mwh, t.spot_fve_eur_mwh, t.source, h.created_at, h.changed_by_name
+      FROM trader_price_today_v t
+      JOIN market_price_history_v h ON h.id = t.id
+     WHERE t.org_id = ${org}
+     ORDER BY t.delivery_year`;
   const history = await sql`
-    SELECT id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh, source,
-           created_at, changed_by_name, corrected_at, corrected_by_name, is_corrected
-      FROM market_price_history_v
-     WHERE org_id = ${org} AND on_date >= crm_today() - 60
-     ORDER BY on_date DESC, delivery_year, created_at DESC`;
-  return c.json({ org_id: org, ...meta, parameters, today, history });
+    SELECT h.id, h.on_date, h.delivery_year, h.bl_eur_mwh, h.pl_eur_mwh, h.portfolio_eur_mwh, h.spot_fve_eur_mwh, h.source,
+           h.created_at, h.changed_by_name, h.corrected_at, h.corrected_by_name, h.is_corrected, m.removed_reason
+      FROM market_price_history_v h
+      JOIN market_price_daily m ON m.id = h.id
+     WHERE h.org_id = ${org} AND h.on_date >= crm_today() - 60
+     ORDER BY h.on_date DESC, h.delivery_year, h.created_at DESC`;
+  // posledný beh cien z Montelu a 12-mesačný priemer SPOT (denník behov vidí admin a Nákup)
+  const [montel] = await sql`
+    SELECT j.started_at, j.result, jsonb_array_length(j.errors) AS errors
+      FROM job_run j WHERE j.job = 'ceny' ORDER BY j.started_at DESC LIMIT 1`;
+  const [spot] = await sql`
+    SELECT on_date, avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = ${org} ORDER BY on_date DESC LIMIT 1`;
+  return c.json({ org_id: org, ...meta, parameters, today, history, montel: montel ?? null, spot: spot ?? null });
 });
 
 // Nová hodnota parametra s „platí od“ (dnes a neskôr; kto smie ktorý parameter, stráži databáza)
@@ -161,4 +172,31 @@ pricing.post('/pricing/market-prices', async (c) => {
     VALUES (${org}, coalesce(${onDate}::date, crm_today()), ${deliveryYear}, ${bl}, ${pl}, ${portfolio}, ${spotFve})
     RETURNING id`;
   return c.json({ id: row.id }, 201);
+});
+
+// Zmazanie ručne zadanej ceny dňa s dôvodom (iba admin, 0048): riadok ostane v histórii ako zmazaný; ďalší beh ju načíta z Montelu
+pricing.post('/pricing/market-prices/:id/remove', async (c) => {
+  const pid = id(c.req.param('id'));
+  const b = await readBody(c.req);
+  const reason = str(b, 'reason', 'Dôvod', { max: 500 })!;
+  await c.var.sql`SELECT market_price_manual_remove(${pid}, ${reason})`;
+  return c.json({ ok: true });
+});
+
+// História cien z Montelu od 1. 1. 2026 (iba admin, 0047): settlement ročných produktov po dňoch; dni s cenou sa nemenia
+pricing.post('/pricing/market-history', async (c) => {
+  const sql = c.var.sql;
+  const [r] = await sql<{ ok: boolean; today: string }[]>`SELECT crm_is_admin() AS ok, crm_today() AS today`;
+  if (!r?.ok) throw new Forbidden('Históriu cien načítava admin.');
+  let json: unknown;
+  try {
+    json = await montelGet(c.env, '/forwards/ohlc/history', historyDays(r.today));
+  } catch (err) {
+    if (err instanceof MontelError) return c.json({ error: `Montel neodpovedá (${err.kod}). Skúste neskôr.` }, 502);
+    throw err;
+  }
+  const days = extractHistory(json, HISTORY_FROM, r.today);
+  if (days.length === 0) return c.json({ error: 'Montel nevrátil žiadne ceny ročných produktov.' }, 502);
+  const [res] = await sql<{ r: { dni: number; riadky: number } }[]>`SELECT market_price_history_import(${sql.json(days)}) AS r`;
+  return c.json({ ...res.r, montel_dni: days.length });
 });

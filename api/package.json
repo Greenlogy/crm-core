@@ -5,7 +5,7 @@
   "description": "API jadra Greenlogy CRM (Cloudflare Worker). Prototyp: iba čítanie.",
   "scripts": {
     "dev": "./dev.sh",
-    "typecheck": "tsc --noEmit && node scripts/check-gmail.mjs",
+    "typecheck": "tsc --noEmit && node scripts/check-gmail.mjs && node scripts/check-montel.mjs",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

@@ -4,6 +4,8 @@
 // Do logu ide iba počet, nikdy údaje záznamov.
 
 import { connect, type Env } from './db';
+import { extractQuotes, extractSpotAvg, MontelError, montelGet, type MontelPath } from './montel';
+import { isPriceSlot } from './schedule';
 
 // Denný beh OOM (oom_daily_run, 0016): najprv plánované zmeny splatné k dnešku (prepis, odchod, zrušenie),
 // potom aktivácia Pripravovaných OOM (zmena dodávateľa potvrdená, začiatok dodávky nastal, povinné údaje).
@@ -102,4 +104,37 @@ export async function nightlyRun(env: Env): Promise<void> {
     failed = true;
   }
   if (failed) throw new Error('Nočný beh skončil s chybou (podrobnosti v logu vyššie).');
+}
+
+// Ceny z Montelu (market_price_daily_run, 0047): po – pi 7:00 a 13:00 v Bratislave (Cron v UTC, čas stráži isPriceSlot).
+// Načíta BL / PL rokov dodávky a 12-mesačný priemer SPOT; chyby Montelu (iba kód a adresa) zapíše databáza do denníka
+// behov a upozorní adminov. Do logu iba počty.
+export async function pricesRun(env: Env, scheduledTime: number): Promise<void> {
+  if (!isPriceSlot(scheduledTime)) return;
+  const errors: { krok: string; kod: string; text: string }[] = [];
+  const get = async (path: MontelPath): Promise<unknown> => {
+    try {
+      return await montelGet(env, path);
+    } catch (err) {
+      errors.push({ krok: 'montel', kod: err instanceof MontelError ? err.kod : 'chyba', text: path });
+      return null;
+    }
+  };
+  const [quotes, spot] = await Promise.all([get('/forwards/quotes'), get('/spot/aggregates')]);
+  const rows = quotes === null ? [] : extractQuotes(quotes);
+  const spotAvg = spot === null ? null : extractSpotAvg(spot);
+  if (quotes !== null && rows.length === 0) errors.push({ krok: 'montel', kod: 'bez cien', text: '/forwards/quotes' });
+  if (spot !== null && spotAvg === null) errors.push({ krok: 'montel', kod: 'bez priemeru', text: '/spot/aggregates' });
+  const sql = connect(env);
+  try {
+    const [row] = await sql<{ r: { ceny: number; spot: number } }[]>`
+      SELECT market_price_daily_run(${sql.json(rows)}, ${spotAvg}, ${sql.json(errors)}) AS r`;
+    console.log(`Ceny z Montelu: zapísané ${row?.r?.ceny ?? 0}, SPOT ${row?.r?.spot ?? 0}, chyby ${errors.length}`);
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? 'unknown';
+    console.error(`Ceny z Montelu zlyhali: ${(err as Error).name} ${code}`);
+    throw err;
+  } finally {
+    await sql.end();
+  }
 }
