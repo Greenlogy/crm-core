@@ -32,6 +32,9 @@ export const ICONS = {
   leads: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14M21 21l-4.3-4.3',
   plus: 'M12 5v14M5 12h14',
+  // sharing: zdieľaná elektrina – jeden zdroj prepojený s dvoma odbermi
+  sharing: 'M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6M5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6M10.5 7.6 6.5 16.4M13.5 7.6l4 8.8M8 19h8',
+  sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
   upload: 'M12 21V9M7 14l5-5 5 5M4 3h16',
 };

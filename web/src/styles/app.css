@@ -2793,3 +2793,34 @@ a.tab {
   height: 18px;
   accent-color: var(--gl-blue-600);
 }
+/* Ikona typu v riadku (dizajn 03) a varovné čipy v sklenenej lište */
+.type-icon.info {
+  background: var(--gl-blue-50);
+  color: var(--gl-brand-blue);
+}
+.type-icon.positive {
+  background: var(--gl-green-50);
+  color: var(--gl-green-700);
+}
+.type-icon.neutral {
+  background: var(--gl-neutral-bg);
+  color: var(--gl-neutral-fg);
+}
+.chip.chip-warn {
+  background: var(--gl-warn-bg);
+  color: var(--gl-warn-fg);
+}
+.chip.chip-danger {
+  background: var(--gl-danger-bg);
+  color: var(--gl-danger-fg);
+}
+.chip.chip-warn .cc,
+.chip.chip-danger .cc {
+  color: inherit;
+  font-weight: var(--gl-fw-semibold);
+}
+.chip.chip-warn[aria-pressed='true'],
+.chip.chip-danger[aria-pressed='true'] {
+  background: var(--gl-blue-600);
+  color: var(--gl-on-primary);
+}

@@ -1,10 +1,14 @@
 // Zoznam odberných miest podľa docs/dizajn/obrazovky/17-oom-zoznam.html (modul Odberné miesta, F1).
 // Tlačidlá stavov s počtami, „Prepísané“ (OOM s prepisom) a „Prechod sa zasekol“; filtre typ, PDS, vlastník,
 // spoločnosť (iba pri viacerých spoločnostiach); hľadanie podľa EIC (aj s medzerami), názvu, adresy a zákazníka.
+// Vzhľad podľa docs/design-handoff/reference/03-odberne-miesta.html: stavy v sklenenej lište, varovné filtre vpravo,
+// ikona typu (blesk spotreba, slnko výroba) a štítok typu („Výroba“ zelená) – doplnky schválené 16. 10. 2026.
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, ErrorState, Pill, Skeleton, Source, StatusPill } from '../components/ui';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
+import { Card, ErrorState, Pill, Skeleton, Source, StatusPill, WithUnit } from '../components/ui';
 import { useApi, type OomFilters, type OomList, type OomListItem } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
 import { permission, useMe } from '../lib/me';
@@ -21,8 +25,11 @@ const CHIPS: [string, string, keyof OomList['counts']][] = [
   ['odidene', 'Odídené', 'odidene'],
   ['zrusene', 'Zrušené', 'zrusene'],
   ['prepisane', 'Prepísané', 'prepisane'],
-  ['zasekol', 'Prechod sa zasekol', 'zasekol'],
-  ['zlyhal', 'Plán zlyhal', 'zlyhal'],
+];
+// Varovné filtre vpravo v lište, podfarbené podľa stavu
+const WARN_CHIPS: [string, string, keyof OomList['counts'], 'warn' | 'danger'][] = [
+  ['zasekol', 'Prechod sa zasekol', 'zasekol', 'warn'],
+  ['zlyhal', 'Plán zlyhal', 'zlyhal', 'danger'],
 ];
 
 const TYPES: [string, string][] = [
@@ -31,6 +38,16 @@ const TYPES: [string, string][] = [
   ['vyroba', 'Výroba'],
   ['sharing', 'Sharing'],
 ];
+
+/** Ikona typu v riadku: blesk spotreba, slnko výroba, prepojené body sharing; odídené a zrušené sivé. */
+function TypeIcon({ o }: { o: OomListItem }) {
+  const tone = o.status === 'odidene' || o.status === 'zrusene' ? 'neutral' : o.type === 'vyroba' ? 'positive' : 'info';
+  return (
+    <span className={`gl-typeicon type-icon ${tone}`} title={OOM_TYPE[o.type] ?? o.type}>
+      <Icon d={o.type === 'vyroba' ? ICONS.sun : o.type === 'sharing' ? ICONS.sharing : ICONS.oom} />
+    </span>
+  );
+}
 
 const supply = (o: OomListItem) =>
   !o.supply_from ? '–' : o.supply_to ? `${date(o.supply_from)} – ${date(o.supply_to)}` : o.status === 'pripravovane' ? `od ${date(o.supply_from)}` : `${date(o.supply_from)} – neurčito`;
@@ -82,44 +99,76 @@ export function OomListPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Odberné miesta</h1>
-          <div className="page-sub">
-            <span>spotreba, výroba, sharing</span>
-            <Source />
+      <PageHero
+        title="Odberné miesta"
+        sub={
+          <>
+            spotreba, výroba, sharing · <Source />
+          </>
+        }
+        actions={
+          <>
+            {canImport && (
+              <button type="button" className="btn" onClick={() => navigate('/oom/import')}>
+                <Icon d={ICONS.upload} />
+                Import z Excelu
+              </button>
+            )}
+            {canExport && (
+              <a className="btn" href={`/api/oom/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+                <Icon d={ICONS.download} />
+                Export
+              </a>
+            )}
+            {canCreate && (
+              <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+                <Icon d={ICONS.plus} />
+                Nové odberné miesto
+              </button>
+            )}
+          </>
+        }
+      />
+      <GlassBar
+        label="Filter podľa stavu"
+        aside={
+          <div className="chips" role="group" aria-label="Upozornenia">
+            {WARN_CHIPS.map(([value, name, key, tone]) => (
+              <button
+                key={value}
+                // „Plán zlyhal“ pri nule bez farby (Peter 16. 10. 2026)
+                className={tone === 'danger' && data?.counts[key] === 0 ? 'chip' : `chip chip-${tone}`}
+                type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
+                {tone === 'warn' ? <span className="dot" aria-hidden="true" /> : null}
+                {name} <span className="cc">{data ? num(data.counts[key], 0) : ''}</span>
+              </button>
+            ))}
           </div>
-        </div>
-        <div className="head-actions">
-          {canImport && (
-            <button type="button" className="btn" onClick={() => navigate('/oom/import')}>
-              Import z Excelu
+        }
+      >
+        <div className="chips" role="group" aria-label="Stav">
+          {CHIPS.map(([value, name, key]) => (
+            <button key={value || 'all'} className="chip" type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
+              {name} <span className="cc">{data ? num(data.counts[key], 0) : ''}</span>
             </button>
-          )}
-          {canExport && (
-            <a className="btn" href={`/api/oom/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
-              Export
-            </a>
-          )}
-          {canCreate && (
-            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
-              Nové odberné miesto
-            </button>
-          )}
+          ))}
         </div>
-      </header>
+      </GlassBar>
       {creating && <OomCreatePanel onClose={() => setCreating(false)} />}
 
       <Card flush label="Zoznam odberných miest">
         <div className="toolbar">
-          <input
-            className="input grow"
-            type="search"
-            placeholder="EIC, názov, adresa alebo zákazník…"
-            aria-label="Hľadať odberné miesto"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
+          <div className="gl-search list-search">
+            <Icon d={ICONS.search} />
+            <input
+              className="input"
+              type="search"
+              placeholder="EIC, názov, adresa alebo zákazník…"
+              aria-label="Hľadať odberné miesto"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
           <select className="input select" aria-label="Typ" value={type} onChange={(e) => update({ typ: e.target.value, page: '1' })}>
             {TYPES.map(([v, n]) => (
               <option key={v} value={v}>
@@ -154,16 +203,6 @@ export function OomListPage() {
               ))}
             </select>
           )}
-        </div>
-
-        <div className="toolbar chips-bar">
-          <div className="chips" role="group" aria-label="Filter podľa stavu">
-            {CHIPS.map(([value, name, key]) => (
-              <button key={value || 'all'} className="chip" type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
-                {name} <span className="cc">{data ? num(data.counts[key], 0) : ''}</span>
-              </button>
-            ))}
-          </div>
         </div>
 
         {error ? (
@@ -216,6 +255,7 @@ export function OomListPage() {
                           open(o);
                         }}
                       >
+                        <TypeIcon o={o} />
                         <span style={{ minWidth: 0 }}>
                           <span className="name-link" title={o.name || oomAddress(o)}>
                             {o.name || oomAddress(o) || o.eic}
@@ -228,7 +268,9 @@ export function OomListPage() {
                       {text(o.customer_name)}
                       <div className="sub">{o.customer_type === 'B2B' ? 'firma' : 'domácnosť'}</div>
                     </td>
-                    <td>{label(OOM_TYPE, o.type)}</td>
+                    <td>
+                      <Pill tone={o.type === 'vyroba' ? 'positive' : 'neutral'}>{label(OOM_TYPE, o.type)}</Pill>
+                    </td>
                     <td>
                       <span className="pills">
                         <StatusPill map={OOM_STATUS} value={o.status} />
@@ -245,7 +287,7 @@ export function OomListPage() {
                     </td>
                     <td>{text(o.pds_label)}</td>
                     <td className={`num${o.planned_mwh === null ? ' muted' : ''}`}>
-                      {o.planned_mwh === null ? '–' : `${mwh(o.planned_mwh)}${o.type === 'vyroba' ? ' výkup' : ''}`}
+                      {o.planned_mwh === null ? '–' : <WithUnit value={mwh(o.planned_mwh)} suffix={o.type === 'vyroba' ? 'výkup' : undefined} />}
                     </td>
                     <td>{supply(o)}</td>
                     <td>{text(o.owner_name)}</td>
@@ -269,14 +311,14 @@ export function OomListPage() {
               {' · jedno EIC = jeden záznam · stav sa viaže na obdobie väzby so zákazníkom'}
             </span>
             {pages > 1 && (
-              <>
+              <div className="pager-actions">
                 <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                   ← Predchádzajúca
                 </button>
                 <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
                   Ďalšia →
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}

@@ -99,12 +99,12 @@ export function DateTile(props: { date: string; tone: Tone }) {
 }
 
 /** „2 268,8 MWh“ → číslo a jednotka v tlmenej farbe (tabuľky, DESIGN_SPEC § 1.5). */
-export function WithUnit(props: { value: string }) {
+export function WithUnit(props: { value: string; suffix?: string }) {
   const i = props.value.lastIndexOf(' ');
   if (i < 0 || /\d/.test(props.value.slice(i + 1))) return <>{props.value}</>;
   return (
     <>
-      {props.value.slice(0, i)} <span className="unit">{props.value.slice(i + 1)}</span>
+      {props.value.slice(0, i)} <span className="unit">{props.value.slice(i + 1)}{props.suffix ? ` ${props.suffix}` : ''}</span>
     </>
   );
 }
