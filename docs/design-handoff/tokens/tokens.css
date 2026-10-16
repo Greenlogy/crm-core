@@ -1,0 +1,107 @@
+/* =====================================================================
+   Greenlogy CRM – dizajnové tokeny (smer „Krajina moderná A – firemné farby“)
+   Zdroj farieb: Design manuál Greenlogy 2021 (#05d695, #13689e), použité
+   v jemnejších odtieňoch. Všetky komponenty používajú iba tieto premenné.
+   ===================================================================== */
+:root {
+  /* --- Značka (plné farby z manuálu) – iba logo, tenké linky, akcenty --- */
+  --gl-brand-green: #05d695;          /* Pantone 3395 C – NIE na text (1,9:1 na bielej) */
+  --gl-brand-blue: #13689e;           /* Pantone 2196 C – odkazy, zvýraznené čísla, text */
+  --gl-brand-gradient: linear-gradient(135deg, #05d695 0%, #13689e 100%); /* iba logo */
+
+  /* --- Zelená (jemné odtiene) --- */
+  --gl-green-50: #e3f8f0;             /* podklad štítku OK, avatar B2C */
+  --gl-green-400: #2fd09c;            /* hlavná séria grafu, progres, akcentová linka */
+  --gl-green-700: #0b7a57;            /* zelený text na svetlom (5,3:1) */
+
+  /* --- Modrá (jemné odtiene) --- */
+  --gl-blue-50: #e6f0f7;              /* aktívna položka menu, štítok info, avatar B2B */
+  --gl-blue-100: #cfe2ef;             /* okraj sekundárneho tlačidla */
+  --gl-blue-200: #9cc3dd;             /* hover okraja */
+  --gl-blue-400: #5a9bc9;             /* 2. séria grafu, bodky */
+  --gl-blue-600: #2f78ab;             /* primárne tlačidlo, aktívny filter (biely text 4,8:1) */
+  --gl-blue-700: #13689e;             /* hover primárneho tlačidla = brand blue */
+
+  /* --- Neutrálne --- */
+  --gl-ink: #1d3a4f;                  /* hlavný text, nadpisy, čísla (11,9:1) */
+  --gl-ink-2: #3f5868;                /* text na pozadí krajiny */
+  --gl-ink-muted: #5c7080;            /* štítky, popisy, metadáta (5,1:1 na bielej) */
+  --gl-neutral-400: #a9b7c2;          /* 3. séria grafu, neaktívne prvky (nie text) */
+  --gl-surface-page: #f4f8f8;
+  --gl-surface-card: #ffffff;
+  --gl-surface-hover: #f6fafb;        /* hover riadku tabuľky */
+  --gl-surface-shade: #f3f8fb;        /* zvýraznený stĺpec tabuľky (napr. Marža firmy) */
+  --gl-border: #e4eef0;               /* okraj kariet, čiara pod hlavičkou tabuľky */
+  --gl-border-strong: #d6e4ea;        /* okraj polí */
+  --gl-divider: #f0f5f6;              /* oddeľovač riadkov */
+
+  /* --- Stavy (podklad / text) – vždy aj slovom, nie len farbou --- */
+  --gl-ok-bg: #e3f8f0;      --gl-ok-fg: #0b7a57;
+  --gl-info-bg: #e6f0f7;    --gl-info-fg: #13689e;
+  --gl-warn-bg: #fff3df;    --gl-warn-fg: #94500c;
+  --gl-danger-bg: #fdebe9;  --gl-danger-fg: #b42318;
+  --gl-neutral-bg: #eef2f4; --gl-neutral-fg: #55697a;
+  --gl-danger-card-bg: #fdf0ee; --gl-danger-card-border: #f6d9d4;
+
+  /* --- Jemné prechody --- */
+  --gl-gradient-soft: linear-gradient(135deg, #c9f3e3 0%, #cfe3f1 100%);   /* hlavná KPI dlaždica */
+  --gl-gradient-calc: linear-gradient(160deg, #eaf8f2 0%, #e7f1f8 100%);   /* kalkulačka */
+  --gl-hero-sky: linear-gradient(180deg, #d9efe3 0%, #eef3e6 55%, #f7efdc 100%); /* obloha za krajinou */
+
+  /* --- Sklo (lišty a dlaždice prekrývajúce krajinu) --- */
+  --gl-glass-bg: rgba(255, 255, 255, .64);
+  --gl-glass-border: rgba(255, 255, 255, .85);
+  --gl-glass-blur: blur(18px) saturate(1.3);
+  --gl-glass-shadow: 0 10px 30px -14px rgba(19, 104, 158, .28);
+
+  /* --- Grafy --- */
+  --gl-chart-1: #2fd09c;  /* hlavná séria (napr. rok 2027) */
+  --gl-chart-2: #5a9bc9;  /* 2. séria */
+  --gl-chart-3: #a9b7c2;  /* 3. séria */
+  --gl-chart-grid: #edf3f5;
+  --gl-chart-axis: #d6e4ea;
+
+  /* --- Typografia --- */
+  --gl-font-sans: "Lexend", system-ui, -apple-system, sans-serif; /* náhrada za Campton (manuál) */
+  --gl-font-mono: "Geist Mono", ui-monospace, Menlo, monospace;   /* EIC, čísla zmlúv a ponúk */
+  --gl-fw-light: 300;  --gl-fw-regular: 400;  --gl-fw-medium: 500;  --gl-fw-semibold: 600;
+  --gl-fs-display: 48px;   /* pozdrav na úvodnej stránke */
+  --gl-fs-h1: 44px;        /* nadpis podstránky */
+  --gl-fs-h2: 19px;        /* nadpis karty */
+  --gl-fs-kpi-xl: 54px;    /* jedno hlavné číslo (provízia) */
+  --gl-fs-kpi-lg: 42px;    /* hlavná KPI dlaždica */
+  --gl-fs-kpi: 32px;       /* ostatné KPI dlaždice */
+  --gl-fs-body: 14px;
+  --gl-fs-small: 13px;
+  --gl-fs-caption: 12px;
+  --gl-fs-nav: 11px;
+  --gl-ls-tight: -.03em;   /* veľké nadpisy a čísla */
+
+  /* --- Zaoblenia --- */
+  --gl-radius-pill: 999px;  /* tlačidlá, vyhľadávanie, štítky, filtre */
+  --gl-radius-field: 12px;  /* polia formulára */
+  --gl-radius-tile: 14px;   /* položka menu, ikonové dlaždice, dátum v zozname */
+  --gl-radius-item: 16px;   /* karta ponuky v zozname */
+  --gl-radius-bar: 20px;    /* sklenená lišta */
+  --gl-radius-card: 22px;   /* karty */
+  --gl-radius-hero: 28px;   /* hlavička s krajinou */
+
+  /* --- Medzery --- */
+  --gl-rail-width: 88px;
+  --gl-page-pad: 20px 28px 48px 12px;
+  --gl-gap-section: 22px;
+  --gl-gap-grid: 12px;
+  --gl-card-pad: 22px 24px;
+  --gl-cell-pad: 12px;
+  --gl-cell-pad-edge: 24px;
+  --gl-hero-h-home: 320px;
+  --gl-hero-h-sub: 270px;
+  --gl-hero-overlap: -88px; /* o koľko sklenená lišta / dlaždice prekrývajú krajinu */
+
+  /* --- Tiene --- */
+  --gl-shadow-card: 0 1px 2px rgba(29, 58, 79, .04), 0 12px 32px -20px rgba(29, 58, 79, .22);
+
+  /* --- Fokus --- */
+  --gl-focus: 2px solid #2f78ab;
+  --gl-focus-offset: 2px;
+}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="Greenlogy CRM">
+<!-- Dočasná značka do menu (zjednodušené „g“ zo značky). Ak máte oficiálny symbol z manuálu v SVG, nahraďte ho. -->
+<defs><linearGradient id="glMark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#05d695"/><stop offset="1" stop-color="#13689e"/></linearGradient></defs>
+<rect width="40" height="40" rx="12" fill="url(#glMark)"/>
+<g transform="translate(9 9)" fill="none" stroke="#ffffff" stroke-width="3"><circle cx="11" cy="10" r="5"/><path d="M15 5.5l3-1.5" stroke-linecap="square"/><path d="M6.5 18.5c2.6 1.8 6.4 1.8 9 0"/></g>
+</svg>
