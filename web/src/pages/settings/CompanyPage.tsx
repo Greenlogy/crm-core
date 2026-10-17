@@ -116,7 +116,7 @@ function OrgEditor(props: { org: SettingsOrg; onSaved: () => void }) {
         <Card
           title="Údaje do dokumentov"
           aside={
-            <button type="button" className="btn primary" disabled={!dirty || save.busy} onClick={submit}>
+            <button type="button" className="btn" disabled={!dirty || save.busy} onClick={submit}>
               Uložiť zmeny
             </button>
           }
@@ -272,7 +272,7 @@ function BankAccounts(props: { org: SettingsOrg; detail?: OrgDetail; onChanged: 
                 <button type="button" className="btn" onClick={() => setAdding(false)}>
                   Zrušiť
                 </button>
-                <button type="button" className="btn primary" disabled={!iban.trim() || save.busy} onClick={add}>
+                <button type="button" className="btn" disabled={!iban.trim() || save.busy} onClick={add}>
                   Pridať účet
                 </button>
               </div>
@@ -398,7 +398,7 @@ function WorkTime(props: { org: SettingsOrg; detail: OrgDetail; onChanged: () =>
     <Card
       title="Pracovný čas"
       aside={
-        <button type="button" className="btn primary" disabled={!dirty || save.busy} onClick={saveHours}>
+        <button type="button" className="btn" disabled={!dirty || save.busy} onClick={saveHours}>
           Uložiť
         </button>
       }
@@ -496,7 +496,7 @@ function SwitchDays(props: { org: SettingsOrg; onSaved: () => void }) {
     <Card
       title="Odberné miesta"
       aside={
-        <button type="button" className="btn primary" disabled={!dirty || save.busy} onClick={submit}>
+        <button type="button" className="btn" disabled={!dirty || save.busy} onClick={submit}>
           Uložiť
         </button>
       }

@@ -169,7 +169,7 @@ function CustomSignatureCard(props: { profile: Profile; userId: string; onSaved:
         </>
       )}
       <div className="row-actions">
-        <button type="button" className="btn primary" disabled={save.busy} onClick={submit}>
+        <button type="button" className="btn" disabled={save.busy} onClick={submit}>
           {save.busy ? 'Ukladám…' : mode === 'profil' ? 'Používať podpis z profilu' : 'Uložiť vlastný podpis'}
         </button>
       </div>

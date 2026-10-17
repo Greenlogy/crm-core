@@ -7,6 +7,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApi, type MenuCounts } from '../lib/api';
 import { num } from '../lib/format';
 import { ENVIRONMENT_LABEL, useMe } from '../lib/me';
+import logoMark from '../assets/logo-mark.png';
 
 export const Icon = (props: { d: string; className?: string }) => (
   <svg className={props.className ?? 'gl-icon'} viewBox="0 0 24 24" aria-hidden="true">
@@ -38,8 +39,8 @@ export const ICONS = {
   note: 'M4 4h16v12l-4 4H4zM16 20v-4h4M8 9h8M8 13h5',
   alert: 'M12 3 2 20h20zM12 10v4M12 17h.01',
   close: 'M6 6l12 12M18 6 6 18',
-  // sharing: zdieľaná elektrina – jeden zdroj prepojený s dvoma odbermi
-  sharing: 'M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6M5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6M10.5 7.6 6.5 16.4M13.5 7.6l4 8.8M8 19h8',
+  // sharing: podanie rúk – symbol prepojenia (Peter 17. 10. 2026)
+  sharing: 'M11 17l2 2a1 1 0 1 0 3-3M14 14l2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4M21 3l1 11h-2M3 3L2 14l6.5 6.5a1 1 0 1 0 3-3M3 4h8',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
   upload: 'M12 21V9M7 14l5-5 5 5M4 3h16',
@@ -108,13 +109,7 @@ export function Layout() {
   return (
     <div className="gl-app">
       <nav className="gl-rail" aria-label="Hlavné menu">
-        <span className="gl-rail__logo" role="img" aria-label="Greenlogy CRM">
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" className="rail-logo-mark">
-            <circle cx="11" cy="10" r="5" />
-            <path d="M15 5.5l3-1.5" strokeLinecap="square" />
-            <path d="M6.5 18.5c2.6 1.8 6.4 1.8 9 0" />
-          </svg>
-        </span>
+        <img className="rail-logo" src={logoMark} alt="Greenlogy CRM" width={40} height={40} />
 
         <NavLink to="/domov" className={item}>
           <Icon d={ICONS.home} />

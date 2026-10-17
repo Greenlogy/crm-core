@@ -129,10 +129,13 @@ a:hover {
   background: var(--gl-danger-bg);
   color: var(--gl-danger-fg);
 }
-.rail-logo-mark {
-  fill: none;
-  stroke: var(--gl-on-primary);
-  stroke-width: 3;
+/* Oficiálny symbol Greenlogy (Peter 17. 10. 2026) namiesto dočasnej značky z podkladov */
+.rail-logo {
+  display: block;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  flex: none;
 }
 .gl-rail__status {
   display: flex;
@@ -935,29 +938,27 @@ a:hover .name-link {
 }
 .snav {
   display: block;
-  padding: 7px 10px;
-  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  border-radius: var(--gl-radius-field);
   border: 1px solid transparent;
-  color: var(--ink-muted);
-  font-weight: 500;
-  font-size: 13px;
+  color: var(--gl-ink-muted);
+  font-weight: var(--gl-fw-medium);
+  font-size: var(--gl-fs-small);
   line-height: 19px;
 }
 .snav:hover {
-  background: var(--surface-muted);
-  color: var(--ink);
+  background: var(--gl-rail-hover);
+  color: var(--gl-ink);
   text-decoration: none;
 }
 .snav.active {
-  background: var(--surface-card);
-  color: var(--ink);
-  font-weight: 600;
-  border-color: var(--border);
-  box-shadow: var(--shadow-card);
+  background: var(--gl-blue-50);
+  color: var(--gl-brand-blue);
+  font-weight: var(--gl-fw-semibold);
 }
 .snav:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: var(--gl-focus);
+  outline-offset: var(--gl-focus-offset);
 }
 .settings-body {
   flex: 1 1 600px;
@@ -1227,8 +1228,8 @@ textarea.inp {
   color: var(--ink-muted);
 }
 .org-tab.active {
-  border-color: var(--brand);
-  color: var(--brand-text);
+  border-color: var(--gl-blue-600);
+  color: var(--gl-brand-blue);
 }
 .settings-columns {
   display: flex;
@@ -2696,7 +2697,8 @@ a.tab {
   .gl-rail__item {
     overflow-wrap: normal;
   }
-  .gl-rail__status {
+  .gl-rail__status,
+  .rail-logo {
     display: none;
   }
   .rail-more-menu {
@@ -3112,5 +3114,38 @@ a.tab {
 @media (max-width: 760px) {
   .t-page-title {
     font-size: 26px;
+  }
+}
+
+/* Posúvateľné boxy sú obsahujúcim blokom – absolútne umiestnené popisky (.sr-only) z nich neunikajú */
+.table-wrap,
+.gl-table-wrap,
+.gl-stepper,
+.kanban {
+  position: relative;
+}
+
+/* Mobil: vnútorné menu Nastavení v riadkoch (položky sa zalomia), dlhé nadpisy a tlačidlá sa zalamujú */
+@media (max-width: 760px) {
+  .settings-nav {
+    flex: 1 1 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .settings-nav-label,
+  .settings-nav-note {
+    flex-basis: 100%;
+  }
+  .snav {
+    flex: none;
+  }
+  .page-head h1 {
+    white-space: normal;
+  }
+  .org-tab {
+    white-space: normal;
+    text-align: left;
+    max-width: 100%;
   }
 }

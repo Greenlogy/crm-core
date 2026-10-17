@@ -213,7 +213,7 @@ function Preview() {
         <Check checked={nt} onChange={setNt}>
           plánovaná spotreba NT
         </Check>
-        <button type="button" className="btn primary" disabled={!pds || !tariff} onClick={show}>
+        <button type="button" className="btn" disabled={!pds || !tariff} onClick={show}>
           Ukázať
         </button>
       </div>

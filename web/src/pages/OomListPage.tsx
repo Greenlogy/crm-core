@@ -39,7 +39,7 @@ const TYPES: [string, string][] = [
   ['sharing', 'Sharing'],
 ];
 
-/** Ikona typu v riadku: blesk spotreba, slnko výroba, prepojené body sharing; odídené a zrušené sivé. */
+/** Ikona typu v riadku: blesk spotreba, slnko výroba, podanie rúk sharing; odídené a zrušené sivé. */
 function TypeIcon({ o }: { o: OomListItem }) {
   const tone = o.status === 'odidene' || o.status === 'zrusene' ? 'neutral' : o.type === 'vyroba' ? 'positive' : 'info';
   return (
