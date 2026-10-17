@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { GlassBar, PageHero } from '../components/hero';
 import { Icon, ICONS } from '../components/Layout';
-import { Card, ErrorState, Pill, Skeleton, Source, StatusPill, WithUnit } from '../components/ui';
+import { Card, ErrorState, Pill, Skeleton, StatusPill, WithUnit } from '../components/ui';
 import { useApi, type OomFilters, type OomList, type OomListItem } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
 import { permission, useMe } from '../lib/me';
@@ -101,11 +101,7 @@ export function OomListPage() {
     <>
       <PageHero
         title="Odberné miesta"
-        sub={
-          <>
-            spotreba, výroba, sharing · <Source />
-          </>
-        }
+        sub="spotreba, výroba, sharing"
         actions={
           <>
             {canImport && (

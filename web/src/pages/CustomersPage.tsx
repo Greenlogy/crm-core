@@ -11,7 +11,7 @@ import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-
 import { GlassBar, PageHero } from '../components/hero';
 import { Icon, ICONS } from '../components/Layout';
 import { permission, useMe } from '../lib/me';
-import { Avatar, Card, ErrorState, Skeleton, Source, WithUnit } from '../components/ui';
+import { Avatar, Card, ErrorState, Skeleton, WithUnit } from '../components/ui';
 import { useApi, type CustomerList, type CustomerListItem, type Owner } from '../lib/api';
 import { date, mwh, num, text } from '../lib/format';
 import { CUSTOMER_STATUS } from '../lib/labels';
@@ -119,8 +119,7 @@ export function CustomersPage(props: { leads?: boolean }) {
               <>
                 <b className="hero-count">{counts ? num(counts.visible, 0) : '…'}</b> · firmy a domácnosti
               </>
-            )}{' '}
-            · <Source />
+            )}
           </>
         }
         actions={

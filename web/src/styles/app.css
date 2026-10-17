@@ -3005,3 +3005,37 @@ a.tab {
     min-width: 84px;
   }
 }
+
+/* Zmluvy (dizajn 05): príznaky v druhom riadku sklenenej lišty, zvýraznený stĺpec marže */
+.glassbar-row {
+  flex-basis: 100%;
+}
+.chip.chip-info {
+  background: var(--gl-info-bg);
+  color: var(--gl-info-fg);
+}
+.chip.chip-info .cc {
+  color: inherit;
+  font-weight: var(--gl-fw-semibold);
+}
+.chip.chip-info[aria-pressed='true'] {
+  background: var(--gl-blue-600);
+  color: var(--gl-on-primary);
+}
+.tbl .margin-col {
+  background: var(--gl-surface-shade);
+}
+.contract-no {
+  color: var(--gl-ink);
+  font-size: var(--gl-fs-small);
+  font-weight: var(--gl-fw-semibold);
+}
+.margin-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.margin-note .gl-icon {
+  width: 14px;
+  height: 14px;
+}

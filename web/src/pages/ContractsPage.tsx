@@ -2,10 +2,14 @@
 // Tlačidlá stavov (vypočítané z fázy v Office portáli a dátumov) a príznakov s počtami; filtre typ, obchodník,
 // spoločnosť, rok bilancie (predvolene bežný); hľadanie podľa čísla zmluvy, zákazníka a EIC. Pridaná hodnota a marža firmy
 // (iba s právom) za zvolený rok (0027); export podľa filtra.
+// Vzhľad podľa docs/design-handoff/reference/05-zmluvy.html: stavy a príznaky v sklenenej lište (príznaky v podfarbení
+// podľa závažnosti), číslo zmluvy v mono písme, stĺpec Marža firmy zvýraznený.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, ErrorState, Pill, Skeleton, Source, StatusPill } from '../components/ui';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
+import { Card, ErrorState, Pill, Skeleton, StatusPill } from '../components/ui';
 import { useApi, type ContractList, type ContractListItem } from '../lib/api';
 import { eur, mwh, num, period, text } from '../lib/format';
 import { permission, useMe } from '../lib/me';
@@ -21,6 +25,8 @@ const STATE_CHIPS: [string, string][] = [
   ['neuspesna', 'Neúspešné'],
 ];
 const FLAG_CHIPS = Object.keys(CONTRACT_FLAG);
+// Podfarbenie čipu príznaku podľa tónu štítku
+const FLAG_CHIP_CLASS: Record<string, string> = { negative: 'chip chip-danger', warning: 'chip chip-warn', info: 'chip chip-info' };
 
 /** Účinnosť v zozname: pri prolongácii alebo skrátení nástupcom koniec podľa CRM. */
 export const contractPeriod = (k: Pick<ContractListItem, 'valid_from' | 'valid_to' | 'effective_to' | 'crm_valid_to'>) =>
@@ -67,38 +73,63 @@ export function ContractsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Zmluvy</h1>
-          <div className="page-sub">
-            <span>dodávka, výkup a VIWA · údaje z Office portálu</span>
-            <Source />
-          </div>
-        </div>
-        <div className="head-actions">
-          {canExport && (
-            <a className="btn" href={`/api/contracts/export?${query}`} title="Stiahnuť zoznam podľa filtra s bilanciou roka (.xlsx)">
-              Export
-            </a>
-          )}
-          {canImport && (
-            <button type="button" className="btn primary" onClick={() => navigate('/zmluvy/import')}>
-              Import z Office portálu
+      <PageHero
+        title="Zmluvy"
+        sub={
+          <>
+            dodávka, výkup a VIWA · údaje z Office portálu
+          </>
+        }
+        actions={
+          <>
+            {canExport && (
+              <a className="btn" href={`/api/contracts/export?${query}`} title="Stiahnuť zoznam podľa filtra s bilanciou roka (.xlsx)">
+                <Icon d={ICONS.download} />
+                Export
+              </a>
+            )}
+            {canImport && (
+              <button type="button" className="btn primary" onClick={() => navigate('/zmluvy/import')}>
+                <Icon d={ICONS.upload} />
+                Import z Office portálu
+              </button>
+            )}
+          </>
+        }
+      />
+
+      <GlassBar label="Filter podľa stavu a príznaku">
+        <div className="chips" role="group" aria-label="Stav">
+          {STATE_CHIPS.map(([value, name]) => (
+            <button key={value || 'all'} className="chip" type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
+              {name} <span className="cc">{data ? num(data.counts[value || 'all'], 0) : ''}</span>
             </button>
-          )}
+          ))}
         </div>
-      </header>
+        {FLAG_CHIPS.some((f) => chip === f || (data?.counts[f] ?? 0) > 0) && (
+          <div className="chips glassbar-row" role="group" aria-label="Príznaky">
+            {FLAG_CHIPS.filter((f) => chip === f || (data?.counts[f] ?? 0) > 0).map((f) => (
+              <button key={f} className={FLAG_CHIP_CLASS[CONTRACT_FLAG[f].tone] ?? 'chip'} type="button" aria-pressed={chip === f} onClick={() => update({ stav: f, page: '1' })}>
+                {CONTRACT_FLAG[f].label} <span className="cc">{data ? num(data.counts[f], 0) : ''}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </GlassBar>
 
       <Card flush label="Zoznam zmlúv">
         <div className="toolbar">
-          <input
-            className="input grow"
-            type="search"
-            placeholder="Číslo zmluvy, zákazník alebo EIC…"
-            aria-label="Hľadať zmluvu"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
+          <div className="gl-search list-search">
+            <Icon d={ICONS.search} />
+            <input
+              className="input"
+              type="search"
+              placeholder="Číslo zmluvy, zákazník alebo EIC…"
+              aria-label="Hľadať zmluvu"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
           <select className="input select" aria-label="Typ" value={type} onChange={(e) => update({ typ: e.target.value, page: '1' })}>
             <option value="">Typ: všetky</option>
             {Object.entries(CONTRACT_TYPE).map(([v, n]) => (
@@ -135,21 +166,6 @@ export function ContractsPage() {
           )}
         </div>
 
-        <div className="toolbar chips-bar">
-          <div className="chips" role="group" aria-label="Filter podľa stavu a príznaku">
-            {STATE_CHIPS.map(([value, name]) => (
-              <button key={value || 'all'} className="chip" type="button" aria-pressed={chip === value} onClick={() => update({ stav: value, page: '1' })}>
-                {name} <span className="cc">{data ? num(data.counts[value || 'all'], 0) : ''}</span>
-              </button>
-            ))}
-            {FLAG_CHIPS.filter((f) => chip === f || (data?.counts[f] ?? 0) > 0).map((f) => (
-              <button key={f} className="chip" type="button" aria-pressed={chip === f} onClick={() => update({ stav: f, page: '1' })}>
-                {CONTRACT_FLAG[f].label} <span className="cc">{data ? num(data.counts[f], 0) : ''}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {error ? (
           <div style={{ padding: '0 16px 16px' }}>
             <ErrorState error={error} />
@@ -177,7 +193,7 @@ export function ContractsPage() {
                     Prid. hodnota [€]
                   </th>
                   {showMargin && (
-                    <th scope="col" className="num">
+                    <th scope="col" className="num margin-col">
                       Marža firmy [€]
                     </th>
                   )}
@@ -204,7 +220,7 @@ export function ContractsPage() {
                         }}
                       >
                         <span style={{ minWidth: 0 }}>
-                          <span className="name-link mono">{k.number}</span>
+                          <span className="name-link gl-mono contract-no">{k.number}</span>
                           <div className="sub">{CONTRACT_TYPE[k.type] ?? k.type}</div>
                         </span>
                       </a>
@@ -219,11 +235,11 @@ export function ContractsPage() {
                       <span className="pills">
                         <StatusPill map={CONTRACT_STATUS} value={k.state} />
                         {k.flags.map((f) => (
-                          <Pill key={f} tone={CONTRACT_FLAG[f]?.tone ?? 'neutral'}>
+                          <Pill key={f} tone={CONTRACT_FLAG[f]?.tone ?? 'neutral'} live>
                             {CONTRACT_FLAG[f]?.label ?? f}
                           </Pill>
                         ))}
-                        {k.ending && <Pill tone="warning">Končí do 4 mesiacov</Pill>}
+                        {k.ending && <Pill tone="warning" live>Končí do 4 mesiacov</Pill>}
                         {k.deal_match === 'caka' && <Pill tone="warning">Nespárovaná</Pill>}
                         {k.deal_match === 'bez_obchodu' && <Pill>Bez obchodu</Pill>}
                       </span>
@@ -264,15 +280,21 @@ export function ContractsPage() {
                 : `${num((page - 1) * data.pageSize + 1, 0)}–${num(Math.min(page * data.pageSize, data.total), 0)} z ${num(data.total, 0)}`}
               {` · bilancia za rok ${year}: pridaná hodnota = iba komodita (základ provízie)${showMargin ? ', marža firmy = komodita + poplatky' : ''} · výkup a VIWA podľa plánu výkupu OOM`}
             </span>
+            {showMargin && (
+              <span className="caption margin-note">
+                <Icon d={ICONS.lock} />
+                Marža firmy: iba CEO, Nákup, Marketing, obch. riaditeľ
+              </span>
+            )}
             {pages > 1 && (
-              <>
+              <div className="pager-actions">
                 <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                   ← Predchádzajúca
                 </button>
                 <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
                   Ďalšia →
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}
