@@ -179,6 +179,10 @@ export type Offer = {
   see_margin: boolean;
   see_portfolio: boolean;
   commission_pct: string | null;
+  /** výstrahy z Finstatu (ako na obchode) */
+  risk: Risk;
+  /** plánovaný ročný objem OOM obchodu [MWh] – upozornenie nad 30 MWh pri cenníkovej ponuke */
+  planned_mwh: string;
   penalty_eur_mwh: string | null;
   has_pdf: boolean;
   link_created_at: string | null;

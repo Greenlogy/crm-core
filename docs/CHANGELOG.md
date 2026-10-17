@@ -2,6 +2,8 @@
 
 ## 2026-10-17
 
+- Modul 5 – uzávierka, body 1–6 (nenasadené): upozornenie nad 30 MWh a výstrahy Finstatu pri ponuke, tranža v súhrne variantu, filtre obchodov (štádium, zdroj, očakávané uzavretie) a súčty podľa mesiaca uzavretia, vážená PH v kanbane, Domov (vypršané ponuky, settlement), voľný e-mail s výberom šablóny (SK / EN / prázdny). `0057` na `dev` a Teste (Peter).
+- Plán `docs/plan-dokoncenie-a-ostre.md` (Peter, fázy A–G) uložený. Fáza A – uzávierka modulu 5: porovnanie zadania v0.2 a obrazoviek 30–42 s kódom (`docs/moduly/05-obchod-uzavierka.md`), zhrnutie a oddelenie Testu a Ostrého v STAV.md. Krok 3 F7 presunutý do importu (F6).
 - Modul 5, F6 oprava (nenasadené): `0057_spot_priemer_od_zaciatku_roka` – priemer SPOT na Domove od 1. 1. aktuálneho roka (Montel `spotAvgYTD`) namiesto 365 dní; tlačidlo „Načítať dnešné ceny z Montelu“ (admin) v Cenových parametroch. 284 kontrol.
 - Modul 5, F7: `0053`–`0056` na `dev`, nasadené na Test (Peter), commit `5018372`.
 - Modul 4/5 (nenasadené): `0056_nakupna_cena_portfolia` overená nanečisto, 284 kontrol – nákupná cena portfólia pre rok dodávky „platí od“ dňa aj spätne od 1. 1. 2026 (iba admin a Nákup, BL / PL dňa ostanú, doplnia sa chýbajúce snímky zmlúv), marža s poslednou cenou, zmrazená marža ponuky spárovanej so zmluvou, premenovanie „odhad portfólia“ → „nákupná cena portfólia“; Cenové parametre pre Nákup s tlačidlom „Nákupná cena portfólia – zadať pre obdobie“.

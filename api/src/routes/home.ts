@@ -19,7 +19,10 @@ home.get('/home', async (c) => {
   const me = c.var.userId;
 
   const [prices, basis, spot, terms, steps, offers, value] = await Promise.all([
-    sql`SELECT delivery_year, trader_price, price_date FROM trader_prices_home(${org}, crm_today(), 3) ORDER BY delivery_year`,
+    // settlement: cena dňa D je settlement predošlého pracovného dňa (denný beh ráno – návrh časť 36.1)
+    sql`SELECT delivery_year, trader_price, price_date,
+               CASE WHEN price_date IS NOT NULL THEN working_days_before(${org}, price_date, 1) END AS settlement_date
+          FROM trader_prices_home(${org}, crm_today(), 3) ORDER BY delivery_year`,
     sql`SELECT delivery_year, basis, basis_eur_mwh, price_date FROM calculator_fix_basis(${org}, crm_today(), 3) ORDER BY delivery_year`,
     sql`SELECT on_date, avg_ytd_eur_mwh FROM spot_average_on(${org}, crm_today())`,
     sql`SELECT seller_type, min_additive_eur_mwh, commission_pct FROM my_sales_terms(${org})`,
@@ -40,6 +43,8 @@ home.get('/home', async (c) => {
              count(*) FILTER (WHERE o.status IN ('odoslana', 'otvorena') AND (o.valid_until IS NULL OR o.valid_until >= now()))::int AS sent,
              count(*) FILTER (WHERE o.status = 'otvorena' AND (o.valid_until IS NULL OR o.valid_until >= now()))::int AS opened,
              count(*) FILTER (WHERE o.status IN ('odoslana', 'otvorena') AND (o.valid_until AT TIME ZONE 'Europe/Bratislava')::date = crm_today())::int AS expires_today,
+             -- vypršané za posledných 30 dní (odoslané / otvorené po platnosti, bez akceptácie) – uzávierka modulu 5, bod 4
+             count(*) FILTER (WHERE o.status IN ('odoslana', 'otvorena') AND o.valid_until < now() AND o.valid_until >= now() - interval '30 days')::int AS expired,
              (SELECT count(*)::int FROM deal x JOIN pipeline_stage s ON s.id = x.stage_id
                WHERE x.owner_id = ${me} AND s.code = 'akceptacia') AS accepted_waiting_contract
         FROM deal d

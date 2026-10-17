@@ -117,7 +117,8 @@ deals.get('/deals/owners', async (c) => {
 /** Najviac obchodov v zozname a kanbane; súčty sú vždy cez všetky vyhovujúce (F6). */
 const LIST_LIMIT = 1000;
 
-// Zoznam a kanban (obrazovka 32). Filtre: pipeline, vlastník, štádium, zdroj, ďalší krok, uzavreté, hľadanie.
+// Zoznam a kanban (obrazovka 32). Filtre: pipeline, vlastník, štádium, zdroj, ďalší krok, očakávané uzavretie (mesiac od – do),
+// uzavreté, hľadanie. Súčty po štádiách a po mesiacoch očakávaného uzavretia (uzávierka modulu 5, bod 3).
 deals.get('/deals', async (c) => {
   const sql = c.var.sql;
   const q = c.req.query();
@@ -127,6 +128,9 @@ deals.get('/deals', async (c) => {
   const source = q.source && /^[a-z0-9_]{1,63}$/.test(q.source) ? q.source : null;
   const step = ['bez_kroku', 'po_termine', 'dnes', 'bez_alebo_po'].includes(q.step ?? '') ? q.step! : null;
   const closed = q.closed === 'mesiac' ? 'mesiac' : q.closed === 'vsetky' ? 'vsetky' : 'otvorene';
+  const month = (v: string | undefined) => (v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? `${v}-01` : null);
+  const closeFrom = month(q.close_from);
+  const closeTo = month(q.close_to);
   const text = (q.q ?? '').trim().slice(0, 100);
   const like = `%${text.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
   const where = sql`
@@ -134,6 +138,8 @@ deals.get('/deals', async (c) => {
        AND (${owner}::uuid IS NULL OR d.owner_id = ${owner})
        AND (${stage}::uuid IS NULL OR d.stage_id = ${stage})
        AND (${source}::text IS NULL OR d.source_code = ${source})
+       AND (${closeFrom}::date IS NULL OR d.expected_close >= ${closeFrom}::date)
+       AND (${closeTo}::date IS NULL OR d.expected_close < (${closeTo}::date + interval '1 month'))
        AND CASE ${closed}
              WHEN 'otvorene' THEN d.closed_at IS NULL
              WHEN 'mesiac' THEN d.closed_at IS NULL OR d.closed_at >= date_trunc('month', now() AT TIME ZONE 'Europe/Bratislava') AT TIME ZONE 'Europe/Bratislava'
@@ -146,7 +152,7 @@ deals.get('/deals', async (c) => {
              ELSE true END
        AND (${text} = '' OR d.name ILIKE ${like} OR c.name ILIKE ${like} OR c.ico LIKE ${text.replace(/\s/g, '') + '%'}
             OR concat_ws(' ', p.first_name, p.last_name) ILIKE ${like})`;
-  const [items, totals] = await Promise.all([
+  const [items, totals, byMonth] = await Promise.all([
     sql`
     SELECT ${DEAL_COLUMNS(sql)}
     ${DEAL_FROM(sql)}
@@ -163,8 +169,18 @@ deals.get('/deals', async (c) => {
     ${DEAL_FROM(sql)}
     ${where}
      GROUP BY d.stage_id, st.outcome`,
+    // otvorené obchody po mesiacoch očakávaného uzavretia (bez dátumu zvlášť): počet, PH, vážená PH
+    sql`
+    SELECT to_char(d.expected_close, 'YYYY-MM') AS month, count(*)::int AS count,
+           coalesce(sum(dv.value_eur), 0) AS value_eur,
+           coalesce(round(sum(coalesce(dv.value_eur, 0) * coalesce(st.probability, 0)), 2), 0) AS weighted_eur
+    ${DEAL_FROM(sql)}
+    ${where}
+       AND d.closed_at IS NULL
+     GROUP BY 1
+     ORDER BY 1 NULLS LAST`,
   ]);
-  return c.json({ items, totals, truncated: items.length >= LIST_LIMIT });
+  return c.json({ items, totals, by_month: byMonth, truncated: items.length >= LIST_LIMIT });
 });
 
 // Karta obchodu (obrazovka 33): obchod, OOM s objemami, kontakty s rolami, práva prihláseného

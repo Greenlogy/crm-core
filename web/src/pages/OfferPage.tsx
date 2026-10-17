@@ -6,10 +6,11 @@
 // F4: odoslanie e-mailom z CRM (dialóg 37) – PDF, odkaz a stav Odoslaná zapíše CRM až po odoslaní; ručná akceptácia
 // s voľbou „Poslať zákazníkovi potvrdenie“.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
 import { EmailComposer } from '../components/email';
+import { RiskPills } from '../components/deal-forms';
 import { Card, Empty, ErrorState, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { send, useApi } from '../lib/api';
 import { date, dec, eur, text } from '../lib/format';
@@ -178,6 +179,9 @@ export function OfferPage() {
             <Rows
               rows={[
                 ['Jazyk', o.language === 'en' ? 'angličtina' : 'slovenčina'],
+                ...(o.company_id
+                  ? ([['Finstat', o.risk && o.risk.warnings.length ? <RiskPills key="r" risk={o.risk} /> : o.risk?.finstat_updated_at ? 'bez výstrah' : 'nenačítané']] as [string, ReactNode][])
+                  : []),
                 ['Ceny k', date(o.priced_on)],
                 ['Platnosť', o.valid_until ? `do ${dateTime(o.valid_until)}${o.valid_shortened ? ' (skrátená)' : ''}` : 'určí sa pri odoslaní'],
                 ...(o.sent_at
@@ -341,13 +345,26 @@ function DocLinks(props: { offer: Offer; onPanel: (p: Panel) => void }) {
   );
 }
 
+/** Cenníková ponuka (domácnosť, malý podnik) nad 30 MWh – treba individuálnu ponuku (zadanie 5.3; hranica ako v 0029). */
+const LARGE_PRICE_LIST_MWH = 30;
+function largePriceList(o: Offer): boolean {
+  return (o.household || o.variants.some((v) => v.price_kind === 'cennik')) && Number(o.planned_mwh) > LARGE_PRICE_LIST_MWH;
+}
+
 function CheckCard(props: { offer: Offer }) {
   const c = props.offer.check;
   if (!c || !isDraft(props.offer.status)) return null;
   const errors = c.errors.filter((e) => !e.includes('akceptoval'));
-  if (errors.length === 0 && c.needs.length === 0 && !c.risk_needs_approval && !c.fix_stale) return null;
+  const large = largePriceList(props.offer);
+  if (errors.length === 0 && c.needs.length === 0 && !c.risk_needs_approval && !c.fix_stale && !large) return null;
   return (
     <div className="ban ban-warn offer-check">
+      {large && (
+        <p>
+          <strong>Plánovaná spotreba {dec(props.offer.planned_mwh, 0, 1)} MWh je nad {LARGE_PRICE_LIST_MWH} MWh</strong> – pre cenníkové ceny
+          (domácnosť, malý podnik) treba individuálnu ponuku (variant FIX alebo SPOT + aditív).
+        </p>
+      )}
       {c.needs.length > 0 && (
         <p>
           <strong>Bez výnimky sa ponuka nedá odoslať.</strong>{' '}
@@ -367,6 +384,22 @@ function CheckCard(props: { offer: Offer }) {
   );
 }
 
+/** Tranža variantu po rokoch (rovnako ako pri zmluve – contract_year_calc): energopomoc SEAS, FIX a cenník FIX, SPOT + aditív,
+ *  VIWA a výkup za SPOT SPOT; výkup s pevnou cenou FIX. Rovnaká vo všetkých rokoch sa ukáže raz. */
+function trancheText(values: VariantValue[]): string {
+  const byYear = new Map<number, Set<string>>();
+  for (const x of values) {
+    if (!x.kind) continue;
+    const t = x.kind === 'energo' ? 'SEAS'
+      : x.kind === 'vykup' ? (x.price_model === 'fix' ? 'FIX' : 'SPOT')
+      : x.kind === 'fix' || x.kind === 'cennik' ? 'FIX' : 'SPOT';
+    byYear.set(x.year, (byYear.get(x.year) ?? new Set()).add(t));
+  }
+  const per = [...byYear].sort(([a], [b]) => a - b).map(([y, s]) => [y, [...s].sort().join(' + ')] as const);
+  if (per.length === 0) return '–';
+  return new Set(per.map(([, t]) => t)).size === 1 ? per[0][1] : per.map(([y, t]) => `${y} ${t}`).join(' · ');
+}
+
 function SummaryCard(props: { offer: Offer; variant: Variant; summary: VariantSummary[]; values: VariantValue[] }) {
   const { offer: o, variant: v } = props;
   const years = props.summary.filter((s) => s.year !== null);
@@ -379,6 +412,7 @@ function SummaryCard(props: { offer: Offer; variant: Variant; summary: VariantSu
     >
       <Rows
         rows={[
+          ['Tranža', trancheText(props.values)],
           ...years.map((s): [string, string] => [`Pridaná hodnota ${s.year}`, `${eur(s.added_value_eur)} €`]),
           ['Pridaná hodnota spolu', <strong key="t">{eur(total?.added_value_eur)} €</strong>],
           [

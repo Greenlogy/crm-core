@@ -3174,3 +3174,16 @@ a.tab {
     width: 100%;
   }
 }
+
+/* Obchody: filter očakávaného uzavretia (mesiac od – do) */
+.month-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.month-range .inp {
+  width: 150px;
+}
+.kanban-head .caption + .caption {
+  display: block;
+}

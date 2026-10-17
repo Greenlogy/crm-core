@@ -72,14 +72,17 @@ emails.get('/emails/me', async (c) => {
   return c.json({ ...u, gmail_configured: gmailConfigured(c.env), environment: c.env.ENVIRONMENT ?? 'test' });
 });
 
-// Predvyplnený voľný e-mail z karty obchodu, firmy alebo kontaktu: platná šablóna „voľný“, oslovenie a adresát
-// z hlavného kontaktu obchodu alebo z kontaktu
+// Predvyplnený voľný e-mail z karty obchodu, firmy alebo kontaktu: platná šablóna „voľný“ v zvolenom jazyku (sk / en) alebo
+// prázdny e-mail (iba oslovenie a podpis), oslovenie a adresát z hlavného kontaktu obchodu alebo z kontaktu.
+// Vráti aj jazyky, v ktorých je šablóna „voľný“ platná (výber v dialógu – uzávierka modulu 5, bod 5).
 emails.get('/emails/new', async (c) => {
   const deal = c.req.query('deal_id') || null;
   const company = c.req.query('company_id') || null;
   const person = c.req.query('person_id') || null;
   for (const v of [deal, company, person]) if (v && !UUID.test(v)) throw new BadRequest('Neplatné ID.');
   if (!deal && !company && !person) throw new BadRequest('Zadajte obchod, firmu alebo kontakt.');
+  const lang = c.req.query('lang') === 'en' ? 'en' : 'sk';
+  const empty = c.req.query('template') === 'prazdny';
   const sql = c.var.sql;
   const [r] = await sql<{ template_version_id: string | null; subject: string; body: string; to: string[]; gmail_enabled: boolean; mailbox: string }[]>`
     WITH k AS (
@@ -89,13 +92,15 @@ emails.get('/emails/new', async (c) => {
                              (SELECT d.person_id FROM deal d WHERE d.id = ${deal}::uuid))
     ), t AS (
       SELECT id, subject, body FROM email_template_version
-       WHERE org_id = crm_default_org() AND code = 'volny' AND language = 'sk' AND status = 'platna'
+       WHERE org_id = crm_default_org() AND code = 'volny' AND language = ${lang}::offer_language AND status = 'platna' AND NOT ${empty}
     )
     SELECT (SELECT id FROM t) AS template_version_id, coalesce((SELECT subject FROM t), '') AS subject,
            replace(coalesce((SELECT body FROM t), '«oslovenie»,' || chr(10) || chr(10) || chr(10) || '«podpis»'), '«oslovenie»',
-                   email_salutation((SELECT id FROM k), 'sk')) AS body,
+                   email_salutation((SELECT id FROM k), ${lang}::offer_language)) AS body,
            coalesce((SELECT to_jsonb(ARRAY[lower(btrim(email))]) FROM k WHERE email IS NOT NULL AND btrim(email) <> ''), '[]'::jsonb) AS to,
-           u.gmail_enabled, u.email AS mailbox
+           u.gmail_enabled, u.email AS mailbox,
+           coalesce((SELECT jsonb_agg(DISTINCT language::text) FROM email_template_version
+                      WHERE org_id = crm_default_org() AND code = 'volny' AND status = 'platna'), '[]'::jsonb) AS languages
       FROM app_user u WHERE u.id = ${c.var.userId}`;
   return c.json({ ...r, gmail_configured: gmailConfigured(c.env), environment: c.env.ENVIRONMENT ?? 'test' });
 });

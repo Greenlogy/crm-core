@@ -17,13 +17,13 @@ import { useMe } from '../lib/me';
 
 type Home = {
   today: string;
-  prices: { delivery_year: number; trader_price: string | null; price_date: string | null }[];
+  prices: { delivery_year: number; trader_price: string | null; price_date: string | null; settlement_date: string | null }[];
   basis: { delivery_year: number; basis: 'cena_pre_obchodnika' | 'odhad_portfolia'; basis_eur_mwh: string | null; price_date: string | null }[];
   series: { delivery_year: number; points: { on_date: string; trader_price: string }[] }[];
   spot: { on_date: string; avg_ytd_eur_mwh: string } | null;
   terms: { seller_type: 'obchodnik' | 'manazer'; min_additive_eur_mwh: string | null; commission_pct: string | null } | null;
   steps: { id: string; name: string; next_step: string | null; next_step_on: string; customer_name: string | null; state: 'po_termine' | 'dnes' | 'zajtra' }[];
-  offers: { waiting_approval: number; sent: number; opened: number; expires_today: number; accepted_waiting_contract: number };
+  offers: { waiting_approval: number; sent: number; opened: number; expires_today: number; expired: number; accepted_waiting_contract: number };
   value: { open_deals: number; value_eur: string; weighted_eur: string; without_step: number };
   team: { owner_id: string; owner_name: string; open_deals: number; value_eur: string; weighted_eur: string; won_month: number; won_month_eur: string; attention: number }[] | null;
 };
@@ -128,7 +128,7 @@ function HomeBody({ d }: { d: Home }) {
             color={i > 0 ? COLORS[i % COLORS.length] : undefined}
             label={`Cena pre obchodníka FIX ${p.delivery_year}`}
             value={p.trader_price ? decRound(p.trader_price, 2) : ''}
-            meta={p.price_date ? `€/MWh · stav k ${date(p.price_date)}` : 'cena dňa chýba'}
+            meta={p.price_date ? `€/MWh · stav k ${date(p.price_date)}${p.settlement_date ? ` · settlement ${date(p.settlement_date)}` : ''}` : 'cena dňa chýba'}
           />
         ))}
         <PriceTile
@@ -191,6 +191,7 @@ function HomeBody({ d }: { d: Home }) {
               <div className="row"><dt><Link to="/schvalovanie">Čakajú na schválenie</Link></dt><dd><Count n={d.offers.waiting_approval} tone="warning" /></dd></div>
               <div className="row"><dt>Odoslané a platné</dt><dd><span className="caption">(otvorené zákazníkom {num(d.offers.opened, 0)})</span> <Count n={d.offers.sent} tone="info" /></dd></div>
               <div className="row"><dt className={d.offers.expires_today > 0 ? 'negative-text' : undefined}>Vyprší dnes</dt><dd><Count n={d.offers.expires_today} tone="negative" /></dd></div>
+              <div className="row"><dt title="odoslané alebo otvorené ponuky po platnosti, bez akceptácie">Vypršané (30 dní)</dt><dd><Count n={d.offers.expired} tone="warning" /></dd></div>
               <div className="row"><dt><Link to="/zmluvy-k-obchodom">Akceptované – čakajú na zmluvu</Link></dt><dd><Count n={d.offers.accepted_waiting_contract} tone="positive" /></dd></div>
               <div className="row"><dt>Otvorené obchody</dt><dd>{num(d.value.open_deals, 0)}</dd></div>
             </dl>

@@ -89,6 +89,8 @@ type Source =
 
 type ComposeState = {
   draftId: string | null; kind: 'ponuka' | 'volny' | 'pripomienka_platnosti'; templateId: string | null;
+  /** voľný e-mail z karty: zvolená šablóna (volny:sk, volny:en, prazdny) a jazyky s platnou šablónou */
+  choice?: string; languages?: string[];
   to: string; cc: string; subject: string; body: string; gmailEnabled: boolean; gmailConfigured: boolean; mailbox: string; environment: string;
 };
 
@@ -131,18 +133,27 @@ export function EmailComposer(props: { title: string; source: Source; onClose: (
         });
         return;
       }
-      const q = new URLSearchParams();
-      if (src.dealId) q.set('deal_id', src.dealId);
-      if (src.companyId) q.set('company_id', src.companyId);
-      if (src.personId) q.set('person_id', src.personId);
-      const r = await get<{ template_version_id: string | null; subject: string; body: string; to: string[]; gmail_enabled: boolean; gmail_configured: boolean; mailbox: string; environment: string }>(`/api/emails/new?${q}`);
-      setSt({
-        draftId: null, kind: 'volny', templateId: r.template_version_id, to: r.to.join(', '), cc: '', subject: r.subject, body: r.body,
-        gmailEnabled: r.gmail_enabled, gmailConfigured: r.gmail_configured, mailbox: r.mailbox, environment: r.environment,
-      });
+      await loadFree('volny:sk');
     };
     load().catch((e: unknown) => setLoadError(e instanceof ApiError ? e.message : 'E-mail sa nepodarilo pripraviť.'));
   }, []);
+
+  // voľný e-mail: šablóna „voľný“ v slovenčine / angličtine alebo prázdny (oslovenie a podpis); adresáti ostanú
+  async function loadFree(choice: string, keep?: ComposeState) {
+    if ('draft' in src || 'offerId' in src) return;
+    const q = new URLSearchParams();
+    if (src.dealId) q.set('deal_id', src.dealId);
+    if (src.companyId) q.set('company_id', src.companyId);
+    if (src.personId) q.set('person_id', src.personId);
+    if (choice === 'prazdny') q.set('template', 'prazdny');
+    if (choice === 'volny:en') q.set('lang', 'en');
+    const r = await get<{ template_version_id: string | null; subject: string; body: string; to: string[]; gmail_enabled: boolean; gmail_configured: boolean; mailbox: string; environment: string; languages: string[] }>(`/api/emails/new?${q}`);
+    setSt({
+      draftId: keep?.draftId ?? null, kind: 'volny', templateId: r.template_version_id, choice, languages: r.languages,
+      to: keep ? keep.to : r.to.join(', '), cc: keep ? keep.cc : '', subject: r.subject, body: r.body,
+      gmailEnabled: r.gmail_enabled, gmailConfigured: r.gmail_configured, mailbox: r.mailbox, environment: r.environment,
+    });
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && props.onClose();
@@ -198,6 +209,25 @@ export function EmailComposer(props: { title: string; source: Source; onClose: (
                 <div className="ban ban-warn">Odosielanie z Gmailu ešte nemáte zapnuté (pilot). Koncept si uložte; zapne ho admin v Nastaveniach → Používatelia.</div>
               )}
               <div className="mail-grid">
+                {st.choice && (
+                  <>
+                    <label className="mail-label" htmlFor="mail-template">Šablóna</label>
+                    <select
+                      id="mail-template"
+                      className="inp"
+                      value={st.choice}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        if (st.body.trim() && !window.confirm('Text e-mailu sa nahradí zvolenou šablónou. Pokračovať?')) return;
+                        loadFree(next, st).catch((x: unknown) => setResult({ tone: 'error', text: x instanceof ApiError ? x.message : 'Šablónu sa nepodarilo načítať.' }));
+                      }}
+                    >
+                      {(st.languages ?? []).includes('sk') && <option value="volny:sk">Voľný e-mail (slovensky)</option>}
+                      {(st.languages ?? []).includes('en') && <option value="volny:en">Voľný e-mail (anglicky)</option>}
+                      <option value="prazdny">Prázdny e-mail</option>
+                    </select>
+                  </>
+                )}
                 <span className="mail-label">Od</span>
                 <span>
                   {st.mailbox} <span className="caption">· odošle sa z vašej schránky Google Workspace</span>

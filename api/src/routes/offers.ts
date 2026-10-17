@@ -60,7 +60,12 @@ async function offerHead(sql: Sql, offerId: string) {
              WHERE t.org_id = o.org_id AND t.kind = o.kind AND t.language = o.language
                AND (t.id = o.template_version_id OR (o.template_version_id IS NULL AND t.status IN ('platna', 'navrh')))
              ORDER BY (t.id = o.template_version_id) DESC, (t.status = 'platna') DESC LIMIT 1) AS template,
-           user_commission_pct(d.owner_id) AS commission_pct
+           user_commission_pct(d.owner_id) AS commission_pct,
+           -- uzávierka modulu 5: výstrahy z Finstatu pri ponuke (dlhy, nedoplatky, konkurz, E/X, Z-skóre) a plánovaný ročný
+           -- objem OOM obchodu (upozornenie nad 30 MWh pri cenníkových ponukách – zadanie 5.3, hranica ako v 0029)
+           CASE WHEN d.company_id IS NOT NULL THEN company_risk(d.company_id) END AS risk,
+           (SELECT coalesce(sum(coalesce(x.planned_vt_mwh, 0) + coalesce(x.planned_nt_mwh, 0)), 0)
+              FROM deal_oom x WHERE x.deal_id = d.id) AS planned_mwh
       FROM offer o
       JOIN deal d ON d.id = o.deal_id
       JOIN pipeline_stage st ON st.id = d.stage_id

@@ -18,6 +18,8 @@ import { date, eur, num, text } from '../lib/format';
 type View = 'kanban' | 'zoznam';
 /** Súčty z databázy cez všetky vyhovujúce obchody (nie iba zobrazených najviac 1 000) – po štádiách (F6, 0052). */
 type StageTotal = { stage_id: string; outcome: DealRow['stage_outcome']; count: number; value_eur: string; weighted_eur: string; attention: number; lost_reasons: string[] };
+/** Otvorené obchody po mesiacoch očakávaného uzavretia (uzávierka modulu 5, bod 3); month null = bez dátumu. */
+type MonthTotal = { month: string | null; count: number; value_eur: string; weighted_eur: string };
 const STEP_FILTER: [string, string][] = [
   ['', 'Všetky kroky'],
   ['bez_alebo_po', 'Bez kroku alebo po termíne'],
@@ -40,6 +42,10 @@ export function DealsPage() {
   // obchodník predvolene vidí svoje obchody (dizajn 32 „Vlastník: ja“); vedenie všetky
   const owner = params.get('owner') ?? (me.deal_manager ? '' : 'ja');
   const step = params.get('step') ?? '';
+  const stage = params.get('stage') ?? '';
+  const source = params.get('source') ?? '';
+  const closeFrom = params.get('close_from') ?? '';
+  const closeTo = params.get('close_to') ?? '';
   const view = (params.get('view') as View) || 'kanban';
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
@@ -48,10 +54,14 @@ export function DealsPage() {
     ...(activePipeline ? { pipeline: activePipeline.id } : {}),
     ...(owner && owner !== 'vsetci' ? { owner } : {}),
     ...(step ? { step } : {}),
+    ...(stage ? { stage } : {}),
+    ...(source ? { source } : {}),
+    ...(closeFrom ? { close_from: closeFrom } : {}),
+    ...(closeTo ? { close_to: closeTo } : {}),
     ...(q.trim().length >= 2 ? { q: q.trim() } : {}),
     closed: 'mesiac',
   });
-  const { data, error } = useApi<{ items: DealRow[]; totals: StageTotal[]; truncated: boolean }>(activePipeline ? `/api/deals?${query}` : '/api/deals?closed=mesiac&pipeline=');
+  const { data, error } = useApi<{ items: DealRow[]; totals: StageTotal[]; by_month: MonthTotal[]; truncated: boolean }>(activePipeline ? `/api/deals?${query}` : '/api/deals?closed=mesiac&pipeline=');
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params);
     if (v) p.set(k, v);
@@ -140,6 +150,26 @@ export function DealsPage() {
           <div style={{ minWidth: 200 }}>
             <Select value={step} onChange={(v) => set('step', v)} options={STEP_FILTER.map(([value, label]) => ({ value, label }))} />
           </div>
+          <div style={{ minWidth: 180 }}>
+            <Select
+              value={stage}
+              onChange={(v) => set('stage', v)}
+              options={[{ value: '', label: 'Štádium: všetky' }, ...(activePipeline?.stages ?? []).map((s) => ({ value: s.id, label: `Štádium: ${s.name}` }))]}
+            />
+          </div>
+          <div style={{ minWidth: 180 }}>
+            <Select
+              value={source}
+              onChange={(v) => set('source', v)}
+              options={[{ value: '', label: 'Zdroj: všetky' }, ...((opts?.lists.zdroj_obchodu ?? []) as { code: string; label: string }[]).map((s) => ({ value: s.code, label: `Zdroj: ${s.label}` }))]}
+            />
+          </div>
+          <label className="month-range" title="Očakávané uzavretie (mesiac od – do)">
+            <span className="caption">Uzavretie</span>
+            <input className="inp" type="month" aria-label="Očakávané uzavretie od" value={closeFrom} onChange={(e) => set('close_from', e.target.value)} />
+            <span className="caption">–</span>
+            <input className="inp" type="month" aria-label="Očakávané uzavretie do" value={closeTo} onChange={(e) => set('close_to', e.target.value)} />
+          </label>
           <div style={{ minWidth: 220 }}>
             <TextInput value={q} onChange={setQ} placeholder="Hľadať obchod, firmu, IČO…" />
           </div>
@@ -162,6 +192,7 @@ export function DealsPage() {
           <DealTable items={items} />
         )}
       </Card>
+      {data && <ByMonth rows={data.by_month ?? []} />}
     </>
   );
 }
@@ -179,6 +210,7 @@ function Kanban(props: { items: DealRow[]; totals: StageTotal[]; stages: DealOpt
               <span className="caption">
                 {num(tot?.count ?? 0, 0)} · {eur(tot?.value_eur ?? 0)} €{s.probability !== null ? ` · ${Math.round(Number(s.probability) * 100)} %` : ''}
               </span>
+              <span className="caption" title="vážená pridaná hodnota podľa pravdepodobnosti štádia">vážená {eur(tot?.weighted_eur ?? 0)} €</span>
             </div>
             {col.map((d) => (
               <Link key={d.id} to={`/obchody/${d.id}`} className={`kanban-card${d.step_state === 'po_termine' || d.step_state === 'bez_kroku' ? ' kanban-attention' : ''}`}>
@@ -293,5 +325,42 @@ function ClosedThisMonth(props: { totals: StageTotal[] }) {
         <span className="caption">{[...reasons].map(([r, n]) => `${r} ${n}`).join(' · ') || '–'}</span>
       </span>
     </div>
+  );
+}
+
+/** Otvorené obchody po mesiacoch očakávaného uzavretia (zadanie 13): počet, PH a vážená PH – za všetky vyhovujúce filtru. */
+function ByMonth(props: { rows: MonthTotal[] }) {
+  const label = (m: string | null) =>
+    m ? new Intl.DateTimeFormat('sk-SK', { month: 'long', year: 'numeric' }).format(new Date(`${m}-15T12:00:00Z`)) : 'bez dátumu uzavretia';
+  return (
+    <Card flush title="Otvorené obchody podľa mesiaca očakávaného uzavretia">
+      <div className="table-wrap">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Mesiac</th>
+              <th className="num">Obchody</th>
+              <th className="num">PH [€]</th>
+              <th className="num">Vážená PH [€]</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.rows.length === 0 && (
+              <tr>
+                <td colSpan={4} className="muted">Žiadny otvorený obchod.</td>
+              </tr>
+            )}
+            {props.rows.map((r) => (
+              <tr key={r.month ?? 'bez'}>
+                <td>{label(r.month)}</td>
+                <td className="num">{num(r.count, 0)}</td>
+                <td className={`num${Number(r.value_eur) < 0 ? ' negative-text' : ''}`}>{eur(r.value_eur)}</td>
+                <td className={`num${Number(r.weighted_eur) < 0 ? ' negative-text' : ''}`}>{eur(r.weighted_eur)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
