@@ -28,6 +28,7 @@ import { offersPdf } from './routes/offers-pdf';
 import { emails } from './routes/emails';
 import { contractDeals } from './routes/contract-deals';
 import { home } from './routes/home';
+import { commissionMinute, commissions } from './routes/commissions';
 import { type AppEnv, UUID } from './types';
 import { BadRequest, Forbidden } from './validate';
 import { listContacts, ROLE_FILTER } from './queries/contacts';
@@ -120,6 +121,7 @@ app.get('/me', async (c) => {
            u.seller_type, u.approves_prices, u.approves_assignments, crm_deal_manager() AS deal_manager,
            crm_can_see_margin() AS can_see_margin,
            crm_can_see_job_runs() AS can_see_job_runs,
+           crm_commission_sees_all() AS sees_all_commissions,
            ${c.env.ENVIRONMENT ?? 'test'}::text AS environment,
            coalesce((SELECT json_agg(json_build_object('id', o.id, 'name', o.legal_name, 'country', o.country,
                                                        'currency', o.currency, 'status', o.status, 'default', o.is_default)
@@ -156,6 +158,7 @@ app.route('/', offersPdf);
 app.route('/', emails);
 app.route('/', contractDeals);
 app.route('/', home);
+app.route('/', commissions);
 app.route('/', approvals);
 app.route('/', companyCheck);
 
@@ -248,7 +251,8 @@ export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     // každú minútu: e-maily (F4); po – pi ráno a na obed: ceny z Montelu (F6, iba 7:00 a 13:00 v Bratislave); inak nočný beh
-    if (controller.cron === '* * * * *') ctx.waitUntil(emailRun(env));
+    // každú minútu aj provízie (F7): fronta prepočtov a nevykreslené PDF listov – pred e-mailmi, aby list odišiel hneď
+    if (controller.cron === '* * * * *') ctx.waitUntil(commissionMinute(env).then(() => emailRun(env)));
     else if (controller.cron === PRICE_CRON) ctx.waitUntil(pricesRun(env, controller.scheduledTime));
     else ctx.waitUntil(nightlyRun(env));
   },

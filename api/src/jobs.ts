@@ -81,6 +81,12 @@ export async function dailyDealRun(env: Env): Promise<void> {
       return tx<{ r: { ph_prepocitane: number; ph_rozdiel: number } }[]>`SELECT deal_value_daily() AS r`;
     });
     console.log(`PH obchodov: prepočítané ${ph?.r?.ph_prepocitane ?? 0}, rozdiel ${ph?.r?.ph_rozdiel ?? 0}`);
+    // F7: nočný prepočet provízií (v poradí obchodov, obsadený obchod preskočí); počty do denníka behu obchodov
+    const [pv] = await sql.begin(async (tx) => {
+      await tx`SET LOCAL statement_timeout = '300s'`;
+      return tx<{ r: { provizie_prepocitane: number; provizie_zmena: number; provizie_preskocene: number } }[]>`SELECT commission_daily() AS r`;
+    });
+    console.log(`Provízie: prepočítané ${pv?.r?.provizie_prepocitane ?? 0}, zmena ${pv?.r?.provizie_zmena ?? 0}, preskočené ${pv?.r?.provizie_preskocene ?? 0}`);
   } catch (err) {
     const code = (err as { code?: string }).code ?? 'unknown';
     console.error(`Nočný beh obchodov zlyhal: ${(err as Error).name} ${code}`);

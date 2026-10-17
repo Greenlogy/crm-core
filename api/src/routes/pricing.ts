@@ -56,13 +56,14 @@ async function orgOf(sql: Sql, org: unknown): Promise<string> {
 }
 
 pricing.use('/pricing/*', async (c, next) => {
-  const [r] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() OR crm_approves_prices() AS ok`;
-  if (!r?.ok) return c.json({ error: 'Cenové parametre môže otvoriť admin alebo obchodný riaditeľ.' }, 403);
+  // 0056: Nákup zadáva nákupnú cenu portfólia, preto obrazovku otvorí aj Nákup (ostatné zmeny stráži databáza)
+  const [r] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() OR crm_approves_prices() OR crm_is_purchase() AS ok`;
+  if (!r?.ok) return c.json({ error: 'Cenové parametre môže otvoriť admin, obchodný riaditeľ alebo Nákup.' }, 403);
   await next();
 });
 pricing.use('/pricing', async (c, next) => {
-  const [r] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() OR crm_approves_prices() AS ok`;
-  if (!r?.ok) return c.json({ error: 'Cenové parametre môže otvoriť admin alebo obchodný riaditeľ.' }, 403);
+  const [r] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() OR crm_approves_prices() OR crm_is_purchase() AS ok`;
+  if (!r?.ok) return c.json({ error: 'Cenové parametre môže otvoriť admin, obchodný riaditeľ alebo Nákup.' }, 403);
   await next();
 });
 
@@ -71,7 +72,7 @@ pricing.get('/pricing', async (c) => {
   const sql = c.var.sql;
   const org = await orgOf(sql, c.req.query('org'));
   const [meta] = await sql`
-    SELECT crm_today() AS today, crm_is_admin() AS is_admin, crm_approves_prices() AS approves_prices,
+    SELECT crm_today() AS today, crm_is_admin() AS is_admin, crm_approves_prices() AS approves_prices, crm_is_purchase() AS purchase,
            crm_active_user_id() AS user_id`;
   const parameters = await sql`
     SELECT p.id, p.code, p.delivery_year, p.valid_from, p.value, p.note, p.created_at, p.updated_at,
@@ -102,7 +103,9 @@ pricing.get('/pricing', async (c) => {
       FROM job_run j WHERE j.job = 'ceny' ORDER BY j.started_at DESC LIMIT 1`;
   const [spot] = await sql`
     SELECT on_date, avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = ${org} ORDER BY on_date DESC LIMIT 1`;
-  return c.json({ org_id: org, ...meta, parameters, today, history, montel: montel ?? null, spot: spot ?? null });
+  // nákupná cena portfólia po rokoch dodávky: dni zmeny, platná dnes (0056)
+  const portfolio = await sql`SELECT * FROM market_price_portfolio_history(${org})`;
+  return c.json({ org_id: org, ...meta, parameters, today, history, portfolio, montel: montel ?? null, spot: spot ?? null });
 });
 
 // Nová hodnota parametra s „platí od“ (dnes a neskôr; kto smie ktorý parameter, stráži databáza)
@@ -163,15 +166,34 @@ pricing.post('/pricing/market-prices', async (c) => {
   const onDate = b.on_date === undefined || b.on_date === null || b.on_date === '' ? null : day(b.on_date, 'Deň');
   const bl = price(b.bl_eur_mwh, 'BL');
   const pl = price(b.pl_eur_mwh, 'PL');
-  const portfolio = price(b.portfolio_eur_mwh, 'Odhad portfólia');
   const spotFve = price(b.spot_fve_eur_mwh, 'Očakávaná cena SPOT pre FVE');
   if ((bl === null) !== (pl === null)) throw new BadRequest('Zadajte BL aj PL (alebo ani jedno).');
-  if ([bl, pl, portfolio, spotFve].every((v) => v === null)) throw new BadRequest('Zadajte aspoň jednu cenu.');
+  if ([bl, pl, spotFve].every((v) => v === null)) throw new BadRequest('Zadajte aspoň jednu cenu.');
+  // 0056: nákupná cena portfólia sa tu nemení – prevezme sa z platného záznamu dňa (zadáva ju admin a Nákup samostatne)
   const [row] = await sql<{ id: string }[]>`
     INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh)
-    VALUES (${org}, coalesce(${onDate}::date, crm_today()), ${deliveryYear}, ${bl}, ${pl}, ${portfolio}, ${spotFve})
+    SELECT ${org}, d.on_date, ${deliveryYear}, ${bl}, ${pl},
+           (SELECT m.portfolio_eur_mwh FROM market_price_daily m
+             WHERE m.org_id = ${org} AND m.on_date = d.on_date AND m.delivery_year = ${deliveryYear} AND m.corrected_at IS NULL),
+           ${spotFve}
+      FROM (SELECT coalesce(${onDate}::date, crm_today()) AS on_date) d
     RETURNING id`;
   return c.json({ id: row.id }, 201);
+});
+
+// Nákupná cena portfólia pre rok dodávky „platí od“ dňa – dnes alebo spätne od 1. 1. 2026 (iba admin a Nákup, 0056).
+// Platí po ďalší deň s vlastnou cenou; marža sa prepočíta sama, snímkam zmlúv sa doplní iba chýbajúca cena.
+pricing.post('/pricing/portfolio', async (c) => {
+  const b = await readBody(c.req);
+  const sql = c.var.sql;
+  const org = await orgOf(sql, b.org_id);
+  const onDate = day(b.on_date, 'Platí od');
+  const deliveryYear = year(b.delivery_year, 'Rok dodávky');
+  const value = price(b.value, 'Nákupná cena portfólia');
+  if (value === null) throw new BadRequest('Zadajte nákupnú cenu portfólia.');
+  const [r] = await sql<{ r: { zmena: boolean; zmluvy_doplnene?: number; plati_do?: string | null } }[]>`
+    SELECT market_price_portfolio_set(${org}, ${onDate}::date, ${deliveryYear}, ${value}) AS r`;
+  return c.json(r.r);
 });
 
 // Zmazanie ručne zadanej ceny dňa s dôvodom (iba admin, 0048): riadok ostane v histórii ako zmazaný; ďalší beh ju načíta z Montelu

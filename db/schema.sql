@@ -133,11 +133,8 @@ CREATE TYPE public.bank_account_purpose AS ENUM (
 --
 
 CREATE TYPE public.commission_status AS ENUM (
-    'vypocitana',
-    'cakajuca',
+    'caka',
     'uplatnena',
-    'schvalena',
-    'vyplatena',
     'zrusena'
 );
 
@@ -809,6 +806,28 @@ BEGIN
   END LOOP;
 
   RAISE EXCEPTION 'add_business_minutes: business_calendar nepokrýva termín od % (+% min)', start, minutes;
+END;
+$$;
+
+
+--
+-- Name: app_user_commission_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.app_user_commission_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.sees_all_commissions IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.sees_all_commissions ELSE false END)
+     AND NOT (crm_is_service() OR crm_is_admin()) THEN
+    RAISE EXCEPTION '„Vidí všetky provízie“ mení iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NEW.commission_enabled IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.commission_enabled ELSE false END)
+     AND NOT (crm_is_service() OR crm_is_admin() OR crm_approves_prices()) THEN
+    RAISE EXCEPTION '„Počítať provízie“ mení admin alebo schvaľovateľ cien.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
@@ -1533,6 +1552,897 @@ BEGIN
   END IF;
 END;
 $$;
+
+
+--
+-- Name: commission_claim_create(uuid, uuid[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_create(p_user uuid, p_ids uuid[]) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_me    uuid := crm_active_user_id();
+  v_org   uuid;
+  v_n     integer;
+  v_total numeric;
+  v_year  integer := extract(year FROM crm_today())::integer;
+  v_no    text;
+  v_claim uuid;
+  v_cc    uuid[];
+BEGIN
+  IF v_me IS NULL THEN
+    RAISE EXCEPTION 'Uplatniť províziu môže iba prihlásený používateľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_user IS DISTINCT FROM v_me AND NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Províziu za iného obchodníka uplatní iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_user = v_me AND NOT crm_is_admin() AND crm_scope('provizie', 'view') = 'nic' THEN
+    RAISE EXCEPTION 'Nemáte právo na provízie.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF coalesce(cardinality(p_ids), 0) = 0 THEN
+    RAISE EXCEPTION 'Vyberte aspoň jednu províziu.' USING ERRCODE = 'check_violation';
+  END IF;
+  -- 0054: najprv zámky obchodov (v poradí), dokončenie prepočtov z fronty, až potom riadky provízií
+  PERFORM commission_lock_deals(ARRAY(SELECT DISTINCT deal_id FROM commission WHERE id = ANY (p_ids) AND deal_id IS NOT NULL));
+  PERFORM commission_sync(x.deal_id, false)
+     FROM (SELECT DISTINCT q.deal_id FROM commission_queue q JOIN commission c ON c.deal_id = q.deal_id WHERE c.id = ANY (p_ids)
+           ORDER BY q.deal_id) x;
+  DELETE FROM commission_queue q USING commission c WHERE c.id = ANY (p_ids) AND q.deal_id = c.deal_id;
+  PERFORM 1 FROM commission WHERE id = ANY (p_ids) ORDER BY id FOR UPDATE;
+  SELECT count(*), min(org_id::text)::uuid, sum(amount_eur) INTO v_n, v_org, v_total FROM commission WHERE id = ANY (p_ids);
+  IF v_n <> (SELECT count(DISTINCT x) FROM unnest(p_ids) x) THEN
+    RAISE EXCEPTION 'Niektorá provízia neexistuje.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM commission WHERE id = ANY (p_ids) AND (status <> 'caka' OR user_id <> p_user OR org_id <> v_org)) THEN
+    RAISE EXCEPTION 'Uplatniť sa dajú iba čakajúce provízie jedného obchodníka v jednej spoločnosti.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT v_org = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Spoločnosť provízie nevidíte.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF EXISTS (SELECT 1 FROM commission WHERE id = ANY (p_ids) AND base_missing IS NOT NULL) THEN
+    RAISE EXCEPTION 'Provízia s neúplným základom (chýba cena) sa nedá uplatniť – doplňte ceny.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_total < 0 OR NOT EXISTS (SELECT 1 FROM commission WHERE id = ANY (p_ids) AND amount_eur > 0) THEN
+    RAISE EXCEPTION 'Súčet listu musí byť aspoň 0 € a list musí obsahovať kladnú províziu (záporné vyrovnanie sa samostatne neuplatňuje).'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  v_no := format('CMSN-%s-%s', v_year, lpad(doc_number_next(v_org, 'provizny_list', v_year)::text, 4, '0'));
+  INSERT INTO commission_claim (org_id, number, user_id, total_eur, by_duration, created_by)
+  SELECT v_org, v_no, p_user, v_total,
+         coalesce((SELECT jsonb_object_agg(k, s) FROM (SELECT coalesce(duration_years::text, 'neurcito') AS k, sum(amount_eur) AS s
+                                                        FROM commission WHERE id = ANY (p_ids) GROUP BY 1) z), '{}'),
+         v_me
+  RETURNING id INTO v_claim;
+  UPDATE commission SET status = 'uplatnena', claim_id = v_claim WHERE id = ANY (p_ids);
+
+  -- upozornenia: obchodníkovi, ak uplatnil admin; príjemcom kópie (bez súm – nemusia vidieť všetky provízie)
+  IF p_user <> v_me THEN
+    INSERT INTO notification (user_id, kind, commission_claim_id, detail)
+    VALUES (p_user, 'provizny_list', v_claim, format('Provízny list %s uplatnil za vás %s.', v_no, crm_user_name(v_me)));
+  END IF;
+  SELECT coalesce(array_agg(x::uuid), '{}') INTO v_cc
+    FROM jsonb_array_elements_text(coalesce((SELECT value FROM app_setting WHERE key = 'commission_claim_cc'), '[]')) x;
+  INSERT INTO notification (user_id, kind, commission_claim_id, detail)
+  SELECT u.id, 'provizny_list', v_claim, format('Nový provízny list %s – %s.', v_no, crm_user_name(p_user))
+    FROM app_user u
+   WHERE u.id = ANY (v_cc) AND u.id <> p_user AND u.status = 'aktivny' AND crm_user_sees_org(u.id, v_org);
+  RETURN v_claim;
+END;
+$$;
+
+
+--
+-- Name: FUNCTION commission_claim_create(p_user uuid, p_ids uuid[]); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.commission_claim_create(p_user uuid, p_ids uuid[]) IS 'uplatnenie provízií (0053): obchodník sám alebo admin za neho; jedna transakcia, číslo CMSN-RRRR-NNNN, súčet ≥ 0';
+
+
+--
+-- Name: commission_claim_document(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_document(p_claim uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  k commission_claim;
+BEGIN
+  SELECT * INTO k FROM commission_claim WHERE id = p_claim;
+  IF k.id IS NULL OR NOT (crm_current_user_id() IS NULL OR crm_commission_visible(k.org_id, k.user_id)) THEN   -- beh na pozadí = bez používateľa
+    RETURN NULL;
+  END IF;
+  RETURN jsonb_build_object(
+    'claim', jsonb_build_object('id', k.id, 'org_id', k.org_id, 'number', k.number, 'created_at', k.created_at, 'total_eur', k.total_eur,
+                                'by_duration', k.by_duration, 'source', k.source,
+                                'created_by', crm_user_name(k.created_by), 'voided_at', k.voided_at,
+                                'voided_by', crm_user_name(k.voided_by), 'void_reason', k.void_reason),
+    'seller', (SELECT jsonb_build_object('name', u.name, 'email', u.email, 'position', u.job_title) FROM app_user u WHERE u.id = k.user_id),
+    'org', (SELECT jsonb_build_object('legal_name', o.legal_name, 'address', o.address, 'reg_no', o.reg_no, 'tax_no', o.tax_no,
+                                      'vat_no', o.vat_no, 'email', o.email, 'web', o.web,
+                                      'logo', (SELECT jsonb_build_object('mime', l.mime, 'data', encode(l.data, 'base64'))
+                                                 FROM org_logo l WHERE l.org_id = o.id))
+              FROM org o WHERE o.id = k.org_id),
+    -- položky zo snímky pri uplatnení (aj pre zrušený list)
+    'items', coalesce((SELECT jsonb_agg(i ORDER BY (i->>'duration_years')::int NULLS LAST, i->>'won_at', i->>'deal_name')
+                         FROM jsonb_array_elements(k.items_snapshot) i), '[]'));
+END;
+$$;
+
+
+--
+-- Name: FUNCTION commission_claim_document(p_claim uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.commission_claim_document(p_claim uuid) IS 'dokument provízneho listu pre PDF listu aj PDF zrušenia (0055); položky zo snímky pri uplatnení';
+
+
+--
+-- Name: commission_claim_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Provízny list sa nemaže (iba zruší).' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF (NEW.org_id, NEW.number, NEW.user_id, NEW.total_eur, NEW.by_duration, NEW.created_by, NEW.created_at, NEW.source, NEW.legacy_id, NEW.legacy_pdf_url)
+     IS DISTINCT FROM
+     (OLD.org_id, OLD.number, OLD.user_id, OLD.total_eur, OLD.by_duration, OLD.created_by, OLD.created_at, OLD.source, OLD.legacy_id, OLD.legacy_pdf_url) THEN
+    RAISE EXCEPTION 'Provízny list sa nemení (iba PDF, odoslanie a zrušenie).' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.voided_at IS NOT NULL AND (NEW.voided_at, NEW.voided_by, NEW.void_reason) IS DISTINCT FROM (OLD.voided_at, OLD.voided_by, OLD.void_reason) THEN
+    RAISE EXCEPTION 'Zrušenie listu sa nemení.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.source = 'sales_portal' AND NEW IS DISTINCT FROM OLD THEN
+    RAISE EXCEPTION 'Provízny list zo Sales portálu je iba na čítanie.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.pdf_key IS NOT NULL AND NEW.pdf_key IS DISTINCT FROM OLD.pdf_key THEN
+    RAISE EXCEPTION 'PDF listu sa neprepisuje.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: commission_claim_pdf_pending(integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_pdf_pending(p_limit integer DEFAULT 10) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT coalesce(jsonb_agg(x ORDER BY x->>'created_at'), '[]')
+    FROM (SELECT jsonb_build_object('id', k.id, 'kind', CASE WHEN k.pdf_key IS NULL THEN 'list' ELSE 'zrusenie' END,
+                                    'org_id', k.org_id, 'number', k.number, 'pdf_key', k.pdf_key, 'created_at', k.created_at) AS x
+            FROM commission_claim k
+           WHERE crm_current_user_id() IS NULL AND k.source = 'crm'
+             AND (k.pdf_key IS NULL OR (k.voided_at IS NOT NULL AND k.void_pdf_key IS NULL))
+           ORDER BY k.created_at
+           LIMIT greatest(least(p_limit, 50), 1)) s
+$$;
+
+
+--
+-- Name: commission_claim_pdf_set(uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_pdf_set(p_claim uuid, p_kind text, p_key text, p_sha256 text) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE
+  k    commission_claim;
+  v_cc uuid[];
+  v_n  integer;
+BEGIN
+  SELECT * INTO k FROM commission_claim WHERE id = p_claim FOR UPDATE;
+  IF k.id IS NULL OR NOT (crm_current_user_id() IS NULL OR crm_commission_visible(k.org_id, k.user_id)) THEN   -- beh na pozadí = bez používateľa
+    RAISE EXCEPTION 'Provízny list neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF p_kind NOT IN ('list', 'zrusenie') OR p_key !~ ('^provizie/' || k.org_id || '/[0-9]{4}/CMSN-[0-9]{4}-[0-9]{4,}(-zrusene)?\.pdf$') THEN
+    RAISE EXCEPTION 'Neplatný kľúč PDF listu.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_kind = 'list' THEN
+    UPDATE commission_claim SET pdf_key = p_key, pdf_sha256 = p_sha256 WHERE id = k.id AND pdf_key IS NULL;
+  ELSE
+    IF k.voided_at IS NULL THEN
+      RAISE EXCEPTION 'List nie je zrušený.' USING ERRCODE = 'check_violation';
+    END IF;
+    UPDATE commission_claim SET void_pdf_key = p_key, void_pdf_sha256 = p_sha256 WHERE id = k.id AND void_pdf_key IS NULL;
+  END IF;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n = 0 THEN
+    RETURN false;   -- PDF už bolo uložené (súbežné dokončenie) – e-mail sa nezaradí druhýkrát
+  END IF;
+  -- zrušený skôr, než sa stihlo uložiť PDF listu: posiela sa iba zrušenie
+  IF p_kind = 'list' AND k.voided_at IS NOT NULL THEN
+    RETURN true;
+  END IF;
+  SELECT coalesce(array_agg(x::uuid), '{}') INTO v_cc
+    FROM jsonb_array_elements_text(coalesce((SELECT value FROM app_setting WHERE key = 'commission_claim_cc'), '[]')) x;
+  INSERT INTO email_outbox (user_id, kind, commission_claim_id, detail)
+  SELECT u.id, CASE p_kind WHEN 'list' THEN 'provizny_list' ELSE 'provizny_list_zruseny' END, k.id, k.number
+    FROM app_user u
+   WHERE u.status = 'aktivny' AND (u.id = k.user_id OR (u.id = ANY (v_cc) AND crm_user_sees_org(u.id, k.org_id)));
+  RETURN true;
+END;
+$_$;
+
+
+--
+-- Name: commission_claim_snapshot(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_snapshot() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  UPDATE commission_claim
+     SET items_snapshot = items_snapshot || jsonb_build_array(jsonb_build_object(
+           'commission_id', NEW.id,
+           'deal_name', coalesce((SELECT d.name FROM deal d WHERE d.id = NEW.deal_id), NEW.legacy_deal_name),
+           'customer_name', (SELECT coalesce(co.name, nullif(btrim(concat_ws(' ', ct.first_name, ct.last_name)), ''))
+                               FROM deal d LEFT JOIN company co ON co.id = d.company_id LEFT JOIN contact ct ON ct.id = d.person_id
+                              WHERE d.id = NEW.deal_id),
+           'kind', NEW.kind, 'won_at', NEW.won_at, 'duration_years', NEW.duration_years, 'volume_mwh', NEW.volume_mwh,
+           'base_eur', NEW.base_eur, 'pct', NEW.pct, 'amount_eur', NEW.amount_eur, 'source', NEW.source))
+   WHERE id = NEW.claim_id;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: commission_claim_void(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_claim_void(p_claim uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  k commission_claim;
+  r record;
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Provízny list zruší iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 3 THEN
+    RAISE EXCEPTION 'Zadajte dôvod zrušenia (aspoň 3 znaky).' USING ERRCODE = 'check_violation';
+  END IF;
+  -- 0054: najprv zámky obchodov listu (v poradí), potom list a provízie
+  PERFORM commission_lock_deals(ARRAY(SELECT DISTINCT deal_id FROM commission WHERE claim_id = p_claim AND deal_id IS NOT NULL));
+  SELECT * INTO k FROM commission_claim WHERE id = p_claim FOR UPDATE;
+  IF k.id IS NULL OR NOT k.org_id = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Provízny list neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF k.voided_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Provízny list je už zrušený.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF k.source = 'sales_portal' THEN
+    RAISE EXCEPTION 'Provízny list zo Sales portálu je iba na čítanie.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  UPDATE commission_claim SET voided_at = now(), voided_by = crm_active_user_id(), void_reason = btrim(p_reason) WHERE id = k.id;
+  FOR r IN SELECT id, deal_id FROM commission WHERE claim_id = k.id ORDER BY id LOOP
+    IF r.deal_id IS NOT NULL THEN
+      -- najviac jedna čakajúca na obchod: nová čakajúca položka (vyrovnanie) sa zruší a prepočet ju zahrnie
+      UPDATE commission SET status = 'zrusena', recalculated_at = now() WHERE deal_id = r.deal_id AND status = 'caka';
+    END IF;
+    UPDATE commission SET status = 'caka', claim_id = NULL WHERE id = r.id;
+    IF r.deal_id IS NOT NULL THEN
+      PERFORM commission_sync(r.deal_id, true);
+    END IF;
+  END LOOP;
+  INSERT INTO notification (user_id, kind, commission_claim_id, detail)
+  VALUES (k.user_id, 'provizny_list_zruseny', k.id, format('Provízny list %s bol zrušený, provízie sa vrátili na Čaká.', k.number));
+END;
+$$;
+
+
+--
+-- Name: commission_daily(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_daily() RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_all  integer := 0;
+  v_diff integer := 0;
+  v_skip integer := 0;
+  r      record;
+  v_res  jsonb;
+BEGIN
+  PERFORM crm_background_only();
+  PERFORM commission_queue_run();
+  -- 0054: v poradí obchodov a bez čakania – obchod, ktorý práve prepočítava iná transakcia, sa preskočí (prepočíta ho ona)
+  FOR r IN SELECT x.id FROM (SELECT d.id FROM deal d JOIN pipeline_stage s ON s.id = d.stage_id WHERE s.code = 'vyhrane'
+                             UNION
+                             SELECT c.deal_id FROM commission c WHERE c.status = 'caka' AND c.deal_id IS NOT NULL) x
+            ORDER BY x.id LOOP
+    v_all := v_all + 1;
+    IF NOT commission_lock_deal(r.id, false) THEN
+      v_skip := v_skip + 1;
+      CONTINUE;
+    END IF;
+    IF commission_sync(r.id, false) THEN
+      v_diff := v_diff + 1;
+    END IF;
+  END LOOP;
+  v_res := jsonb_build_object('provizie_prepocitane', v_all, 'provizie_zmena', v_diff, 'provizie_preskocene', v_skip);
+  UPDATE job_run SET result = result || v_res
+   WHERE id = (SELECT id FROM job_run WHERE job = 'obchody' AND run_date = crm_today() ORDER BY started_at DESC LIMIT 1);
+  RETURN v_res;
+END;
+$$;
+
+
+--
+-- Name: commission_deal_base(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_deal_base(p_deal uuid) RETURNS TABLE(base_eur numeric, volume_mwh numeric, duration_years smallint, contracts integer, missing text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  c       contract;
+  v_from  date;
+  v_until date;
+  y       integer;
+  r       record;
+  v_base  numeric := 0;
+  v_vol   numeric := 0;
+  v_dur   integer := 0;
+  v_open  boolean := false;
+  v_n     integer := 0;
+  v_miss  text[] := '{}';
+BEGIN
+  FOR c IN SELECT * FROM contract k
+            WHERE k.deal_id = p_deal AND k.deal_match IN ('auto', 'rucne') AND k.signed_on IS NOT NULL
+              AND k.phase NOT IN ('odmietnuta', 'neuspesna')
+            ORDER BY k.number LOOP
+    SELECT coalesce(min(x.valid_from), c.valid_from) INTO v_from FROM contract_oom x WHERE x.contract_id = c.id AND x.valid_from IS NOT NULL;
+    IF v_from IS NULL THEN
+      v_miss := v_miss || format('zmluva %s bez začiatku dodávky', c.number);
+      CONTINUE;
+    END IF;
+    v_n := v_n + 1;
+    IF c.valid_to IS NULL THEN
+      v_open := true;
+      v_until := (v_from + interval '12 months' - interval '1 day')::date;
+    ELSE
+      v_until := greatest(c.valid_to, v_from);
+      v_dur := greatest(v_dur, ceil(((extract(year FROM v_until) * 12 + extract(month FROM v_until))
+                                     - (extract(year FROM v_from) * 12 + extract(month FROM v_from)) + 1) / 12.0)::integer);
+    END IF;
+    FOR y IN extract(year FROM v_from)::integer .. extract(year FROM v_until)::integer LOOP
+      SELECT * INTO r FROM contract_year_calc_core(c.id, y, v_until);
+      IF r.months > 0 AND r.added_value_eur IS NULL THEN
+        -- 0054: dôvod pre obrazovku 41 a upozornenie adminom („chýba cena pre obchodníka k DD.MM.RRRR“)
+        v_miss := v_miss || format('chýba %s k %s (zmluva %s, rok %s)', coalesce(r.missing, 'vstup výpočtu'),
+                                   to_char(c.signed_on, 'DD.MM.YYYY'), c.number, y);
+      END IF;
+      v_base := v_base + coalesce(r.added_value_eur, 0);
+      v_vol := v_vol + coalesce(r.volume_mwh, 0);
+    END LOOP;
+  END LOOP;
+  RETURN QUERY SELECT round(v_base, 2), round(v_vol, 3),
+                      CASE WHEN v_open OR v_dur = 0 THEN NULL ELSE v_dur END::smallint, v_n,
+                      nullif(array_to_string(v_miss, '; '), '');
+END;
+$$;
+
+
+--
+-- Name: commission_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Provízia sa nemaže (iba zruší).' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.status = 'zrusena' AND NEW IS DISTINCT FROM OLD THEN
+    RAISE EXCEPTION 'Zrušená provízia sa nemení.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF (NEW.org_id, NEW.deal_id, NEW.source, NEW.kind, NEW.legacy_id) IS DISTINCT FROM (OLD.org_id, OLD.deal_id, OLD.source, OLD.kind, OLD.legacy_id) THEN
+    RAISE EXCEPTION 'Obchod, zdroj a druh provízie sa nemenia.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- história zo Sales portálu: iba stav a list (uplatnenie čakajúcej, zrušenie listu v CRM)
+  IF OLD.source = 'sales_portal'
+     AND ((NEW.user_id, NEW.won_at, NEW.duration_years, NEW.volume_mwh, NEW.base_eur, NEW.pct, NEW.target_eur, NEW.amount_eur,
+           NEW.legacy_hubspot_deal_id, NEW.legacy_deal_name, NEW.legacy_eics, NEW.legacy_supply_from, NEW.legacy_supply_to)
+          IS DISTINCT FROM
+          (OLD.user_id, OLD.won_at, OLD.duration_years, OLD.volume_mwh, OLD.base_eur, OLD.pct, OLD.target_eur, OLD.amount_eur,
+           OLD.legacy_hubspot_deal_id, OLD.legacy_deal_name, OLD.legacy_eics, OLD.legacy_supply_from, OLD.legacy_supply_to)
+          OR NEW.status = 'zrusena') THEN
+    RAISE EXCEPTION 'Provízia zo Sales portálu sa nemení.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- uplatnená sa neprepočítava ani nepreradí (zmení sa iba návrat na Čaká pri zrušení listu)
+  IF OLD.status = 'uplatnena' AND NEW.status = 'uplatnena'
+     AND (NEW.user_id, NEW.base_eur, NEW.pct, NEW.target_eur, NEW.amount_eur, NEW.claim_id, NEW.volume_mwh, NEW.duration_years)
+         IS DISTINCT FROM (OLD.user_id, OLD.base_eur, OLD.pct, OLD.target_eur, OLD.amount_eur, OLD.claim_id, OLD.volume_mwh, OLD.duration_years) THEN
+    RAISE EXCEPTION 'Uplatnená provízia sa nemení.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF OLD.status = 'uplatnena' AND NEW.status = 'zrusena' THEN
+    RAISE EXCEPTION 'Uplatnenú províziu nemožno zrušiť – najprv zrušte provízny list.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: commission_legacy_allow(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_legacy_allow(p_deal uuid, p_reason text) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d deal;
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Províziu napriek zhode so Sales portálom povolí iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 3 THEN
+    RAISE EXCEPTION 'Zadajte dôvod (aspoň 3 znaky).' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO d FROM deal WHERE id = p_deal;
+  IF d.id IS NULL OR NOT d.org_id = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Obchod neexistuje.' USING ERRCODE = 'no_data_found';
+  END IF;
+  INSERT INTO commission_legacy_override (deal_id, org_id, legacy_commission_id, reason, decided_by)
+  VALUES (p_deal, d.org_id, commission_legacy_match(p_deal), btrim(p_reason), crm_active_user_id())
+  ON CONFLICT (deal_id) DO NOTHING;
+  RETURN commission_sync(p_deal, true);
+END;
+$$;
+
+
+--
+-- Name: commission_legacy_match(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_legacy_match(p_deal uuid) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT c.id
+    FROM deal d
+    JOIN commission c ON c.source = 'sales_portal' AND c.status <> 'zrusena' AND c.org_id = d.org_id
+   WHERE d.id = p_deal
+     AND ((d.hubspot_id IS NOT NULL AND c.legacy_hubspot_deal_id = d.hubspot_id)
+          OR EXISTS (SELECT 1 FROM contract k
+                       JOIN contract_oom x ON x.contract_id = k.id
+                       JOIN oom o ON o.id = x.oom_id
+                      WHERE k.deal_id = d.id AND k.deal_match IN ('auto', 'rucne')
+                        AND o.eic = ANY (c.legacy_eics)
+                        AND (c.legacy_supply_from IS NULL
+                             OR daterange(c.legacy_supply_from, coalesce(c.legacy_supply_to, 'infinity'), '[]')
+                                && daterange(coalesce(x.valid_from, k.valid_from, '-infinity'), coalesce(x.valid_to, k.valid_to, 'infinity'), '[]'))))
+   ORDER BY c.won_at DESC NULLS LAST, c.id
+   LIMIT 1
+$$;
+
+
+--
+-- Name: commission_list(uuid, public.commission_status, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_list(p_user uuid DEFAULT NULL::uuid, p_status public.commission_status DEFAULT NULL::public.commission_status, p_q text DEFAULT NULL::text) RETURNS TABLE(id uuid, deal_id uuid, deal_name text, customer_name text, user_id uuid, user_name text, kind text, status public.commission_status, won_at date, duration_years smallint, volume_mwh numeric, base_eur numeric, base_missing text, pct numeric, target_eur numeric, amount_eur numeric, claim_id uuid, claim_number text, claimed_at timestamp with time zone, source text, reassigned_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT c.id, c.deal_id, coalesce(d.name, c.legacy_deal_name),
+         coalesce(co.name, nullif(btrim(concat_ws(' ', ct.first_name, ct.last_name)), '')),
+         c.user_id, crm_user_name(c.user_id), c.kind, c.status, c.won_at, c.duration_years, c.volume_mwh, c.base_eur,
+         c.base_missing, c.pct, c.target_eur, c.amount_eur, c.claim_id, k.number, k.created_at, c.source, c.reassigned_at
+    FROM commission c
+    LEFT JOIN deal d ON d.id = c.deal_id
+    LEFT JOIN company co ON co.id = d.company_id
+    LEFT JOIN contact ct ON ct.id = d.person_id
+    LEFT JOIN commission_claim k ON k.id = c.claim_id
+   WHERE crm_commission_visible(c.org_id, c.user_id)
+     AND (p_user IS NULL OR c.user_id = p_user)
+     AND (p_status IS NULL OR c.status = p_status)
+     AND (p_status IS NOT NULL OR c.status <> 'zrusena')
+     AND (p_q IS NULL OR btrim(p_q) = ''
+          OR concat_ws(' ', d.name, c.legacy_deal_name, co.name, ct.first_name, ct.last_name, k.number) ILIKE '%' || btrim(p_q) || '%')
+   ORDER BY c.duration_years NULLS LAST, c.won_at DESC NULLS LAST, c.id
+$$;
+
+
+--
+-- Name: FUNCTION commission_list(p_user uuid, p_status public.commission_status, p_q text); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.commission_list(p_user uuid, p_status public.commission_status, p_q text) IS 'provízie pre obrazovku 41 (0053): iba viditeľné (vlastné, alebo všetky s právom); zrušené iba na vyžiadanie';
+
+
+--
+-- Name: commission_lock_deal(uuid, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_lock_deal(p_deal uuid, p_wait boolean) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_wait THEN
+    PERFORM 1 FROM deal WHERE id = p_deal FOR NO KEY UPDATE;
+  ELSE
+    PERFORM 1 FROM deal WHERE id = p_deal FOR NO KEY UPDATE SKIP LOCKED;
+  END IF;
+  RETURN FOUND;
+END;
+$$;
+
+
+--
+-- Name: commission_lock_deals(uuid[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_lock_deals(p_deals uuid[]) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM 1 FROM deal WHERE id = ANY (p_deals) ORDER BY id FOR NO KEY UPDATE;
+END;
+$$;
+
+
+--
+-- Name: commission_notify_admins(uuid, text, uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_notify_admins(p_org uuid, p_kind text, p_deal uuid, p_detail text) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  INSERT INTO notification (user_id, kind, deal_id, detail)
+  SELECT u.id, p_kind, p_deal, p_detail
+    FROM app_user u
+   WHERE u.is_admin AND u.status = 'aktivny' AND crm_user_sees_org(u.id, p_org)
+$$;
+
+
+--
+-- Name: commission_on_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_on_change() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  r_new jsonb := CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END;
+  r_old jsonb := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END;
+  v_new uuid;
+  v_old uuid;
+BEGIN
+  CASE TG_TABLE_NAME
+    WHEN 'deal' THEN
+      PERFORM commission_sync((r_new->>'id')::uuid, true);
+    WHEN 'contract' THEN
+      v_new := (r_new->>'deal_id')::uuid;
+      v_old := (r_old->>'deal_id')::uuid;
+      IF v_old IS DISTINCT FROM v_new THEN
+        IF v_old IS NOT NULL THEN
+          PERFORM commission_sync(v_old, true);
+        END IF;
+        IF v_new IS NOT NULL THEN
+          PERFORM commission_sync(v_new, true);
+        END IF;
+      ELSIF v_new IS NOT NULL THEN
+        INSERT INTO commission_queue (deal_id) VALUES (v_new);   -- 0054: bilancia → fronta
+      END IF;
+    ELSE   -- contract_oom, contract_price, contract_year_basis: bilancia zmluvy
+      SELECT k.deal_id INTO v_new FROM contract k WHERE k.id = (coalesce(r_new, r_old)->>'contract_id')::uuid;
+      IF v_new IS NOT NULL THEN
+        INSERT INTO commission_queue (deal_id) VALUES (v_new);   -- 0054: bilancia → fronta
+      END IF;
+  END CASE;
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: commission_queue_alert(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_queue_alert() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_n      integer;
+  v_deals  integer;
+  v_oldest timestamptz;
+  v_run    uuid;
+BEGIN
+  PERFORM crm_background_only();
+  SELECT count(*), count(DISTINCT deal_id), min(created_at) INTO v_n, v_deals, v_oldest
+    FROM commission_queue WHERE alerted_at IS NULL AND created_at < now() - interval '1 hour';
+  IF v_n = 0 THEN
+    RETURN 0;
+  END IF;
+  UPDATE commission_queue SET alerted_at = now() WHERE alerted_at IS NULL AND created_at < now() - interval '1 hour';
+  INSERT INTO job_run (job, run_date, finished_at, result, errors)
+  VALUES ('provizie', crm_today(), now(), jsonb_build_object('fronta_stara', v_deals),
+          jsonb_build_array(jsonb_build_object('krok', 'fronta', 'kod', 'stara_polozka',
+            'text', format('Prepočet provízie %s obchodov čaká vo fronte od %s (obchod je obsadený inou transakciou).',
+                           v_deals, to_char(v_oldest AT TIME ZONE 'Europe/Bratislava', 'DD.MM.YYYY HH24:MI')))))
+  RETURNING id INTO v_run;
+  INSERT INTO notification (user_id, kind, job_run_id, detail)
+  SELECT u.id, 'provizie_fronta', v_run,
+         format('Prepočet provízie %s obchodov čaká vo fronte dlhšie ako 1 hodinu – pozrite denník behov.', v_deals)
+    FROM app_user u WHERE u.is_admin AND u.status = 'aktivny';
+  RETURN v_deals;
+END;
+$$;
+
+
+--
+-- Name: commission_queue_run(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_queue_run() RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d      uuid;
+  v_max  bigint;
+  v_done integer := 0;
+  v_skip integer := 0;
+BEGIN
+  PERFORM crm_background_only();
+  FOR d IN SELECT DISTINCT deal_id FROM commission_queue ORDER BY deal_id LOOP
+    -- obsadený obchod: položky ostanú vo fronte a spracuje ich ďalší beh (0055)
+    IF NOT commission_lock_deal(d, false) THEN
+      v_skip := v_skip + 1;
+      CONTINUE;
+    END IF;
+    SELECT max(id) INTO v_max FROM commission_queue WHERE deal_id = d;
+    PERFORM commission_sync(d, false);
+    DELETE FROM commission_queue WHERE deal_id = d AND id <= v_max;
+    v_done := v_done + 1;
+  END LOOP;
+  RETURN jsonb_build_object('fronta_spracovane', v_done, 'fronta_preskocene', v_skip, 'fronta_stara', commission_queue_alert());
+END;
+$$;
+
+
+--
+-- Name: commission_reassign(uuid, uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_reassign(p_deal uuid, p_user uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  p commission;
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Províziu preradí iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 3 THEN
+    RAISE EXCEPTION 'Zadajte dôvod preradenia (aspoň 3 znaky).' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM commission_lock_deal(p_deal, true);   -- 0054: zámok obchodu pred riadkom provízie
+  SELECT * INTO p FROM commission WHERE deal_id = p_deal AND status = 'caka' FOR UPDATE;
+  IF p.id IS NULL OR NOT p.org_id = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Obchod nemá čakajúcu províziu.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF p.user_id = p_user THEN
+    RETURN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM app_user u WHERE u.id = p_user AND u.status = 'aktivny') OR NOT crm_user_sees_org(p_user, p.org_id) THEN
+    RAISE EXCEPTION 'Nový obchodník musí byť aktívny a v spoločnosti provízie.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE commission
+     SET user_id = p_user, reassigned_from = p.user_id, reassigned_by = crm_active_user_id(), reassigned_at = now(),
+         reassign_reason = btrim(p_reason)
+   WHERE id = p.id;
+  INSERT INTO notification (user_id, kind, deal_id, detail)
+  VALUES (p_user, 'provizia_preradena', p_deal, format('%s vám preradil čakajúcu províziu.', crm_user_name(crm_active_user_id()))),
+         (p.user_id, 'provizia_preradena', p_deal, format('%s preradil vašu čakajúcu províziu – %s.', crm_user_name(crm_active_user_id()), crm_user_name(p_user)));
+END;
+$$;
+
+
+--
+-- Name: commission_settings_set(date, uuid[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_settings_set(p_from date, p_cc uuid[]) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT crm_is_admin() THEN
+    RAISE EXCEPTION 'Nastavenia provízií mení iba admin.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(coalesce(p_cc, '{}')) x WHERE NOT EXISTS (SELECT 1 FROM app_user u WHERE u.id = x AND u.status = 'aktivny')) THEN
+    RAISE EXCEPTION 'Príjemca kópie musí byť aktívny používateľ.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE app_setting SET value = coalesce(to_jsonb(p_from), 'null'::jsonb)
+   WHERE key = 'commission_crm_from' AND value IS DISTINCT FROM coalesce(to_jsonb(p_from), 'null'::jsonb);
+  UPDATE app_setting SET value = to_jsonb(coalesce((SELECT array_agg(DISTINCT x ORDER BY x) FROM unnest(p_cc) x), '{}'::uuid[]))
+   WHERE key = 'commission_claim_cc';
+END;
+$$;
+
+
+--
+-- Name: commission_summary(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_summary(p_user uuid DEFAULT NULL::uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  WITH c AS (
+    SELECT c.*, k.created_at AS claimed_at, k.number
+      FROM commission c LEFT JOIN commission_claim k ON k.id = c.claim_id
+     WHERE crm_commission_visible(c.org_id, c.user_id) AND (p_user IS NULL OR c.user_id = p_user)
+  ), t AS (SELECT crm_today() AS today)
+  SELECT jsonb_build_object(
+    'unpaid_eur',   coalesce((SELECT sum(amount_eur) FROM c WHERE status = 'caka'), 0),
+    'unpaid_deals', (SELECT count(DISTINCT coalesce(deal_id::text, id::text)) FROM c WHERE status = 'caka'),
+    'month_eur',    coalesce((SELECT sum(amount_eur) FROM c, t WHERE status = 'uplatnena' AND date_trunc('month', crm_local_date(claimed_at)) = date_trunc('month', t.today)), 0),
+    'month_last_claim', (SELECT number FROM c, t WHERE status = 'uplatnena' AND date_trunc('month', crm_local_date(claimed_at)) = date_trunc('month', t.today)
+                          ORDER BY claimed_at DESC LIMIT 1),
+    'quarter_eur',  coalesce((SELECT sum(amount_eur) FROM c, t WHERE status = 'uplatnena' AND date_trunc('quarter', crm_local_date(claimed_at)) = date_trunc('quarter', t.today)), 0),
+    'year_eur',     coalesce((SELECT sum(amount_eur) FROM c, t WHERE status = 'uplatnena' AND date_trunc('year', crm_local_date(claimed_at)) = date_trunc('year', t.today)), 0),
+    'deals_year',   (SELECT count(DISTINCT coalesce(deal_id::text, legacy_id)) FROM c, t WHERE status <> 'zrusena' AND won_at >= date_trunc('year', t.today)::date))
+$$;
+
+
+--
+-- Name: FUNCTION commission_summary(p_user uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.commission_summary(p_user uuid) IS 'súčty obrazovky 41 (0053): nevyplatené = čakajúce; uplatnené podľa dátumu uplatnenia (nie výhry)';
+
+
+--
+-- Name: commission_sync(uuid, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.commission_sync(p_deal uuid, p_structural boolean) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  d         deal;
+  v_won     boolean;
+  v_claimed numeric;
+  v_hasclm  boolean;
+  p         commission;
+  v_ref     commission;
+  v_user    uuid;
+  v_pct     numeric;
+  v_wonon   date;
+  v_from    date;
+  v_legacy  uuid;
+  b         record;
+  v_target  numeric;
+  v_diff    numeric;
+  v_n       integer;
+BEGIN
+  -- 0054: zámok obchodu = riadok obchodu (FOR NO KEY UPDATE), vždy pred riadkami provízií; súbežné prepočty po sebe
+  SELECT * INTO d FROM deal WHERE id = p_deal FOR NO KEY UPDATE;
+  IF d.id IS NULL THEN
+    RETURN false;
+  END IF;
+  v_won := (SELECT s.code FROM pipeline_stage s WHERE s.id = d.stage_id) = 'vyhrane';
+  SELECT coalesce(sum(amount_eur), 0), count(*) > 0 INTO v_claimed, v_hasclm
+    FROM commission WHERE deal_id = p_deal AND status = 'uplatnena';
+  IF v_hasclm AND NOT p_structural THEN
+    RETURN false;   -- odpoveď 1: po uplatnení iba štrukturálne zmeny
+  END IF;
+  SELECT * INTO p FROM commission WHERE deal_id = p_deal AND status = 'caka' FOR UPDATE;
+  -- vlastník a percento: čakajúca položka, inak posledná nezrušená (preradenie platí aj pre budúce vyrovnania)
+  IF p.id IS NOT NULL THEN
+    v_ref := p;
+  ELSE
+    SELECT * INTO v_ref FROM commission WHERE deal_id = p_deal AND status <> 'zrusena' ORDER BY created_at DESC LIMIT 1;
+  END IF;
+
+  IF v_ref.id IS NULL THEN
+    -- vznik: Vyhraté, od dátumu prechodu, vlastník počíta provízie, bez provízie zo Sales portálu
+    IF NOT v_won OR d.closed_at IS NULL THEN
+      RETURN false;
+    END IF;
+    v_wonon := crm_local_date(d.closed_at);
+    v_from := (SELECT (value #>> '{}')::date FROM app_setting WHERE key = 'commission_crm_from');
+    IF v_from IS NULL OR v_wonon < v_from THEN
+      RETURN false;
+    END IF;
+    IF NOT coalesce((SELECT commission_enabled FROM app_user WHERE id = d.owner_id), false) THEN
+      RETURN false;
+    END IF;
+    v_legacy := commission_legacy_match(p_deal);
+    IF v_legacy IS NOT NULL AND NOT EXISTS (SELECT 1 FROM commission_legacy_override WHERE deal_id = p_deal) THEN
+      IF NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'provizia_duplicita' AND deal_id = p_deal) THEN
+        PERFORM commission_notify_admins(d.org_id, 'provizia_duplicita', p_deal,
+          'Obchod má províziu zo Sales portálu – provízia z CRM nevznikla. Ak ide o iný obchod, povoľte ju.');
+      END IF;
+      RETURN false;
+    END IF;
+    v_user := d.owner_id;
+    v_pct := user_commission_pct(d.owner_id, v_wonon);
+  ELSE
+    v_user := v_ref.user_id;
+    v_pct := v_ref.pct;
+    v_wonon := CASE WHEN v_won AND d.closed_at IS NOT NULL THEN crm_local_date(d.closed_at) ELSE v_ref.won_at END;
+  END IF;
+
+  SELECT * INTO b FROM commission_deal_base(p_deal);
+  -- 0054: neúplný základ blokuje uplatnenie – admini dostanú upozornenie (raz pre ten istý dôvod)
+  IF b.missing IS NOT NULL AND v_won
+     AND NOT EXISTS (SELECT 1 FROM notification WHERE kind = 'provizia_chyba_cena' AND deal_id = p_deal AND detail = b.missing) THEN
+    PERFORM commission_notify_admins(d.org_id, 'provizia_chyba_cena', p_deal, b.missing);
+  END IF;
+  v_target := CASE WHEN v_won THEN round(greatest(b.base_eur, 0) * v_pct / 100, 2) ELSE 0 END;
+  v_diff := v_target - v_claimed;
+
+  IF p.id IS NOT NULL THEN
+    IF (NOT v_won AND NOT v_hasclm) OR (v_hasclm AND v_diff = 0) THEN
+      UPDATE commission SET status = 'zrusena', recalculated_at = now() WHERE id = p.id;
+      RETURN true;
+    END IF;
+    UPDATE commission
+       SET amount_eur = v_diff, target_eur = v_target, base_eur = b.base_eur, base_missing = b.missing,
+           volume_mwh = b.volume_mwh, duration_years = b.duration_years, won_at = v_wonon, recalculated_at = now()
+     WHERE id = p.id
+       AND (amount_eur, target_eur, base_eur, base_missing, volume_mwh, duration_years, won_at)
+           IS DISTINCT FROM (v_diff, v_target, b.base_eur, b.missing, b.volume_mwh, b.duration_years, v_wonon);
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n > 0;
+  END IF;
+
+  IF (v_won AND NOT v_hasclm) OR (v_hasclm AND v_diff <> 0) THEN
+    INSERT INTO commission (org_id, deal_id, user_id, kind, status, won_at, duration_years, volume_mwh, base_eur, base_missing,
+                            pct, target_eur, amount_eur, recalculated_at)
+    VALUES (d.org_id, p_deal, v_user, CASE WHEN v_hasclm THEN 'vyrovnanie' ELSE 'provizia' END, 'caka', v_wonon,
+            b.duration_years, b.volume_mwh, b.base_eur, b.missing, v_pct, v_target, v_diff, now());
+    IF v_hasclm THEN
+      INSERT INTO notification (user_id, kind, deal_id, detail)
+      VALUES (v_user, 'provizia_vyrovnanie', p_deal,
+              'Vyrovnanie už uplatnenej provízie po zmene obchodu – nová čakajúca položka.');
+    END IF;
+    RETURN true;
+  END IF;
+  RETURN false;
+END;
+$$;
+
+
+--
+-- Name: FUNCTION commission_sync(p_deal uuid, p_structural boolean); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.commission_sync(p_deal uuid, p_structural boolean) IS 'prepočet provízie obchodu (0053): jedna čakajúca položka = cieľ − Σ uplatnených; po uplatnení iba pri štrukturálnej zmene';
 
 
 --
@@ -5780,11 +6690,31 @@ CREATE FUNCTION public.contract_year_calc(p_contract_id uuid, p_year integer) RE
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
+  SELECT c.* FROM contract_year_calc_core(p_contract_id, p_year, NULL) c
+   WHERE EXISTS (SELECT 1 FROM contract k WHERE k.id = p_contract_id
+                    AND k.org_id = ANY (crm_user_orgs()) AND crm_contract_visible(k.company_id, k.person_id, k.owner_id))
+$$;
+
+
+--
+-- Name: FUNCTION contract_year_calc(p_contract_id uuid, p_year integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.contract_year_calc(p_contract_id uuid, p_year integer) IS 'ročná bilancia zmluvy: objem, výnos komodity, poplatky, pridaná hodnota, marža firmy (iba s právom), tranža; iba viditeľná zmluva';
+
+
+--
+-- Name: contract_year_calc_core(uuid, integer, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.contract_year_calc_core(p_contract_id uuid, p_year integer, p_until date DEFAULT NULL::date) RETURNS TABLE(year integer, months integer, volume_mwh numeric, revenue_eur numeric, fees_eur numeric, cost_eur numeric, added_value_eur numeric, margin_cost_eur numeric, margin_eur numeric, model text, tranche text, basis_stored boolean, basis_source text, trader_price numeric, exception_id uuid, exception_value numeric, portfolio_eur_mwh numeric, portfolio_on date, portfolio_stale boolean, missing text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
 WITH k AS (
   SELECT c AS rec, c.id, c.org_id, c.type, crm_can_see_margin() AS see_margin
     FROM contract c
    WHERE c.id = p_contract_id
-     AND c.org_id = ANY (crm_user_orgs()) AND crm_contract_visible(c.company_id, c.person_id, c.owner_id)
 ),
 bs AS (SELECT b.*, true AS stored FROM contract_year_basis b WHERE b.contract_id = p_contract_id AND b.year = p_year),
 b AS (
@@ -5802,6 +6732,7 @@ mk AS (
 mo AS (
   SELECT make_date(p_year, i, 1) AS m_start, (make_date(p_year, i, 1) + interval '1 month - 1 day')::date AS m_end
     FROM generate_series(1, 12) i
+   WHERE p_until IS NULL OR make_date(p_year, i, 1) <= p_until   -- 0053: koniec obdobia (provízia: zmluva z Office portálu, neurčito 12 mesiacov)
 ),
 co AS (
   SELECT x.oom_id, x.valid_from, x.valid_to, x.qty_vt_mwh, x.qty_nt_mwh,
@@ -5877,11 +6808,11 @@ agg AS (
               WHEN bool_or(kind IN ('fix', 'cennik')) THEN 'FIX'
               WHEN bool_or(kind IN ('spot_plus_eur', 'viwa', 'vykup')) THEN 'SPOT' END AS tranche,
          CASE WHEN bool_or(kind = 'fix' AND unit_cost IS NULL) THEN 'cena pre obchodníka'
-              WHEN bool_or(kind = 'cennik' AND unit_cost IS NULL) THEN 'odhad portfólia ku dňu podpisu'
+              WHEN bool_or(kind = 'cennik' AND unit_cost IS NULL) THEN 'nákupná cena portfólia ku dňu podpisu'
               WHEN bool_or(kind = 'energo' AND unit_cost IS NULL) THEN 'nákupná cena energopomoci'
               WHEN bool_or(kind = 'viwa' AND rev IS NULL) THEN 'balík VIWA'
               WHEN bool_or(kind = 'vykup' AND price_model = 'spot_minus_pct' AND rev IS NULL) THEN 'očakávaná cena SPOT pre FVE'
-              WHEN bool_or(kind IS NOT NULL AND unit_mcost IS NULL) THEN 'odhad portfólia (marža)' END AS missing
+              WHEN bool_or(kind IS NOT NULL AND unit_mcost IS NULL) THEN 'nákupná cena portfólia (marža)' END AS missing
     FROM calc
 )
 SELECT p_year, agg.months, round(coalesce(agg.vol, 0), 3), round(agg.rev, 2), round(agg.fees + vu.fee, 2), round(agg.cost, 2),
@@ -5897,10 +6828,10 @@ $$;
 
 
 --
--- Name: FUNCTION contract_year_calc(p_contract_id uuid, p_year integer); Type: COMMENT; Schema: public; Owner: -
+-- Name: FUNCTION contract_year_calc_core(p_contract_id uuid, p_year integer, p_until date); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.contract_year_calc(p_contract_id uuid, p_year integer) IS 'ročná bilancia zmluvy: objem, výnos komodity, poplatky, pridaná hodnota, marža firmy (iba s právom), tranža; iba viditeľná zmluva';
+COMMENT ON FUNCTION public.contract_year_calc_core(p_contract_id uuid, p_year integer, p_until date) IS 'jadro ročnej bilancie zmluvy bez kontroly prístupu (interné, 0053); p_until = posledný deň započítaného obdobia (mesiace od neho ďalej sa nepočítajú)';
 
 
 --
@@ -6133,6 +7064,40 @@ $$;
 --
 
 COMMENT ON FUNCTION public.crm_can_see_margin() IS 'vidí maržu firmy: tím s can_see_company_margin (modul zmluvy) alebo „schvaľuje ceny“';
+
+
+--
+-- Name: crm_commission_sees_all(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_commission_sees_all() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT crm_is_service() OR crm_is_admin() OR crm_scope('provizie', 'view') = 'vsetko'
+      OR EXISTS (SELECT 1 FROM app_user u WHERE u.id = crm_active_user_id() AND u.sees_all_commissions)
+$$;
+
+
+--
+-- Name: FUNCTION crm_commission_sees_all(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.crm_commission_sees_all() IS 'všetky provízie: admin, tím „Provízie – všetko“, príznak používateľa (0053); nie schvaľovateľ cien ani Back office / Nákup';
+
+
+--
+-- Name: crm_commission_visible(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_commission_visible(p_org uuid, p_user uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT p_org = ANY (crm_user_orgs())
+     AND (crm_commission_sees_all()
+          OR (p_user = crm_active_user_id() AND crm_scope('provizie', 'view') <> 'nic'))
+$$;
 
 
 --
@@ -6495,6 +7460,18 @@ CREATE FUNCTION public.crm_is_admin() RETURNS boolean
     SET search_path TO 'public', 'pg_temp'
     AS $$
   SELECT EXISTS (SELECT 1 FROM app_user u WHERE u.id = crm_active_user_id() AND u.is_admin)
+$$;
+
+
+--
+-- Name: crm_is_purchase(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.crm_is_purchase() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM app_user u JOIN team t ON t.id = u.team_id WHERE u.id = crm_active_user_id() AND t.code = 'nakup')
 $$;
 
 
@@ -8893,10 +9870,14 @@ BEGIN
       FROM c WHERE x.id = c.id RETURNING x.*
   )
   SELECT coalesce(jsonb_agg(jsonb_build_object('id', u.id, 'send_key', u.send_key, 'kind', u.kind, 'to', a.email, 'name', a.name,
-                                               'deal_id', u.deal_id, 'approval_id', u.approval_id, 'detail', u.detail)
+                                               'deal_id', u.deal_id, 'approval_id', u.approval_id, 'detail', u.detail,
+                                               -- 0055: provízny list – PDF z R2 ako príloha
+                                               'commission_claim_id', u.commission_claim_id,
+                                               'pdf_key', CASE u.kind WHEN 'provizny_list' THEN k.pdf_key WHEN 'provizny_list_zruseny' THEN k.void_pdf_key END)
                             ORDER BY u.created_at), '[]')
     INTO res
-    FROM u JOIN app_user a ON a.id = u.user_id;
+    FROM u JOIN app_user a ON a.id = u.user_id
+    LEFT JOIN commission_claim k ON k.id = u.commission_claim_id;
   RETURN res;
 END;
 $$;
@@ -10182,7 +11163,8 @@ CREATE FUNCTION public.market_price_flag_check() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-  IF (current_setting('crm.market_price_import', true) = 'on' OR current_setting('crm.market_price_correction', true) = 'on')
+  IF (current_setting('crm.market_price_import', true) = 'on' OR current_setting('crm.market_price_correction', true) = 'on'
+      OR current_setting('crm.market_price_portfolio', true) = 'on')
      AND NOT crm_internal_call() THEN
     RAISE EXCEPTION 'Trhové ceny z Montelu zapisuje iba denný beh alebo načítanie histórie.' USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -10203,6 +11185,11 @@ BEGIN
   IF TG_OP = 'UPDATE' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
      AND current_setting('crm.market_price_correction', true) = 'on' THEN
     RETURN NEW;                                   -- označenie opravy z tejto funkcie (nižšie)
+  END IF;
+  -- 0056: nákupná cena portfólia (market_price_portfolio_set) – funkcia vlastníka zachová BL, PL a zdroj dňa
+  IF TG_OP = 'INSERT' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
+     AND current_setting('crm.market_price_portfolio', true) = 'on' THEN
+    RETURN NEW;
   END IF;
   -- 0047: načítanie z Montelu (market_price_import) – funkcia vlastníka označí zdroj a zachová ručné hodnoty dňa
   IF TG_OP = 'INSERT' AND current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'market_price_daily'::regclass)
@@ -10229,6 +11216,13 @@ BEGIN
   END IF;
   IF NOT (crm_is_admin() OR crm_approves_prices()) THEN
     RAISE EXCEPTION 'Trhové ceny zadáva admin alebo obchodný riaditeľ.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- 0056: nákupnú cenu portfólia mení iba admin a Nákup cez market_price_portfolio_set; ručné ceny dňa ju prevezmú zo dňa
+  IF NEW.portfolio_eur_mwh IS DISTINCT FROM (SELECT m.portfolio_eur_mwh FROM market_price_daily m
+                                               WHERE m.org_id = NEW.org_id AND m.on_date = NEW.on_date AND m.delivery_year = NEW.delivery_year
+                                                 AND m.corrected_at IS NULL) THEN
+    RAISE EXCEPTION 'Nákupnú cenu portfólia zadáva admin alebo Nákup tlačidlom „Nákupná cena portfólia – zadať pre obdobie“.'
+      USING ERRCODE = 'insufficient_privilege';
   END IF;
   NEW.source := 'rucne';
   NEW.changed_by := crm_active_user_id();
@@ -10352,6 +11346,94 @@ BEGIN
   PERFORM set_config('crm.market_price_correction', '', true);
 END;
 $$;
+
+
+--
+-- Name: market_price_portfolio_history(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_portfolio_history(p_org uuid) RETURNS TABLE(delivery_year smallint, on_date date, value numeric, source text, changed_by_name text, created_at timestamp with time zone, is_current boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT m.delivery_year, m.on_date, m.portfolio_eur_mwh, m.source, crm_user_name(m.changed_by), m.created_at,
+         m.on_date = max(m.on_date) FILTER (WHERE m.on_date <= crm_today()) OVER (PARTITION BY m.delivery_year)
+    FROM market_price_daily m
+   WHERE m.org_id = p_org AND m.corrected_at IS NULL AND m.portfolio_eur_mwh IS NOT NULL
+     AND p_org = ANY (crm_user_orgs()) AND (crm_is_admin() OR crm_is_purchase() OR crm_sees_portfolio())
+     -- iba dni, keď sa cena zmenila oproti predošlému dňu s cenou (Montel ju denne prenáša ďalej)
+     AND m.portfolio_eur_mwh IS DISTINCT FROM (SELECT p.portfolio_eur_mwh FROM market_price_daily p
+                                                WHERE p.org_id = m.org_id AND p.delivery_year = m.delivery_year AND p.corrected_at IS NULL
+                                                  AND p.portfolio_eur_mwh IS NOT NULL AND p.on_date < m.on_date
+                                                ORDER BY p.on_date DESC LIMIT 1)
+   ORDER BY m.delivery_year, m.on_date DESC
+$$;
+
+
+--
+-- Name: market_price_portfolio_set(uuid, date, integer, numeric); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.market_price_portfolio_set(p_org uuid, p_on date, p_year integer, p_value numeric) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  cur     market_price_daily;
+  v_me    uuid := crm_active_user_id();
+  v_val   numeric := round(p_value, 4);
+  v_next  date;
+  v_n     integer := 0;
+  c       record;
+BEGIN
+  IF v_me IS NULL OR NOT (crm_is_admin() OR crm_is_purchase()) THEN
+    RAISE EXCEPTION 'Nákupnú cenu portfólia zadáva admin alebo Nákup.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NOT p_org = ANY (crm_user_orgs()) THEN
+    RAISE EXCEPTION 'Spoločnosť nevidíte.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_on IS NULL OR p_on < '2026-01-01' OR p_on > crm_today() THEN
+    RAISE EXCEPTION 'Deň „platí od“: od 1. 1. 2026 do dnes.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_year IS NULL OR p_year < 2026 OR p_year > 2100 THEN
+    RAISE EXCEPTION 'Rok dodávky: 2026 až 2100.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_val IS NULL OR v_val < 0 OR v_val > 10000 THEN
+    RAISE EXCEPTION 'Nákupná cena portfólia: 0 až 10 000 €/MWh.' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO cur FROM market_price_daily
+   WHERE org_id = p_org AND on_date = p_on AND delivery_year = p_year AND corrected_at IS NULL FOR UPDATE;
+  IF cur.id IS NOT NULL AND cur.portfolio_eur_mwh = v_val THEN
+    RETURN jsonb_build_object('zmena', false);
+  END IF;
+  IF cur.id IS NOT NULL THEN
+    PERFORM set_config('crm.market_price_correction', 'on', true);
+    UPDATE market_price_daily SET corrected_at = now(), corrected_by = v_me WHERE id = cur.id;
+    PERFORM set_config('crm.market_price_correction', '', true);
+  END IF;
+  PERFORM set_config('crm.market_price_portfolio', 'on', true);
+  INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh, spot_fve_eur_mwh, source, changed_by)
+  VALUES (p_org, p_on, p_year, cur.bl_eur_mwh, cur.pl_eur_mwh, v_val, cur.spot_fve_eur_mwh, coalesce(cur.source, 'rucne'), v_me);
+  PERFORM set_config('crm.market_price_portfolio', '', true);
+  -- snímky zmlúv ku dňu podpisu bez nákupnej ceny portfólia (napr. podpis v deň bez ceny)
+  FOR c IN SELECT DISTINCT k.id FROM contract k JOIN contract_year_basis b ON b.contract_id = k.id
+            WHERE k.org_id = p_org AND b.year = p_year AND b.portfolio_eur_mwh IS NULL AND k.signed_on >= p_on
+            ORDER BY k.id LOOP
+    PERFORM contract_basis_refresh(c.id);
+    v_n := v_n + 1;
+  END LOOP;
+  SELECT min(m.on_date) INTO v_next FROM market_price_daily m
+   WHERE m.org_id = p_org AND m.delivery_year = p_year AND m.corrected_at IS NULL AND m.on_date > p_on AND m.portfolio_eur_mwh IS NOT NULL;
+  RETURN jsonb_build_object('zmena', true, 'zmluvy_doplnene', v_n, 'plati_do', v_next - 1);
+END;
+$$;
+
+
+--
+-- Name: FUNCTION market_price_portfolio_set(p_org uuid, p_on date, p_year integer, p_value numeric); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.market_price_portfolio_set(p_org uuid, p_on date, p_year integer, p_value numeric) IS 'nákupná cena portfólia pre rok dodávky od dňa (admin, Nákup; 0056); BL/PL dňa ostanú; snímkam doplní iba chýbajúcu cenu';
 
 
 --
@@ -12822,7 +13904,10 @@ CREATE FUNCTION public.offer_variant_values_core(p_variant uuid) RETURNS TABLE(o
     AS $$
 WITH v AS (
   SELECT v.*, o.kind AS okind, o.household, o.org_id AS oorg, o.sent_at AS osent, d.id AS deal_id, crm_can_see_margin() AS see_margin,
-         crm_sees_portfolio() AS see_portfolio
+         crm_sees_portfolio() AS see_portfolio,
+         -- 0056: marža ponuky spárovanej so zmluvou sa zmrazí ku dňu spárovania (živá marža je na zmluve); ostatné dnes
+         coalesce((SELECT crm_local_date(min(k.deal_matched_at)) FROM contract k
+                    WHERE k.offer_variant_id = v.id AND k.deal_match IN ('auto', 'rucne')), crm_today()) AS margin_on
     FROM offer_variant v JOIN offer o ON o.id = v.offer_id JOIN deal d ON d.id = o.deal_id
    WHERE v.id = p_variant
 ),
@@ -12872,7 +13957,7 @@ calc AS (
          b.viwa_additive,
          (SELECT e.value FROM ex e WHERE e.year = it.year AND e.price_model = it.price_model
                                     AND e.voltage_group IN (it.vg, 'vsetko') ORDER BY e.value LIMIT 1) AS exc,
-         (SELECT value FROM contract_market_value((SELECT oorg FROM v), it.year, crm_today(), 'portfolio')) AS portfolio_today,
+         (SELECT value FROM contract_market_value((SELECT oorg FROM v), it.year, (SELECT margin_on FROM v), 'portfolio')) AS portfolio_today,
          (SELECT value FROM contract_market_value((SELECT oorg FROM v), it.year, crm_today(), 'spot_fve')) AS spot_fve,
          (SELECT coalesce(sum((coalesce(f.fee_eur_month, 0) + coalesce(f.fee_kw_eur_month, 0) * it.kw) * it.months), 0)
             FROM offer_item f
@@ -12909,7 +13994,7 @@ SELECT oom_id, year, vg, item_id, price_model, kind, vt, nt, ad, pct, months,
             -- 0041: pri manažérovi je hranicou odhad portfólia (hlásenie hovorí, čo chýba a čo urobiť)
             WHEN kind = 'fix' AND ucost IS NULL THEN
               CASE WHEN seller_type = 'manazer'
-                   THEN 'chýba odhad portfólia (hranica manažéra) – doplňte ho v cenách dňa a ponuku prepočítajte'
+                   THEN 'chýba nákupná cena portfólia (hranica manažéra) – doplňte ju v cenových parametroch a ponuku prepočítajte'
                    ELSE 'chýba cena pre obchodníka – doplňte ceny dňa a ponuku prepočítajte' END
             WHEN kind IN ('spot_plus_eur', 'vykup') AND ucost IS NULL THEN 'chýba minimálny aditív'
             WHEN kind = 'viwa' AND viwa_additive IS NULL THEN 'chýba balík VIWA'
@@ -15836,6 +16921,26 @@ $$;
 
 
 --
+-- Name: user_commission_enabled_set(uuid, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_commission_enabled_set(p_user uuid, p_on boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT (crm_is_admin() OR crm_approves_prices()) THEN
+    RAISE EXCEPTION '„Počítať provízie“ mení admin alebo schvaľovateľ cien.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_on IS NULL THEN
+    RAISE EXCEPTION 'Zadajte áno alebo nie.' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE app_user SET commission_enabled = p_on WHERE id = p_user AND commission_enabled IS DISTINCT FROM p_on;
+END;
+$$;
+
+
+--
 -- Name: user_commission_pct(uuid, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -16167,6 +17272,8 @@ CREATE TABLE public.app_user (
     gmail_enabled boolean DEFAULT false NOT NULL,
     mobile text,
     linkedin_url text,
+    commission_enabled boolean DEFAULT false NOT NULL,
+    sees_all_commissions boolean DEFAULT false NOT NULL,
     CONSTRAINT app_user_deactivated_check CHECK (((status = 'deaktivovany'::public.user_status) = (deactivated_at IS NOT NULL))),
     CONSTRAINT app_user_email_check CHECK ((email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'::text)),
     CONSTRAINT app_user_job_title_check CHECK (((job_title IS NULL) OR (length(job_title) <= 80))),
@@ -16231,6 +17338,20 @@ COMMENT ON COLUMN public.app_user.phone IS 'telefón obchodníka do ponuky („C
 --
 
 COMMENT ON COLUMN public.app_user.gmail_enabled IS 'pilot: e-maily z CRM cez Gmail zo schránky používateľa (zapína admin postupne) – 0042';
+
+
+--
+-- Name: COLUMN app_user.commission_enabled; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.commission_enabled IS 'počítať provízie (predvolene vypnuté, odpoveď 5); mení admin a schvaľovateľ cien; platí pre obchody vyhraté s províziou odteraz';
+
+
+--
+-- Name: COLUMN app_user.sees_all_commissions; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.app_user.sees_all_commissions IS 'vidí všetky provízie aj bez práva tímu „Provízie – všetko“ (napr. obchodný riaditeľ v Sales_internal); mení admin';
 
 
 --
@@ -16480,40 +17601,168 @@ CREATE TABLE public.campaign (
 
 CREATE TABLE public.commission (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    deal_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    deal_id uuid,
     user_id uuid NOT NULL,
-    base_eur numeric(12,2),
-    amount_eur numeric(12,2),
-    period date,
-    status public.commission_status DEFAULT 'vypocitana'::public.commission_status NOT NULL,
-    pdf_url text,
+    kind text DEFAULT 'provizia'::text NOT NULL,
+    status public.commission_status DEFAULT 'caka'::public.commission_status NOT NULL,
+    won_at date,
+    duration_years smallint,
+    volume_mwh numeric(12,3),
+    base_eur numeric(12,2) NOT NULL,
+    base_missing text,
+    pct numeric(5,2) NOT NULL,
+    target_eur numeric(12,2) NOT NULL,
+    amount_eur numeric(12,2) NOT NULL,
+    claim_id uuid,
+    recalculated_at timestamp with time zone,
+    reassigned_from uuid,
+    reassigned_by uuid,
+    reassigned_at timestamp with time zone,
+    reassign_reason text,
+    source text DEFAULT 'crm'::text NOT NULL,
+    legacy_id text,
+    legacy_hubspot_deal_id text,
+    legacy_deal_name text,
+    legacy_eics text[],
+    legacy_supply_from date,
+    legacy_supply_to date,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT commission_check CHECK (((source = 'crm'::text) = (deal_id IS NOT NULL))),
+    CONSTRAINT commission_check1 CHECK (((source = 'sales_portal'::text) = (legacy_id IS NOT NULL))),
+    CONSTRAINT commission_check2 CHECK (((status = 'uplatnena'::public.commission_status) = (claim_id IS NOT NULL))),
+    CONSTRAINT commission_check3 CHECK (((kind = 'provizia'::text) OR (source = 'crm'::text))),
+    CONSTRAINT commission_check4 CHECK (((reassigned_at IS NULL) = (reassign_reason IS NULL))),
+    CONSTRAINT commission_duration_years_check CHECK ((duration_years > 0)),
+    CONSTRAINT commission_kind_check CHECK ((kind = ANY (ARRAY['provizia'::text, 'vyrovnanie'::text]))),
+    CONSTRAINT commission_pct_check CHECK (((pct >= (0)::numeric) AND (pct <= (100)::numeric))),
+    CONSTRAINT commission_reassign_reason_check CHECK (((reassign_reason IS NULL) OR (length(btrim(reassign_reason)) >= 3))),
+    CONSTRAINT commission_source_check CHECK ((source = ANY (ARRAY['crm'::text, 'sales_portal'::text]))),
+    CONSTRAINT commission_target_eur_check CHECK ((target_eur >= (0)::numeric))
 );
 
 
 --
--- Name: COLUMN commission.period; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE commission; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.commission.period IS 'prvý deň obdobia (mesiaca), za ktoré sa provízia vypláca';
+COMMENT ON TABLE public.commission IS 'provízia obchodníka (0053): položka obchodu Čaká → Uplatnená (list) alebo Zrušená; na obchod najviac jedna čakajúca; zapisujú iba funkcie';
 
 
 --
--- Name: commission_rule; Type: TABLE; Schema: public; Owner: -
+-- Name: COLUMN commission.kind; Type: COMMENT; Schema: public; Owner: -
 --
 
-CREATE TABLE public.commission_rule (
+COMMENT ON COLUMN public.commission.kind IS 'provizia = prvá položka obchodu; vyrovnanie = rozdiel po uplatnení (spárovanie / zrušenie spárovania zmluvy, zmena štádia)';
+
+
+--
+-- Name: commission_claim; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.commission_claim (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    product_id uuid,
-    pipeline_id uuid,
-    segment text,
-    rate_type text NOT NULL,
-    rate_value numeric(12,4) NOT NULL,
-    valid_from date NOT NULL,
+    org_id uuid NOT NULL,
+    number text NOT NULL,
+    user_id uuid NOT NULL,
+    total_eur numeric(12,2) NOT NULL,
+    by_duration jsonb DEFAULT '{}'::jsonb NOT NULL,
+    pdf_key text,
+    void_pdf_key text,
+    emailed_at timestamp with time zone,
+    created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT commission_rule_target_check CHECK ((num_nonnulls(product_id, pipeline_id) >= 1))
+    voided_at timestamp with time zone,
+    voided_by uuid,
+    void_reason text,
+    source text DEFAULT 'crm'::text NOT NULL,
+    legacy_id text,
+    legacy_pdf_url text,
+    pdf_sha256 text,
+    void_pdf_sha256 text,
+    items_snapshot jsonb DEFAULT '[]'::jsonb NOT NULL,
+    CONSTRAINT commission_claim_check CHECK (((voided_at IS NULL) = (void_reason IS NULL))),
+    CONSTRAINT commission_claim_check1 CHECK (((source = 'sales_portal'::text) = (legacy_id IS NOT NULL))),
+    CONSTRAINT commission_claim_items_snapshot_check CHECK ((jsonb_typeof(items_snapshot) = 'array'::text)),
+    CONSTRAINT commission_claim_number_check CHECK ((number ~ '^CMSN-[0-9]{4}-[0-9]{4,}$'::text)),
+    CONSTRAINT commission_claim_pdf_sha256_check CHECK ((pdf_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT commission_claim_source_check CHECK ((source = ANY (ARRAY['crm'::text, 'sales_portal'::text]))),
+    CONSTRAINT commission_claim_total_eur_check CHECK ((total_eur >= (0)::numeric)),
+    CONSTRAINT commission_claim_void_pdf_sha256_check CHECK ((void_pdf_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT commission_claim_void_reason_check CHECK (((void_reason IS NULL) OR (length(btrim(void_reason)) >= 3)))
+);
+
+
+--
+-- Name: TABLE commission_claim; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.commission_claim IS 'provízny list CMSN-RRRR-NNNN (0053): jeden obchodník, súčet ≥ 0; zrušiť smie admin s dôvodom, číslo sa znova nepoužije; história zo Sales portálu iba na čítanie';
+
+
+--
+-- Name: COLUMN commission_claim.items_snapshot; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.commission_claim.items_snapshot IS 'položky listu v čase uplatnenia (PDF listu aj PDF zrušenia – po zrušení sa položky vrátia na Čaká); 0055';
+
+
+--
+-- Name: commission_legacy_override; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.commission_legacy_override (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deal_id uuid NOT NULL,
+    org_id uuid NOT NULL,
+    legacy_commission_id uuid,
+    reason text NOT NULL,
+    decided_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT commission_legacy_override_reason_check CHECK ((length(btrim(reason)) >= 3))
+);
+
+
+--
+-- Name: TABLE commission_legacy_override; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.commission_legacy_override IS 'admin povolil províziu z CRM napriek zhode so Sales portálom (0053)';
+
+
+--
+-- Name: commission_queue; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.commission_queue (
+    id bigint NOT NULL,
+    deal_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    alerted_at timestamp with time zone
+);
+
+
+--
+-- Name: TABLE commission_queue; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.commission_queue IS 'obchody na prepočet provízie po zmene bilancie zmluvy (0054); spracuje commission_queue_run na pozadí alebo uplatnenie; bez auditu';
+
+
+--
+-- Name: commission_queue_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.commission_queue ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.commission_queue_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
 
@@ -17476,10 +18725,12 @@ CREATE TABLE public.email_outbox (
     error text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    commission_claim_id uuid,
     CONSTRAINT email_outbox_check CHECK (((status <> 'odosiela_sa'::text) OR (send_key IS NOT NULL))),
     CONSTRAINT email_outbox_check1 CHECK (((status <> 'odoslany'::text) OR (gmail_message_id IS NOT NULL))),
+    CONSTRAINT email_outbox_claim_check CHECK (((kind = ANY (ARRAY['provizny_list'::text, 'provizny_list_zruseny'::text])) = (commission_claim_id IS NOT NULL))),
     CONSTRAINT email_outbox_gmail_message_id_check CHECK (((gmail_message_id IS NULL) OR (gmail_message_id ~ '^[0-9a-f]{6,32}$'::text))),
-    CONSTRAINT email_outbox_kind_check CHECK ((kind = ANY (ARRAY['schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'pomoc_s_ponukou'::text]))),
+    CONSTRAINT email_outbox_kind_check CHECK ((kind = ANY (ARRAY['schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'ponuka_akceptovana'::text, 'pomoc_s_ponukou'::text, 'provizny_list'::text, 'provizny_list_zruseny'::text]))),
     CONSTRAINT email_outbox_status_check CHECK ((status = ANY (ARRAY['v_rade'::text, 'odosiela_sa'::text, 'odoslany'::text, 'chyba'::text])))
 );
 
@@ -17693,7 +18944,7 @@ CREATE TABLE public.job_run (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT job_run_errors_check CHECK ((jsonb_typeof(errors) = 'array'::text)),
-    CONSTRAINT job_run_job_check CHECK ((job = ANY (ARRAY['zmluvy'::text, 'obchody'::text, 'ceny'::text])))
+    CONSTRAINT job_run_job_check CHECK ((job = ANY (ARRAY['zmluvy'::text, 'obchody'::text, 'ceny'::text, 'provizie'::text])))
 );
 
 
@@ -17951,7 +19202,8 @@ CREATE TABLE public.notification (
     read_at timestamp with time zone,
     deal_id uuid,
     approval_id uuid,
-    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'akceptacia_zrusena'::text, 'ponuka_odpoved'::text, 'ponuka_pripomienka'::text, 'gmail_chyba'::text, 'email_chyba'::text, 'nesparovana_zmluva'::text, 'cena_ina_ako_v_ponuke'::text, 'obnova'::text, 'chyba_oom_na_zmluve'::text, 'pomoc_s_ponukou'::text])))
+    commission_claim_id uuid,
+    CONSTRAINT notification_kind_check CHECK ((kind = ANY (ARRAY['konci_4_mesiace'::text, 'sprolongovana'::text, 'neprolongovana'::text, 'pod_hranicou'::text, 'vynimka_nova'::text, 'vynimka_rozhodnutie'::text, 'nocny_beh_chyba'::text, 'maly_podnik'::text, 'objem_xm'::text, 'dalsi_krok'::text, 'schvalenie_nove'::text, 'schvalenie_rozhodnutie'::text, 'pridelenie_firmy'::text, 'ponuka_akceptovana'::text, 'ponuka_zablokovana'::text, 'akceptacia_zrusena'::text, 'ponuka_odpoved'::text, 'ponuka_pripomienka'::text, 'gmail_chyba'::text, 'email_chyba'::text, 'nesparovana_zmluva'::text, 'cena_ina_ako_v_ponuke'::text, 'obnova'::text, 'chyba_oom_na_zmluve'::text, 'pomoc_s_ponukou'::text, 'provizny_list'::text, 'provizny_list_zruseny'::text, 'provizia_vyrovnanie'::text, 'provizia_duplicita'::text, 'provizia_preradena'::text, 'provizia_chyba_cena'::text, 'provizie_fronta'::text])))
 );
 
 
@@ -19681,6 +20933,38 @@ ALTER TABLE ONLY public.campaign
 
 
 --
+-- Name: commission_claim commission_claim_org_id_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_org_id_number_key UNIQUE (org_id, number);
+
+
+--
+-- Name: commission_claim commission_claim_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: commission_legacy_override commission_legacy_override_deal_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_deal_id_key UNIQUE (deal_id);
+
+
+--
+-- Name: commission_legacy_override commission_legacy_override_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: commission commission_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -19689,11 +20973,11 @@ ALTER TABLE ONLY public.commission
 
 
 --
--- Name: commission_rule commission_rule_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: commission_queue commission_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.commission_rule
-    ADD CONSTRAINT commission_rule_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.commission_queue
+    ADD CONSTRAINT commission_queue_pkey PRIMARY KEY (id);
 
 
 --
@@ -21037,31 +22321,66 @@ CREATE INDEX call_agent_id_idx ON public.call USING btree (agent_id);
 
 
 --
--- Name: commission_deal_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: commission_claim_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX commission_deal_id_idx ON public.commission USING btree (deal_id);
-
-
---
--- Name: commission_rule_pipeline_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX commission_rule_pipeline_id_idx ON public.commission_rule USING btree (pipeline_id);
+CREATE INDEX commission_claim_idx ON public.commission USING btree (claim_id);
 
 
 --
--- Name: commission_rule_product_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: commission_claim_legacy_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX commission_rule_product_id_idx ON public.commission_rule USING btree (product_id);
+CREATE UNIQUE INDEX commission_claim_legacy_key ON public.commission_claim USING btree (legacy_id) WHERE (legacy_id IS NOT NULL);
 
 
 --
--- Name: commission_user_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: commission_claim_user_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX commission_user_id_idx ON public.commission USING btree (user_id);
+CREATE INDEX commission_claim_user_idx ON public.commission_claim USING btree (user_id);
+
+
+--
+-- Name: commission_deal_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX commission_deal_idx ON public.commission USING btree (deal_id);
+
+
+--
+-- Name: commission_deal_pending_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX commission_deal_pending_key ON public.commission USING btree (deal_id) WHERE (status = 'caka'::public.commission_status);
+
+
+--
+-- Name: commission_legacy_hubspot_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX commission_legacy_hubspot_idx ON public.commission USING btree (legacy_hubspot_deal_id) WHERE (legacy_hubspot_deal_id IS NOT NULL);
+
+
+--
+-- Name: commission_legacy_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX commission_legacy_key ON public.commission USING btree (legacy_id) WHERE (legacy_id IS NOT NULL);
+
+
+--
+-- Name: commission_queue_deal_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX commission_queue_deal_idx ON public.commission_queue USING btree (deal_id, id);
+
+
+--
+-- Name: commission_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX commission_user_idx ON public.commission USING btree (user_id, status);
 
 
 --
@@ -22150,10 +23469,17 @@ CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.commission F
 
 
 --
--- Name: commission_rule trg_audit; Type: TRIGGER; Schema: public; Owner: -
+-- Name: commission_claim trg_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.commission_rule FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.commission_claim FOR EACH ROW EXECUTE FUNCTION public.audit_row();
+
+
+--
+-- Name: commission_legacy_override trg_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_audit AFTER INSERT OR DELETE OR UPDATE ON public.commission_legacy_override FOR EACH ROW EXECUTE FUNCTION public.audit_row();
 
 
 --
@@ -22668,10 +23994,66 @@ CREATE TRIGGER trg_child_guard BEFORE INSERT OR DELETE OR UPDATE ON public.offer
 
 
 --
+-- Name: commission trg_claim_snapshot; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_claim_snapshot AFTER UPDATE OF claim_id ON public.commission FOR EACH ROW WHEN (((new.claim_id IS NOT NULL) AND (old.claim_id IS DISTINCT FROM new.claim_id))) EXECUTE FUNCTION public.commission_claim_snapshot();
+
+
+--
 -- Name: pipeline_stage trg_code_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_code_guard BEFORE INSERT OR UPDATE ON public.pipeline_stage FOR EACH ROW EXECUTE FUNCTION public.pipeline_stage_code_guard();
+
+
+--
+-- Name: contract trg_commission; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission AFTER INSERT OR DELETE OR UPDATE OF deal_id, deal_match, phase, signed_on, valid_from, valid_to ON public.contract FOR EACH ROW EXECUTE FUNCTION public.commission_on_change();
+
+
+--
+-- Name: contract_oom trg_commission; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission AFTER INSERT OR DELETE OR UPDATE ON public.contract_oom FOR EACH ROW EXECUTE FUNCTION public.commission_on_change();
+
+
+--
+-- Name: contract_price trg_commission; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission AFTER INSERT OR DELETE OR UPDATE ON public.contract_price FOR EACH ROW EXECUTE FUNCTION public.commission_on_change();
+
+
+--
+-- Name: contract_year_basis trg_commission; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission AFTER INSERT OR DELETE OR UPDATE ON public.contract_year_basis FOR EACH ROW EXECUTE FUNCTION public.commission_on_change();
+
+
+--
+-- Name: deal trg_commission; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission AFTER INSERT ON public.deal FOR EACH ROW EXECUTE FUNCTION public.commission_on_change();
+
+
+--
+-- Name: app_user trg_commission_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission_guard BEFORE INSERT OR UPDATE OF sees_all_commissions, commission_enabled ON public.app_user FOR EACH ROW EXECUTE FUNCTION public.app_user_commission_guard();
+
+
+--
+-- Name: deal trg_commission_upd; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_commission_upd AFTER UPDATE OF stage_id ON public.deal FOR EACH ROW WHEN ((old.stage_id IS DISTINCT FROM new.stage_id)) EXECUTE FUNCTION public.commission_on_change();
 
 
 --
@@ -22917,6 +24299,20 @@ CREATE TRIGGER trg_fill BEFORE INSERT OR UPDATE ON public.contract_price FOR EAC
 --
 
 CREATE TRIGGER trg_flag_check BEFORE INSERT OR UPDATE ON public.market_price_daily FOR EACH ROW EXECUTE FUNCTION public.market_price_flag_check();
+
+
+--
+-- Name: commission trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.commission FOR EACH ROW EXECUTE FUNCTION public.commission_guard();
+
+
+--
+-- Name: commission_claim trg_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_guard BEFORE DELETE OR UPDATE ON public.commission_claim FOR EACH ROW EXECUTE FUNCTION public.commission_claim_guard();
 
 
 --
@@ -23417,10 +24813,17 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.commission FOR EACH RO
 
 
 --
--- Name: commission_rule trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: commission_claim trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.commission_rule FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.commission_claim FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: commission_legacy_override trg_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON public.commission_legacy_override FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -24147,6 +25550,46 @@ ALTER TABLE ONLY public.call
 
 
 --
+-- Name: commission_claim commission_claim_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: commission commission_claim_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission
+    ADD CONSTRAINT commission_claim_id_fkey FOREIGN KEY (claim_id) REFERENCES public.commission_claim(id);
+
+
+--
+-- Name: commission_claim commission_claim_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: commission_claim commission_claim_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: commission_claim commission_claim_voided_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_claim
+    ADD CONSTRAINT commission_claim_voided_by_fkey FOREIGN KEY (voided_by) REFERENCES public.app_user(id);
+
+
+--
 -- Name: commission commission_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -24155,19 +25598,59 @@ ALTER TABLE ONLY public.commission
 
 
 --
--- Name: commission_rule commission_rule_pipeline_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: commission_legacy_override commission_legacy_override_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.commission_rule
-    ADD CONSTRAINT commission_rule_pipeline_id_fkey FOREIGN KEY (pipeline_id) REFERENCES public.pipeline(id);
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
 
 
 --
--- Name: commission_rule commission_rule_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: commission_legacy_override commission_legacy_override_decided_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.commission_rule
-    ADD CONSTRAINT commission_rule_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: commission_legacy_override commission_legacy_override_legacy_commission_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_legacy_commission_id_fkey FOREIGN KEY (legacy_commission_id) REFERENCES public.commission(id);
+
+
+--
+-- Name: commission_legacy_override commission_legacy_override_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_legacy_override
+    ADD CONSTRAINT commission_legacy_override_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: commission commission_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission
+    ADD CONSTRAINT commission_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.org(id);
+
+
+--
+-- Name: commission commission_reassigned_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission
+    ADD CONSTRAINT commission_reassigned_by_fkey FOREIGN KEY (reassigned_by) REFERENCES public.app_user(id);
+
+
+--
+-- Name: commission commission_reassigned_from_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission
+    ADD CONSTRAINT commission_reassigned_from_fkey FOREIGN KEY (reassigned_from) REFERENCES public.app_user(id);
 
 
 --
@@ -24835,6 +26318,14 @@ ALTER TABLE ONLY public.email_message
 
 
 --
+-- Name: email_outbox email_outbox_commission_claim_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_outbox
+    ADD CONSTRAINT email_outbox_commission_claim_id_fkey FOREIGN KEY (commission_claim_id) REFERENCES public.commission_claim(id);
+
+
+--
 -- Name: email_outbox email_outbox_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -25048,6 +26539,14 @@ ALTER TABLE ONLY public.market_price_daily
 
 ALTER TABLE ONLY public.notification
     ADD CONSTRAINT notification_approval_id_fkey FOREIGN KEY (approval_id) REFERENCES public.approval_request(id) ON DELETE CASCADE;
+
+
+--
+-- Name: notification notification_commission_claim_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification
+    ADD CONSTRAINT notification_commission_claim_id_fkey FOREIGN KEY (commission_claim_id) REFERENCES public.commission_claim(id);
 
 
 --
@@ -25912,6 +27411,51 @@ CREATE POLICY audit_log_protect_update ON public.audit_log FOR UPDATE USING (tru
 --
 
 CREATE POLICY audit_log_select ON public.audit_log FOR SELECT USING (public.audit_row_visible(table_name, record_id, diff));
+
+
+--
+-- Name: commission; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.commission ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: commission_claim; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.commission_claim ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: commission_claim commission_claim_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY commission_claim_read ON public.commission_claim FOR SELECT USING (public.crm_commission_visible(org_id, user_id));
+
+
+--
+-- Name: commission_legacy_override; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.commission_legacy_override ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: commission_legacy_override commission_legacy_override_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY commission_legacy_override_read ON public.commission_legacy_override FOR SELECT USING ((public.crm_is_admin() OR public.crm_is_service()));
+
+
+--
+-- Name: commission_queue; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.commission_queue ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: commission commission_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY commission_read ON public.commission FOR SELECT USING (public.crm_commission_visible(org_id, user_id));
 
 
 --
@@ -27724,4 +29268,8 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0049'),
     ('0050'),
     ('0051'),
-    ('0052');
+    ('0052'),
+    ('0053'),
+    ('0054'),
+    ('0055'),
+    ('0056');

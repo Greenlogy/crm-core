@@ -51,6 +51,8 @@ const MORE = [
   { to: '/leady', label: 'Leady', icon: ICONS.leads },
   { to: '/zmluvy-k-obchodom', label: 'Zmluvy k obchodom', icon: ICONS.contracts },
   { to: '/vynimky', label: 'Výnimky z ceny', icon: ICONS.pricelist },
+  // F7: provízie – iba kto ich smie vidieť (vlastné alebo všetky)
+  { to: '/provizie', label: 'Provízie', icon: ICONS.deals, commissions: true },
 ];
 
 export function Layout() {
@@ -103,7 +105,9 @@ export function Layout() {
       : marketing
         ? '/nastavenia/sablony-emailov'
         : '/nastavenia/nocny-beh';
-  const moreActive = MORE.some((m) => location.pathname === m.to);
+  const seesCommissions = me.is_admin || me.sees_all_commissions || (me.permissions.provizie?.view ?? 'nic') !== 'nic';
+  const more = MORE.filter((m) => !('commissions' in m) || seesCommissions);
+  const moreActive = more.some((m) => location.pathname === m.to);
   const item = 'gl-rail__item';
 
   return (
@@ -200,7 +204,7 @@ export function Layout() {
         <div ref={moreMenu} id="rail-more-menu" className="rail-more-menu" role="menu" aria-label="Viac"
           style={{ '--rail-more-top': `${moreTop}px` } as CSSProperties}
         >
-          {MORE.map((m) => (
+          {more.map((m) => (
             <NavLink key={m.to} to={m.to} className="rail-more-link" role="menuitem">
               <Icon d={m.icon} />
               <span>{m.label}</span>

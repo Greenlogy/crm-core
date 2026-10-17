@@ -3149,3 +3149,28 @@ a.tab {
     max-width: 100%;
   }
 }
+
+/* F7 Provízie (obrazovka 41): lišta výberu provízií na uplatnenie */
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 24px 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--gl-border-strong);
+  border-radius: 10px;
+  background: var(--gl-surface-shade);
+}
+.selection-bar .btn {
+  margin-left: auto;
+}
+@media (max-width: 640px) {
+  .selection-bar {
+    margin: 0 16px 16px;
+  }
+  .selection-bar .btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}

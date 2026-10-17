@@ -6,6 +6,7 @@
 // (hotové zelené, aktuálne modré, prehraté vpravo), KPI s hlavnou pridanou hodnotou, ponuky ako karty, časová os s ikonami.
 
 import { EmailComposer, EmailList } from '../components/email';
+import { DealCommission } from '../components/deal-commission';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { LostPanel, ReopenPanel, RiskPills } from '../components/deal-forms';
@@ -351,6 +352,7 @@ export function DealPage() {
               </div>
             )}
           </Card>
+          <DealCommission dealId={d.id} />
           <Card title="Údaje obchodu">
             <Rows
               rows={[

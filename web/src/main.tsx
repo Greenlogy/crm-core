@@ -11,6 +11,8 @@ import { DealsPage } from './pages/DealsPage';
 import { ContractImportPage } from './pages/ContractImportPage';
 import { ContractPage } from './pages/ContractPage';
 import { ContractsPage } from './pages/ContractsPage';
+import { CommissionsPage } from './pages/CommissionsPage';
+import { CommissionsSettingsPage } from './pages/settings/CommissionsSettingsPage';
 import { ExceptionsPage } from './pages/ExceptionsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { CustomerPage } from './pages/CustomerPage';
@@ -85,6 +87,7 @@ const router = createBrowserRouter([
       { path: 'zmluvy/import', element: <ContractImportPage /> },
       { path: 'zmluvy/:id', element: <ContractPage /> },
       { path: 'vynimky', element: <ExceptionsPage /> },
+      { path: 'provizie', element: <CommissionsPage /> },
       { path: 'upozornenia', element: <NotificationsPage /> },
       { path: 'profil', element: <ProfilePage /> },
       { path: 'profil/:id', element: <ProfilePage /> },
@@ -104,6 +107,7 @@ const router = createBrowserRouter([
           { path: 'ciselniky', element: <LookupsPage /> },
           { path: 'parovanie-sadzieb', element: <TariffMappingPage /> },
           { path: 'cenove-parametre', element: <PricingPage /> },
+          { path: 'provizie', element: <CommissionsSettingsPage /> },
           { path: 'sablony-ponuk', element: <OfferTemplatesPage /> },
           { path: 'sablony-emailov', element: <EmailTemplatesPage /> },
           { path: 'preklady-importov', element: <ImportAliasesPage /> },

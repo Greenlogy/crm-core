@@ -28,7 +28,7 @@ type Home = {
   team: { owner_id: string; owner_name: string; open_deals: number; value_eur: string; weighted_eur: string; won_month: number; won_month_eur: string; attention: number }[] | null;
 };
 
-const BASIS_LABEL = { cena_pre_obchodnika: 'cena pre obchodníka', odhad_portfolia: 'odhad portfólia' } as const;
+const BASIS_LABEL = { cena_pre_obchodnika: 'cena pre obchodníka', odhad_portfolia: 'nákupná cena portfólia' } as const;
 const STEP_LABEL = { po_termine: 'po termíne', dnes: 'dnes', zajtra: 'zajtra' } as const;
 const STEP_TONE = { po_termine: 'negative', dnes: 'warning', zajtra: 'neutral' } as const;
 // Dátumová dlaždica: neskorší termín je modrý (DESIGN_SPEC § 6)
@@ -395,7 +395,7 @@ function Calculator({ d }: { d: Home }) {
       </div>
       {r && r.ph < 0 && <div className="caption negative-text" style={{ marginBottom: 8 }}>Cena je pod hranicou – pridaná hodnota je záporná, provízia 0 €. Ponuka by potrebovala schválenie.</div>}
       {kind === 'fix' && b?.basis === 'odhad_portfolia' && (
-        <div className="caption" style={{ marginBottom: 8 }}>Ako manažér máte pri FIX hranicu odhad portfólia – rovnako ako v ponuke.</div>
+        <div className="caption" style={{ marginBottom: 8 }}>Ako manažér máte pri FIX hranicu nákupnú cenu portfólia – rovnako ako v ponuke.</div>
       )}
       <button type="button" className="btn calc-cta" disabled={!r} onClick={() => setCreating(true)}>
         <Icon d={ICONS.plus} />

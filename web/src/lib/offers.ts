@@ -36,7 +36,7 @@ export const PRICE_MODEL: Record<string, string> = {
 };
 export const THRESHOLD_SOURCE: Record<string, string> = {
   cena_pre_obchodnika: 'cena pre obchodníka',
-  odhad_portfolia: 'odhad portfólia',
+  odhad_portfolia: 'nákupná cena portfólia',
   min_aditiv: 'minimálny aditív',
   vynimka: 'schválená výnimka',
   cena_vykupu: 'cena výkupu',

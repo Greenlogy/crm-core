@@ -1,7 +1,7 @@
 // Nastavenia – Cenové parametre (dizajn 29; modul 4, F1a; migrácie 0023, 0024; modul 5 F6: 0047, 0048).
-// Otvorí admin alebo „schvaľuje ceny“ (obchodný riaditeľ). Nová hodnota platí od zvoleného dňa (dnes a neskôr),
-// staré ostávajú v histórii. Ceny dňa (BL, PL) načítava Montel po – pi o 7:00 a 13:00; ručné zadanie (aj odhad portfólia
-// a cena FVE) ostáva ako záloha. Chybná cena sa opraví novým záznamom – pôvodný ostane v histórii ako „opravené“ (kto a kedy).
+// Otvorí admin, „schvaľuje ceny“ (obchodný riaditeľ) a Nákup (0056). Nová hodnota platí od zvoleného dňa (dnes a neskôr),
+// staré ostávajú v histórii. Ceny dňa (BL, PL) načítava Montel po – pi o 7:00 a 13:00; ručné zadanie (BL, PL a cena FVE)
+// ostáva ako záloha. Nákupnú cenu portfólia pre rok dodávky zadáva admin a Nákup „platí od“ dňa, aj spätne od 1. 1. 2026 (0056). Chybná cena sa opraví novým záznamom – pôvodný ostane v histórii ako „opravené“ (kto a kedy).
 // Pri každom dni zdroj (Montel / ručne, kto a kedy). Admin zmaže ručnú cenu dňa s dôvodom (ďalší beh ju načíta z Montelu)
 // a jednorazovo načíta históriu z Montelu od 1. 1. 2026.
 
@@ -62,6 +62,15 @@ type HistoryRow = {
   is_corrected: boolean;
   removed_reason: string | null;
 };
+type PortfolioRow = {
+  delivery_year: number;
+  on_date: string;
+  value: string;
+  source: string;
+  changed_by_name: string | null;
+  created_at: string;
+  is_current: boolean;
+};
 type Pricing = {
   org_id: string;
   today: TodayRow[];
@@ -69,6 +78,9 @@ type Pricing = {
   parameters: ParamRow[];
   is_admin: boolean;
   approves_prices: boolean;
+  /** Nákup (0056): zadáva nákupnú cenu portfólia */
+  purchase: boolean;
+  portfolio: PortfolioRow[];
   montel: { started_at: string; result: { ceny?: number; spot?: number }; errors: number } | null;
   spot: { on_date: string; avg_12m_eur_mwh: string } | null;
 };
@@ -115,6 +127,7 @@ type Panel =
   | { kind: 'price'; correct?: TodayRow }
   | { kind: 'remove'; row: { id: string; on_date: string; delivery_year: number } }
   | { kind: 'history' }
+  | { kind: 'portfolio'; year?: number }
   | null;
 
 export function PricingPage() {
@@ -156,9 +169,11 @@ export function PricingPage() {
         title="Cenové parametre"
         sub="hranice a vzorec ceny pre obchodníka"
         actions={
-          <button type="button" className="btn primary" onClick={() => setPanel({ kind: 'param' })}>
-            Zmeniť parameter
-          </button>
+          d && (d.is_admin || d.approves_prices) ? (
+            <button type="button" className="btn primary" onClick={() => setPanel({ kind: 'param' })}>
+              Zmeniť parameter
+            </button>
+          ) : undefined
         }
       />
       {!d ? (
@@ -250,9 +265,11 @@ export function PricingPage() {
                   Načítať históriu z Montelu
                 </button>
               )}
-              <button type="button" className="btn" onClick={() => setPanel({ kind: 'price' })}>
-                Zadať ceny dňa ručne
-              </button>
+              {(d.is_admin || d.approves_prices) && (
+                <button type="button" className="btn" onClick={() => setPanel({ kind: 'price' })}>
+                  Zadať ceny dňa ručne
+                </button>
+              )}
             </div>
             <div className="table-wrap">
               <table className="tbl">
@@ -265,7 +282,7 @@ export function PricingPage() {
                     <th className="num">Mix</th>
                     <th className="num">+ riziko + marža</th>
                     <th className="num">Cena pre obchodníka</th>
-                    <th className="num">Odhad portfólia</th>
+                    <th className="num">Nákupná cena portfólia</th>
                     <th className="num">SPOT FVE</th>
                     <th />
                   </tr>
@@ -326,6 +343,8 @@ export function PricingPage() {
             </div>
           </section>
 
+          <PortfolioSection d={d} onAdd={(year) => setPanel({ kind: 'portfolio', year })} />
+
           <section className="card" aria-label="Ceny dňa za 60 dní">
             <div className="card-head">
               <h2 className="t-section-title">Ceny dňa – história</h2>
@@ -339,7 +358,7 @@ export function PricingPage() {
                     <th>Rok dodávky</th>
                     <th className="num">BL</th>
                     <th className="num">PL</th>
-                    <th className="num">Odhad portfólia</th>
+                    <th className="num">Nákupná cena portfólia</th>
                     <th>Zdroj</th>
                     <th>Stav</th>
                     <th />
@@ -427,6 +446,9 @@ export function PricingPage() {
           onClose={() => setPanel(null)}
           onSaved={() => data.reload()}
         />
+      )}
+      {panel?.kind === 'portfolio' && d && (
+        <PortfolioPanel orgId={d.org_id} year={panel.year} onClose={() => setPanel(null)} onSaved={() => data.reload()} />
       )}
       {panel?.kind === 'price' && d && (
         <PricePanel
@@ -571,7 +593,6 @@ function PricePanel(props: { orgId: string; correct?: TodayRow; onClose: () => v
   const [year, setYear] = useState(String(c?.delivery_year ?? new Date().getFullYear() + 1));
   const [bl, setBl] = useState(plain(c?.bl_eur_mwh));
   const [pl, setPl] = useState(plain(c?.pl_eur_mwh));
-  const [portfolio, setPortfolio] = useState(plain(c?.portfolio_eur_mwh));
   const [spotFve, setSpotFve] = useState(plain(c?.spot_fve_eur_mwh));
   const save = useSave();
 
@@ -582,7 +603,6 @@ function PricePanel(props: { orgId: string; correct?: TodayRow; onClose: () => v
         delivery_year: year,
         bl_eur_mwh: bl,
         pl_eur_mwh: pl,
-        portfolio_eur_mwh: portfolio,
         spot_fve_eur_mwh: spotFve,
       }),
     );
@@ -617,9 +637,6 @@ function PricePanel(props: { orgId: string; correct?: TodayRow; onClose: () => v
         </Field>
         <Field label="PL [€/MWh]">
           <TextInput value={pl} onChange={setPl} maxLength={20} />
-        </Field>
-        <Field label="Odhad nákupnej ceny portfólia [€/MWh]">
-          <TextInput value={portfolio} onChange={setPortfolio} maxLength={20} />
         </Field>
         <Field label="Očakávaná cena SPOT pre FVE [€/MWh]">
           <TextInput value={spotFve} onChange={setSpotFve} maxLength={20} />
@@ -708,6 +725,148 @@ function HistoryPanel(props: { onClose: () => void; onSaved: () => void }) {
       {result && (
         <Notice tone="ok">
           Hotovo: {result.dni} dní, doplnených {result.riadky} cien (rok dodávky × deň).
+        </Notice>
+      )}
+      {save.error && <Notice tone="error">{save.error}</Notice>}
+    </SidePanel>
+  );
+}
+
+/** Nákupná cena portfólia po rokoch dodávky (0056): platná dnes a dni zmien; zadáva admin a Nákup. */
+function PortfolioSection(props: { d: Pricing; onAdd: (year?: number) => void }) {
+  const { d } = props;
+  const canEdit = d.is_admin || d.purchase;
+  const years = [...new Set(d.portfolio.map((r) => r.delivery_year))].sort();
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <section className="card" aria-label="Nákupná cena portfólia">
+      <div className="card-head">
+        <h2 className="t-section-title">Nákupná cena portfólia</h2>
+        <span className="caption">pre rok dodávky, platí od dňa po ďalšiu zmenu</span>
+        <span className="grow" />
+        {canEdit && (
+          <button type="button" className="btn" onClick={() => props.onAdd()}>
+            Nákupná cena portfólia – zadať pre obdobie
+          </button>
+        )}
+      </div>
+      <div className="table-wrap">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Rok dodávky</th>
+              <th className="num">Platná cena [€/MWh]</th>
+              <th>Platí od</th>
+              <th>Zadal</th>
+              <th aria-label="Akcie" />
+            </tr>
+          </thead>
+          <tbody>
+            {years.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted">Nákupná cena portfólia ešte nie je zadaná.</td>
+              </tr>
+            )}
+            {years.map((y) => {
+              const rows = d.portfolio.filter((r) => r.delivery_year === y);
+              const cur = rows.find((r) => r.is_current) ?? rows[0];
+              return (
+                <Fragment key={y}>
+                  <tr>
+                    <td>{y}</td>
+                    <td className="num">{dec(cur.value, 2, 4)}</td>
+                    <td>{date(cur.on_date)}</td>
+                    <td>{cur.changed_by_name ?? (cur.source === 'rucne' ? EMPTY : 'prenesené z predošlého dňa')}</td>
+                    <td>
+                      {rows.length > 1 && (
+                        <button type="button" className="link-button" onClick={() => setOpen(open === y ? null : y)}>
+                          {open === y ? 'skryť zmeny' : `zmeny (${rows.length})`}
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button type="button" className="link-button" style={{ marginLeft: 8 }} onClick={() => props.onAdd(y)}>
+                          Zadať
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {open === y &&
+                    rows.map((r) => (
+                      <tr key={`${y}-${r.on_date}`} className="muted">
+                        <td />
+                        <td className="num">{dec(r.value, 2, 4)}</td>
+                        <td>od {date(r.on_date)}</td>
+                        <td>{r.changed_by_name ?? EMPTY}</td>
+                        <td>{r.on_date > todayIso() ? 'budúca' : r.is_current ? 'platí dnes' : ''}</td>
+                      </tr>
+                    ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="card-foot caption">
+        Marža firmy sa na všetkých zmluvách a obchodoch počíta s poslednou platnou cenou pre rok dodávky. Pridaná hodnota, uplatnené
+        provízie a ponuky spárované so zmluvou sa nemenia. Pri zadaní spätného dňa sa zmluvám podpísaným od tohto dňa doplní chýbajúca
+        cena v snímke ku dňu podpisu. Zadáva admin a Nákup.
+      </div>
+    </section>
+  );
+}
+
+function PortfolioPanel(props: { orgId: string; year?: number; onClose: () => void; onSaved: () => void }) {
+  const [onDate, setOnDate] = useState(todayIso());
+  const [year, setYear] = useState(String(props.year ?? new Date().getFullYear()));
+  const [value, setValue] = useState('');
+  const [result, setResult] = useState<{ zmena: boolean; zmluvy_doplnene?: number; plati_do?: string | null } | null>(null);
+  const save = useSave();
+  const submit = async () => {
+    await save.run(async () => {
+      const r = await send<{ zmena: boolean; zmluvy_doplnene?: number; plati_do?: string | null }>('POST', '/api/pricing/portfolio', {
+        org_id: props.orgId, on_date: onDate, delivery_year: year, value,
+      });
+      setResult(r);
+      props.onSaved();
+    });
+  };
+  return (
+    <SidePanel
+      title="Nákupná cena portfólia – zadať pre obdobie"
+      onClose={props.onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={props.onClose}>
+            {result ? 'Zavrieť' : 'Zrušiť'}
+          </button>
+          <button type="button" className="btn primary" disabled={save.busy || !value.trim() || !onDate} onClick={submit}>
+            Uložiť
+          </button>
+        </>
+      }
+    >
+      <div className="form-grid">
+        <Field label="Platí od (deň)">
+          <input className="inp" type="date" min="2026-01-01" max={todayIso()} value={onDate} onChange={(e) => { setOnDate(e.target.value); setResult(null); }} />
+        </Field>
+        <Field label="Rok dodávky (CAL)">
+          <TextInput value={year} onChange={(v) => { setYear(v); setResult(null); }} maxLength={4} />
+        </Field>
+        <Field label="Nákupná cena portfólia [€/MWh]">
+          <TextInput value={value} onChange={(v) => { setValue(v); setResult(null); }} maxLength={20} />
+        </Field>
+      </div>
+      <p className="caption">
+        Cena platí od zvoleného dňa po ďalší deň s vlastnou cenou (dnes alebo spätne od 1. 1. 2026). BL a PL toho dňa ostanú, pôvodný záznam
+        ostane v histórii ako opravený. Marža sa prepočíta na všetkých zmluvách a obchodoch; zmluvám podpísaným od tohto dňa bez ceny sa
+        doplní snímka ku dňu podpisu.
+      </p>
+      {result && (
+        <Notice tone="ok">
+          {result.zmena
+            ? `Uložené. Platí ${result.plati_do ? `do ${date(result.plati_do)}` : 'do ďalšej zmeny'}; doplnené snímky zmlúv: ${result.zmluvy_doplnene ?? 0}.`
+            : 'Cena v tento deň je už rovnaká – nič sa nezmenilo.'}
         </Notice>
       )}
       {save.error && <Notice tone="error">{save.error}</Notice>}

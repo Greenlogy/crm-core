@@ -1672,3 +1672,132 @@ Podľa zadania 11, 13, návrhu časti 7 a obrazoviek 30, 32. Dva kroky, každý:
 4. Kalkulačka SPOT: (môj aditív − minimálny aditív podľa typu predajcu) × objem. Zápornú PH ukázať, provízia je vtedy 0 €.
 5. Domov ako úvodná stránka pre rolu obchodník (interný aj externý) a tím Sales_internal; ostatní Zákazníci.
 
+
+## 37. Plán F7 – provízie (schválený 17. 10. 2026 s úpravami A–C a odpoveďami 1–10)
+
+Podľa zadania časť 12, návrhu časť 1.11 a obrazovky 41. Tri kroky, každý: migrácia nanečisto (dočasný Postgres) → `dev` po súhlase → API a obrazovky → Test. Číslo migrácie `0053` (pôvodne orientačne `0040_provizie`).
+
+### 37.1 Úpravy a odpovede (Peter, 17. 10.)
+
+- **A. Dátum prechodu** `commission_crm_from`: na Ostrom predvolene **prázdny = provízie z CRM vypnuté**; Peter ho nastaví v deň, keď Sales portál prestane počítať (súbežná prevádzka nesmie dať dvojité provízie). Na Teste sa posunie dozadu.
+- **B. Prenos histórie:** reálny export z Firestore je osobný údaj – iba v `exports/` a skúška na **dočasnom lokálnom Postgrese**, nie na `dev`; na `dev` iba vymyslený export v rovnakom formáte. Kontrola duplicít so Sales portálom okrem ID dealu z HubSpotu aj **podľa zmluvy (EIC + obdobie)**, lebo obchody v CRM majú nové ID.
+- **C. Viditeľnosť:** províziu (aj na karte obchodu a v API) vidí iba **vlastník provízie** a kto vidí všetky provízie; Back office ani Nákup nie, hoci obchod vidia. Test v DB.
+1. **Vyrovnanie:** na obchod najviac **jedna čakajúca položka = cieľová provízia − súčet uplatnených**. Záporná položka sa nedá uplatniť samostatne, súčet listu musí byť ≥ 0. Po prvom uplatnení sa vyrovnanie tvorí iba pri **spárovaní / zrušení spárovania zmluvy** a pri **zmene štádia** (obchod prestane byť Vyhraté); zmena bilancie z importu ani nočný beh už uplatnenú províziu nemenia.
+2. **Všetky provízie** vidí admin a kto má právo „Provízie – všetko“ (Peter, Daniel); nie je to viazané na schvaľovateľa cien. Asistent iba ak mu právo dá Peter.
+3. Uplatňuje obchodník svoje provízie a admin za obchodníka; zapíše sa, kto uplatnil.
+4. Provízia ostáva tomu, kto bol vlastníkom obchodu pri Vyhraté; **admin ju môže preradiť** inému s dôvodom.
+5. „Počítať provízie“ je pri novom používateľovi predvolene vypnuté.
+6. Príjemcov kópie provízneho listu vyberá admin v Nastaveniach (predvolene Daniel).
+7. Trvanie zmluvy (zoskupenie na obrazovke 41) = najdlhšia zmluva obchodu v celých rokoch; ak je niektorá na neurčito, „neurčito“.
+8. PDF listu: vlastný návrh v štýle PDF ponuky, bez obrázkov, iba logo (dizajn manuál Greenlogy 2021: zelená #05D695, modrá #13689E, písmo Campton – v PDF náhradné ako v ponuke).
+9. Exportný skript a import sa pripravia teraz a overia podľa bodu B; na Ostrom import pri štarte.
+10. Zámok R2 aj pre `provizie/` – do STAV.md (pred Ostrým).
+
+### 37.2 Krok 1 – `0053_provizie` (databáza)
+
+- **Tabuľky:** `commission_rule` a starý `commission` zrušené (prázdne – migrácia to overí); nový `commission_status` (`caka`, `uplatnena`, `zrusena`), `commission_claim`, `commission` podľa 1.11 s doplnkami: `kind` (`provizia` / `vyrovnanie`), `target_eur` (cieľová provízia obchodu v čase výpočtu), preradenie (kto, kedy, dôvod), pri histórii `legacy_eics`, `legacy_supply_from/to` (EIC a obdobie z HubSpotu). Na obchod najviac jedna čakajúca položka (unikátny index).
+- **Používateľ:** `app_user.commission_enabled` (predvolene vypnuté); mení admin a schvaľovateľ cien (ako percento, rozhodnutie 19.6).
+- **Nastavenia:** `commission_crm_from` (prázdne = vypnuté), `commission_claim_cc` (zoznam používateľov na kópiu). Mení admin funkciou.
+- **Výpočet** `commission_sync(obchod, štrukturálna zmena)`:
+  - Základ = Σ pridanej hodnoty spárovaných podpísaných zmlúv obchodu (fáza nie Odmietnutá / Neúspešná) za obdobie zmluvy z Office portálu; pri zmluve na neurčito prvých 12 mesiacov dodávky. Rovnaké jadro ako bilancia zmluvy (modul 4): `contract_year_calc` sa rozdelí na jadro bez kontroly prístupu (`contract_year_calc_core`, s voliteľným koncom obdobia) a obal s kontrolou ako doteraz – rovnaký vzor ako `offer_variant_values` v `0052`.
+  - Cieľová provízia = round(max(základ, 0) × percento / 100, 2); percento platné v deň Vyhraté (rozhodnutie 19.6 – nie prepočet pri zmene percenta, ako písala časť 1.11).
+  - Vznik iba ak: obchod je Vyhraté, dátum Vyhraté ≥ `commission_crm_from` (vyplnený), vlastník má zapnuté „počítať provízie“, a k obchodu nie je provízia zo Sales portálu (rovnaké ID dealu z HubSpotu, **alebo** spoločné EIC so zmluvou obchodu a prekrývajúce sa obdobie; pri neznámom období stačí EIC). Pri zhode upozornenie adminom raz; admin môže zhodu s dôvodom povoliť.
+  - Čakajúca položka = cieľ − Σ uplatnených. Bez uplatnenej sa prepočítava pri každej zmene; s uplatnenou iba pri štrukturálnej zmene (bod 1). Obchod mimo Vyhraté bez uplatnenej → položka Zrušená.
+  - Spúšťače: obchod (štádium – štrukturálne), zmluva (obchod – štrukturálne; fáza, podpis, obdobie – bilancia), OOM v zmluve, ceny zmluvy, snímka ku dňu podpisu (bilancia). Nočná poistka po behu obchodov s počtom rozdielov v denníku.
+- **Uplatnenie** `commission_claim_create(obchodník, položky)`: sám alebo admin; iba čakajúce položky toho obchodníka v jednej spoločnosti; súčet ≥ 0 a aspoň jedna kladná; číslo `CMSN-RRRR-NNNN` z `doc_counter` (pokračuje po histórii); snímka súčtov podľa trvania; kto uplatnil; upozornenie obchodníkovi (ak uplatnil admin) a príjemcom kópie. PDF a e-mail v kroku 2.
+- **Zrušenie listu** `commission_claim_void`: iba admin, dôvod ≥ 3 znaky, nie list zo Sales portálu; položky späť na Čaká (spojené s prípadnou novou čakajúcou položkou obchodu) a prepočet.
+- **Preradenie** `commission_reassign`: iba admin, s dôvodom; čakajúca položka (a budúce vyrovnania) inému obchodníkovi.
+- **Viditeľnosť (RLS):** vlastné provízie, ak tím má „Provízie“ aspoň „iba svoje“; všetky admin a „Provízie – všetko“. Aplikácia tabuľky iba číta, zápis iba funkcie; uplatnená položka a história sa nemenia (spúšťač). Audit oboch tabuliek (číta admin).
+- **Pre aplikáciu:** `commission_list` (s názvom obchodu a zákazníka aj pre preradenú províziu), `commission_summary` (nevyplatené, uplatnené mesiac / kvartál / rok podľa dátumu uplatnenia, počet obchodov od 1. 1.).
+- **Testy** séria P (`db/test/checks_provizie.sql`): vznik a podmienky, záporná PH = 0 €, neurčito 12 mesiacov, prepočet bez uplatnenia, vyrovnanie po uplatnení (spárovanie druhej zmluvy, zrušenie spárovania, štádium), import po uplatnení nič nemení, uplatnenie (číslo, súčet ≥ 0, cudzí obchodník nie, admin za obchodníka), zrušenie listu, preradenie, duplicita so Sales portálom, RLS (Back office a Nákup nevidia), mutačné skúšky.
+
+### 37.3 Krok 2 – API, PDF, e-mail, obrazovky
+
+`routes/commissions.ts`; PDF cez Browser Rendering do R2 `provizie/`, zrušený list = nový súbor s pečiatkou; e-mail z crm@ cez frontu (obchodník + príjemcovia kópie); obrazovka 41, Nastavenia → Provízie obchodníkov (percento s históriou, „počítať provízie“, dátum prechodu, príjemcovia kópie), provízia na karte obchodu (iba podľa bodu C), menu.
+
+### 37.4 Krok 3 – prenos histórie zo Sales portálu
+
+Firestore obsahuje pri provízii iba ID dealu z HubSpotu, názov, dátum uzavretia, trvanie, objem, maržu, percento a sumu – nie EIC ani obdobie. Exportný skript (iba čítanie, spúšťa Peter) preto doplní EIC a obdobie dodávky z HubSpotu (OOM dealu, iba čítanie). Import `commission_legacy_import` (admin, opakovateľný podľa Firestore ID), percentá a „počítať provízie“ obchodníkov, pokračovanie čísel CMSN. Overenie: reálny export iba na dočasnom lokálnom Postgrese, na `dev` vymyslený.
+
+### 37.5 Otázka ku kroku 1
+
+- **„Provízie – všetko“ pre Daniela:** právo je dnes pri **tíme**, nie pri osobe. Daniel je v Sales_internal (provízie „iba svoje“); ak by právo dostal tím, dostal by ho aj asistent. Návrh: k tímovému právu pridať **príznak pri používateľovi „vidí všetky provízie“** (mení admin, audit) – rovnaký vzor ako „schvaľuje ceny“. V `0053` je pripravený; ak ho nechceš, odstránim ho.
+
+## 38. F7 – krok 1: `0053_provizie` (overená nanečisto 17. 10. 2026, na `dev` nespustená)
+
+**Overenie na dočasnom lokálnom Postgrese** (scratchpad, Postgres 18; `dev` je 17): migrácie `0001`–`0052` + cenníky 2026 → schéma zhodná s `db/schema.sql` z `dev` (0 riadkov rozdielu); doterajšie testy 258 kontrol OK; po `0053` **271 kontrol OK** (+ séria P0–P9 v `db/test/checks_provizie.sql`); `down` vráti schému presne do stavu `0052`, opätovné `up` bez chyby. **Mutačné skúšky** (8, všetky zachytené): vyrovnanie aj pri importe po uplatnení, viditeľnosť pre každého, kto vidí obchod, ignorovaný dátum prechodu, kontrola Sales portálu bez EIC, list so záporným / nulovým súčtom, neurčito 24 mesiacov namiesto 12, zrušenie listu bez spojenia čakajúcich položiek, percento z aktuálnej sadzby namiesto uloženého.
+
+**Čo `0053` robí:**
+
+- **Bilancia zmluvy:** `contract_year_calc` rozdelená na jadro `contract_year_calc_core(zmluva, rok, koniec obdobia)` bez kontroly prístupu (interné) a obal s kontrolou ako doteraz – výsledok pre aplikáciu sa nemení (test P9b: obal = jadro).
+- **Tabuľky:** `commission_status` (`caka`, `uplatnena`, `zrusena`), `commission_claim` (číslo `CMSN-RRRR-NNNN`, súčet ≥ 0, snímka podľa trvania, kto uplatnil, PDF a PDF so zrušením pre krok 2, zrušenie s dôvodom, história zo Sales portálu), `commission` (druh `provizia` / `vyrovnanie`, základ, chýbajúci vstup, percento, cieľ, položka, preradenie, história s EIC a obdobím z HubSpotu), `commission_legacy_override` (povolenie napriek zhode so Sales portálom). Na obchod najviac jedna čakajúca položka (unikátny index). `commission_rule` a starý `commission` zrušené (prázdne).
+- **Používateľ:** `commission_enabled` (predvolene vypnuté; `user_commission_enabled_set` – admin a schvaľovateľ cien), `sees_all_commissions` (príznak „vidí všetky provízie“, mení admin – **otázka 37.5**).
+- **Nastavenia:** `commission_crm_from` (prázdne = vypnuté), `commission_claim_cc` (príjemcovia kópie); `commission_settings_set` iba admin. Na `main` ostane prázdne, na `dev` sa po spustení nastaví `2026-10-01` (Peter, úprava A).
+- **Výpočet** `commission_sync` podľa 37.2: základ `commission_deal_base` (zmluvy obchodu, obdobie z Office portálu, neurčito 12 mesiacov, trvanie, objem, chýbajúce vstupy), cieľ = round(max(PH, 0) × percento / 100, 2), percento platné v deň Vyhraté, vlastník pri Vyhraté. Spúšťače na obchode (štádium), zmluve (obchod = štrukturálne; fáza, podpis, obdobie), OOM v zmluve, cenách a snímke zmluvy. Po prvom uplatnení iba štrukturálne zmeny. Nočná poistka `commission_daily` (počty do denníka behu obchodov; zavolá ju krok 2).
+- **Neúplný základ** (chýba cena pre obchodníka ku dňu podpisu) sa ukáže pri provízii a **nedá sa uplatniť**, kým sa ceny nedoplnia – doplnok, aby sa nevyplatila nižšia suma, ktorú by po uplatnení už nič neopravilo.
+- **Sales portál:** `commission_legacy_match` (ID dealu z HubSpotu, alebo EIC zmluvy obchodu a prekrývajúce sa obdobie; neznáme obdobie = stačí EIC); pri zhode upozornenie `provizia_duplicita` adminom raz, `commission_legacy_allow` (admin s dôvodom).
+- **Uplatnenie / zrušenie / preradenie:** `commission_claim_create`, `commission_claim_void` (spojí novú čakajúcu položku obchodu s vrátenou a prepočíta), `commission_reassign`; upozornenia `provizny_list` (obchodníkovi, ak uplatnil admin; príjemcom kópie bez sumy), `provizny_list_zruseny`, `provizia_vyrovnanie`, `provizia_preradena`. V upozorneniach nie je názov obchodu (môže obsahovať meno zákazníka), iba odkaz.
+- **Viditeľnosť:** RLS `crm_commission_visible` – vlastné, ak má tím „Provízie“ aspoň „iba svoje“; všetky admin, tím „Provízie – všetko“ a príznak. Servis, Nákup a asistent nevidia nič, hoci obchod vidia (test P9). Aplikácia tabuľky iba číta (`app-role.sql`), interné funkcie nespustí. Audit provízií číta admin.
+- **Pre aplikáciu:** `commission_list` (názov obchodu a zákazníka aj pri preradenej provízii, ktorej obchod nový vlastník nevidí; zrušené iba na vyžiadanie; hľadanie), `commission_summary` (nevyplatené, uplatnené mesiac / kvartál / rok podľa dátumu uplatnenia, obchody v roku).
+
+**Rozhodnutia pri implementácii (na potvrdenie):**
+
+1. Vypnutie „počítať provízie“ alebo vyprázdnenie dátumu prechodu **nezruší existujúce** čakajúce provízie – platí iba pre nové. Zapnutie „počítať provízie“ neskôr založí provízie aj obchodom vyhratým od dátumu prechodu (nočná poistka).
+2. Preradená provízia si ponechá **pôvodné percento** (uložené v deň Vyhraté); budúce vyrovnania dostane nový obchodník.
+3. Čakajúcu províziu zo Sales portálu obchodník uplatní v CRM s pôvodnou sumou; list zo Sales portálu sa v CRM zrušiť nedá.
+
+**Ďalej:** po tvojom súhlase `0053` na `dev` a `app-role.sql`; dátum prechodu na Teste (`2026-10-01`) nastaví admin v Nastaveniach → Provízie obchodníkov (krok 2) – `db/app-setting.sh` vie iba zapnúť / vypnúť. Potom krok 2 (API, PDF, e-mail, obrazovky).
+
+## 39. F7 – krok 1b: `0054_provizie_zamky` (Peter 17. 10., body A, B a odpovede 1–4 k 0053; overená nanečisto)
+
+`0053` je na `dev` (Peter). Odpovede: príznak „vidí všetky provízie“ ostáva (mení iba admin, audit); neúplný základ blokuje uplatnenie, na obrazovke 41 dôvod „chýba cena pre obchodníka k DD.MM.RRRR“ a upozornenie adminom; rozhodnutia 1–3 z časti 38 potvrdené; príjemcov kópie nastaví Peter v kroku 2, Daniela založiť pred Ostrým (STAV).
+
+**A. Súbeh a deadlock.**
+- Deadlock z mutačnej skúšky m5 **nesúvisel s províziami**: server ho zapísal medzi testom `checks_zmluvy_obchody.sql` (`ALTER TABLE deal_oom DISABLE TRIGGER`) a automatickým `VACUUM` dočasného servera. Samostatne aj v spoločnom behu (znova) mutáciu testy zachytia správne.
+- Preverenie poradia zámkov však našlo **skutočný problém v `0053`**: prepočet zamykal obchod advisory zámkom, kým párovanie / zrušenie spárovania zamyká riadok obchodu (`FOR UPDATE`) a zápis provízie potrebuje kvôli cudziemu kľúču zdieľaný zámok toho istého riadku. Uplatnenie alebo zrušenie listu (advisory → riadok obchodu) a zrušenie spárovania (riadok obchodu → advisory) sa tak dostali do kruhu. Nový test súbehu `db/test/subeh-provizie.sh` (6 spojení naraz, 30 kôl: import cien v dvoch opačných poradiach, nočný prepočet, fronta, zrušenie a obnova spárovania, uplatnenie a zrušenie listu) na `0053`: **103 deadlockov**; na `0054`: **0** (3 behy), konzistencia OK (najviac jedna čakajúca na obchod, provízie bez uplatnenia zodpovedajú zmluvám).
+- **Pravidlá v `0054`:** zámok obchodu = **riadok obchodu `FOR NO KEY UPDATE`** (ten istý, ktorý berie párovanie a zmena štádia; nekoliduje s kontrolou cudzieho kľúča), berie sa **vždy pred riadkami provízií**, viac obchodov naraz v poradí id. Zmeny bilancie zmluvy (import cien, OOM, snímka, fáza, obdobie) províziu v tej istej transakcii neprepočítavajú – iba zaradia obchod do **fronty `commission_queue`** (bez zámkov; import provízie nezamyká vôbec). Frontu a nočný prepočet spracúva beh na pozadí v poradí obchodov so `SKIP LOCKED` (nikdy nečaká; obsadený obchod ostane vo fronte). Uplatnenie najprv dokončí frontu vybraných obchodov, takže list má vždy aktuálnu sumu. Štrukturálne zmeny prepočítajú hneď ako doteraz.
+- **Zvyškové riziko:** dve transakcie, ktoré zamykajú viac obchodov v rôznom poradí – hromadné párovanie po importe (poradie zmlúv) a súčasné uplatnenie / zrušenie listu (poradie obchodov). PostgreSQL kruh odhalí a jednu transakciu zruší; API v kroku 2 ju pri chybe `40P01` raz zopakuje. Frontu bude spracúvať Cron každú minútu (krok 2).
+
+**B. Interné funkcie:** jadro bilancie, základ, prepočet, zhoda so Sales portálom, upozornenia, zámky a fronta – bez `PUBLIC` a `crm_app`; `crm_public` nemá ani schému `public` (`public-role.sql`) a v `0054` dostane aj výslovný `REVOKE`. Test P11: volanie ako `crm_app` aj ako testovacia verejná rola skončí `permission denied`; na `dev` sa overí aj skutočná `crm_public`.
+
+**Ďalej v `0054`:** dôvod neúplného základu `chýba cena pre obchodníka k DD.MM.RRRR (zmluva …, rok …)` a upozornenie `provizia_chyba_cena` adminom (raz pre ten istý dôvod); spúšťač na `app_user` – „vidí všetky provízie“ iba admin, „počítať provízie“ admin alebo schvaľovateľ cien (zmena v audite používateľa); `app-role.sql`: fronta pre aplikáciu zatvorená.
+
+**Overenie (dočasný lokálny Postgres):** 276 kontrol OK (+ P10 fronta a uplatnenie, P11 crm_app / verejná rola, P12 príznak); `down` vráti schému `0053` bez rozdielu; test súbehu 3× bez deadlocku.
+
+## 40. F7 – krok 2: PDF a e-mail listu, API, obrazovky (`0055_provizie_listy`; lokálne overené 17. 10. 2026)
+
+`0054` je na `dev` (Peter, 17. 10.), riešenie zámkov schválené. Doplnky ku kroku 2 (Peter): (1) preskočený obchod ostáva vo fronte, položka staršia ako 1 hodina → denník behov a upozornenie adminom raz; (2) API opakuje celú transakciu po `40P01` / `40001` najviac raz, test, že nevzniknú dve čísla CMSN ani dva listy; (3) „počítať provízie“ mení admin a schvaľovateľ cien.
+
+**`0055_provizie_listy`:**
+- **Fronta:** `commission_queue.alerted_at`; `commission_queue_alert` (položka vo fronte > 1 h → `job_run` druhu `provizie` s chybou `stara_polozka` a upozornenie `provizie_fronta` adminom; každá stará položka iba raz); `commission_queue_run` vracia aj `fronta_stara`. Beh na pozadí (`crm_app` bez používateľa) smie frontu spustiť; prihlásený používateľ nie (`crm_background_only`).
+- **List:** `items_snapshot` – snímka položiek pri uplatnení (spúšťač pri priradení provízie k listu), aby PDF zrušenia malo položky aj po ich návrate na Čaká; `commission_claim_document` (spoločnosť s logom z Nastavení, obchodník, položky so zákazníkom, súčty, zrušenie – vidí ho, kto vidí list, a beh na pozadí); `commission_claim_pdf_pending` (listy bez PDF a zrušené bez PDF zrušenia – iba beh na pozadí); `commission_claim_pdf_set` (kľúč `provizie/{spoločnosť}/{rok}/{číslo}[-zrusene].pdf` a SHA-256 raz, potom e-mail z crm@ obchodníkovi a príjemcom kópie; PDF listu zrušeného skôr, než sa stihlo uložiť, e-mail nespustí).
+- **E-mail:** `email_outbox.commission_claim_id`, druhy `provizny_list`, `provizny_list_zruseny`; `email_outbox_claim` vracia kľúč PDF – beh e-mailov ho pripojí z R2.
+
+**API (`api/src/routes/commissions.ts`):** `GET /commissions` (zoznam, súčty, listy, obchodníci pre filter), `POST /commissions/claims`, `POST /commissions/claims/:id/void`, `GET /commissions/claims/:id/pdf?kind=list|zrusenie`, `GET /deals/:id/commission`, `POST /deals/:id/commission/reassign | allow`, `GET/PUT /settings/commissions`, `PATCH /settings/commissions/users/:id`. Zápisy bežia na samostatnom pripojení cez `withRetry` (`api/src/db.ts`, celá transakcia znova najviac raz po deadlocku alebo chybe serializácie); PDF až po potvrdení (Browser Run → R2; súbor v R2 sa nikdy neprepíše – ak už je, iba sa zapíše k listu). Ak PDF zlyhá, dokončí ho Cron každú minútu (`commissionMinute`: fronta prepočtov, nevykreslené PDF, potom e-maily). Nočný beh obchodov volá `commission_daily`. Chyba súbehu aj po opakovaní → 409 „Záznam práve mení iná operácia. Skúste to o chvíľu znova.“ `/api/me` vracia `sees_all_commissions`.
+
+**PDF listu (`api/src/render/claim-html.ts`):** v štýle PDF ponuky, bez obrázkov, iba logo spoločnosti (Nastavenia → Spoločnosť; bez loga textový logotyp „greenlogy“ v zelenej #05D695 s modrým „g“ #13689E podľa dizajn manuálu 2021), číslo a dátum, spoločnosť a obchodník, tabuľky podľa trvania zmluvy s medzisúčtom, vyrovnanie a Sales portál označené, spolu, vysvetlenie výpočtu, kto uplatnil, podpisy. Zrušený list: pečiatka ZRUŠENÉ, kto, kedy a dôvod.
+
+**Obrazovky:** 41 Provízie (`/provizie`, pod „Viac“ – iba kto provízie vidí): KPI nevyplatené / tento mesiac / kvartál ↔ rok / počet obchodov, filtre stav, obchodník (kto vidí všetky), hľadanie, skupiny podľa trvania s medzisúčtom, výber čakajúcich provízií jedného obchodníka a „Uplatniť províziu – vytvoriť provízny list“ (kontrola súčtu ≥ 0 a kladnej položky), neúplný základ s dôvodom a bez výberu, provízne listy s PDF a zrušením (admin, dôvod). Nastavenia → Provízie obchodníkov (admin a schvaľovateľ cien): dátum prechodu, príjemcovia kópie, obchodníci s percentom (história), „počítať provízie“, „vidí všetky provízie“ (iba admin). Karta obchodu: karta Provízia (iba vlastník provízie a kto vidí všetky; admin preradí, povolí províziu napriek zhode so Sales portálom). Popisy nových upozornení, denník behov (fronta provízií, počty provízií pri behu obchodov).
+
+**Overenie (dočasný lokálny Postgres + `wrangler dev` proti kópii databázy s testovacími províziami; `dev` sa nemenil):**
+- DB testy 280 kontrol (+ P13 list, PDF, e-mail, P13b beh na pozadí, P14 stará položka fronty, P15 opakovanie po deadlocku); `0055` `down` vráti schému `0054` bez rozdielu.
+- `db/test/subeh-provizie.sh`: súbeh 0 deadlockov, preskočený (obsadený) obchod ostane vo fronte, ohlási sa raz a po uvoľnení sa spracuje; `api/test/retry-db.test.ts` so skutočnou databázou – po deadlocku jeden list a číslo hneď po poslednom.
+- `npm test` (26 OK, `retry-db` sa bez lokálnej databázy preskočí), `npm run typecheck`, `tsc` a build webu.
+- Naživo: uplatnenie za obchodníka (admin) → číslo CMSN, PDF v lokálnom R2, e-mail vo fronte; zrušenie → PDF s pečiatkou, pôvodné ostáva; Nastavenia (dátum, kópia, príznak); používateľ Servisu obchod vidí, províziu, listy ani PDF nie (prázdny zoznam, 403 / 404). Obrazovky 41, Nastavenia a karta obchodu na 1440 px; mobil (390 px) sa v headless Chrome nedá spoľahlivo nasnímať (rovnako existujúce obrazovky) – overí Peter na Teste.
+
+## 41. Nákupná cena portfólia (`0056_nakupna_cena_portfolia`; overená nanečisto 17. 10. 2026)
+
+**Kontext (Peter 17. 10.):** marža firmy = predaj − odhadovaný alebo skutočný nákup elektriny. Nákupná cena celého portfólia pre rok dodávky sa v čase mení (napr. 15. 11. Nákup spočíta, že portfólio 2026 stojí 100 €/MWh) a marža sa má prepočítať na všetkých zmluvách a obchodoch s dodávkou v tom roku. Nemení sa pridaná hodnota (Montel alebo výnimka), uplatnené provízie ani ponuky spárované so zmluvou. Odpovede: 1. marža spárovanej ponuky sa zmrazí, 2. nákupnú cenu zadáva iba admin a Nákup, 3. premenovať „odhad portfólia“ → „nákupná cena portfólia“, 4. spätne najskôr od 1. 1. 2026.
+
+**Ako to funguje:** marža firmy sa neukladá – počíta sa vždy s poslednou platnou nákupnou cenou pre rok dodávky (`contract_market_value` k dnešku), preto sa po zadaní novej ceny prepočíta sama všade. Pridaná hodnota používa snímku ku dňu podpisu (cena pre obchodníka, výnimka; pri manažérovi FIX a cenníkových produktoch nákupná cena ku dňu podpisu) – nemení sa.
+
+**`0056`:**
+- `market_price_portfolio_set(spoločnosť, platí od, rok dodávky, cena)` – iba admin a Nákup (`crm_is_purchase`); deň od 1. 1. 2026 do dnes; nový záznam dňa prevezme BL, PL, SPOT pre FVE a zdroj platného záznamu (denný beh Montelu ho nezablokuje), pôvodný ostane ako opravený; platí po ďalší deň s vlastnou cenou; zmluvám podpísaným od dňa **bez ceny v snímke** sa snímka doplní (existujúce sa nemenia); čakajúce provízie sa prepočítajú cez frontu.
+- Strážca cien: nákupnú cenu ručným zadaním ceny dňa zmeniť nemožno (ani schvaľovateľ cien) – ručné BL / PL / SPOT pre FVE ostávajú admin a schvaľovateľ cien a nákupnú cenu dňa prevezmú; príznak funkcie používateľ nastaviť nemôže.
+- `market_price_portfolio_history` – dni zmeny nákupnej ceny po rokoch dodávky (admin, Nákup, kto vidí nákupnú cenu).
+- Marža ponuky spárovanej so zmluvou sa počíta s nákupnou cenou ku dňu spárovania; ostatné ponuky s dnešnou.
+- Hlásenia „chýba odhad portfólia…“ → „chýba nákupná cena portfólia…“.
+
+**API a obrazovky:** `POST /api/pricing/portfolio`; Cenové parametre otvorí aj Nákup; karta **Nákupná cena portfólia** (platná cena po rokoch dodávky, dni zmien, kto zadal) s tlačidlom **„Nákupná cena portfólia – zadať pre obdobie“** (deň, rok dodávky, cena; výsledok: platí do, doplnené snímky). Ručné ceny dňa bez poľa nákupnej ceny; tlačidlá parametrov a ručných cien iba admin a schvaľovateľ cien. Texty v aplikácii premenované.
+
+**Overenie (dočasný lokálny Postgres):** 284 kontrol (séria N: práva a rozsah, spätné zadanie s BL / PL, platnosť, história, doplnenie snímky, marža s poslednou cenou a nezmenená pridaná hodnota, zmrazená marža spárovanej ponuky; test S2 upravený – schvaľovateľ cien už nákupnú cenu nezadá); 4 mutácie zachytené; `down` vráti schému `0055` bez rozdielu. Naživo (`wrangler dev`, používateľ Nákupu): spätná cena k 16. 10. uložená, BL / PL dňa ostali, ručné BL / PL Nákupu odmietnuté, obrazovka na 1440 px.

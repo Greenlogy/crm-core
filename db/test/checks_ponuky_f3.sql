@@ -684,7 +684,7 @@ DECLARE
 BEGIN
   UPDATE offer_year_basis SET portfolio_eur_mwh = NULL WHERE variant_id = v_m;
   PERFORM set_config('app.user_id', pg_temp.c_id('u', 2)::text, true);
-  ASSERT (SELECT missing FROM offer_variant_values(v_m) LIMIT 1) LIKE 'chýba odhad portfólia (hranica manažéra)%',
+  ASSERT (SELECT missing FROM offer_variant_values(v_m) LIMIT 1) LIKE 'chýba nákupná cena portfólia (hranica manažéra)%',
          'manažér bez odhadu portfólia: ' || coalesce((SELECT missing FROM offer_variant_values(v_m) LIMIT 1), 'nič');
   PERFORM set_config('app.user_id', '', true);
   RAISE NOTICE 'OK: D9 manažér bez odhadu portfólia dostane hlásenie o odhade portfólia a radu ponuku prepočítať';

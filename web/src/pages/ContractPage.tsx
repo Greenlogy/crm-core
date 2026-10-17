@@ -524,7 +524,7 @@ function BalanceCard(props: { k: ContractCard; bal: ContractYear | undefined; on
       <Rows rows={rows} />
       <div className="caption" style={{ marginTop: 8 }}>
         {bal.basis_stored === false ? 'Zmluva nie je podpísaná – počíta sa s hodnotami k dnešku. ' : 'Náklad pridanej hodnoty ku dňu podpisu. '}
-        {props.margin ? 'Marža firmy z dnešného odhadu portfólia.' : 'Maržu firmy vidí iba CEO, Nákup, Marketing a obchodný riaditeľ.'}
+        {props.margin ? 'Marža firmy z dnes platnej nákupnej ceny portfólia.' : 'Maržu firmy vidí iba CEO, Nákup, Marketing a obchodný riaditeľ.'}
       </div>
     </Card>
   );

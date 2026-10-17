@@ -115,16 +115,27 @@ END;
 $$;
 
 -- ============================================================================
--- S2. Ručne zadaná cena dňa sa neprepíše; ručne zadaný odhad portfólia (bez BL / PL) sa prenesie do ceny z Montelu
+-- S2. Ručne zadaná cena dňa sa neprepíše; ručne zadaná nákupná cena portfólia (bez BL / PL) sa prenesie do ceny z Montelu
+--     (0056: nákupnú cenu portfólia zadáva iba admin a Nákup funkciou market_price_portfolio_set, nie schvaľovateľ cien)
 -- ============================================================================
+GRANT EXECUTE ON FUNCTION market_price_portfolio_set(uuid, date, integer, numeric) TO crm_rls_test;
 SET LOCAL ROLE crm_rls_test;
 DO $$
 BEGIN
   PERFORM pg_temp.c_as(pg_temp.c_id(4));                    -- schvaľovateľ cien
-  INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh)
-  VALUES (crm_default_org(), crm_today(), 2091, 80, 90, 85);
-  INSERT INTO market_price_daily (org_id, on_date, delivery_year, portfolio_eur_mwh, spot_fve_eur_mwh)
-  VALUES (crm_default_org(), crm_today(), 2093, 77, 60);
+  BEGIN
+    INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh, portfolio_eur_mwh)
+    VALUES (crm_default_org(), crm_today(), 2091, 80, 90, 85);
+    RAISE EXCEPTION 'CHYBA: schvaľovateľ cien zadal nákupnú cenu portfólia';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  INSERT INTO market_price_daily (org_id, on_date, delivery_year, bl_eur_mwh, pl_eur_mwh)
+  VALUES (crm_default_org(), crm_today(), 2091, 80, 90);
+  INSERT INTO market_price_daily (org_id, on_date, delivery_year, spot_fve_eur_mwh)
+  VALUES (crm_default_org(), crm_today(), 2093, 60);
+  PERFORM pg_temp.c_as(pg_temp.c_id(6));                    -- Nákup
+  PERFORM market_price_portfolio_set(crm_default_org(), crm_today(), 2093, 77);
+  PERFORM pg_temp.c_as(pg_temp.c_id(4));
   -- prihlásený používateľ nemôže obísť strážcu nastavením príznaku importu
   PERFORM set_config('crm.market_price_import', 'on', true);
   BEGIN

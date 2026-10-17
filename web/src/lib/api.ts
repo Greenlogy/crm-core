@@ -745,6 +745,8 @@ export type Me = {
   can_see_margin: boolean;
   /** denník nočných behov (admin, Nákup – 0028) */
   can_see_job_runs: boolean;
+  /** vidí všetky provízie: admin, tím „Provízie – všetko“ alebo príznak používateľa (0053) */
+  sees_all_commissions: boolean;
   environment: string;
   orgs: OrgRef[];
   permissions: Partial<Record<ModuleCode, Permission>>;

@@ -11,18 +11,33 @@ import { deliver, CRM_MAILBOX, type Payload, type Runner } from './gmail/deliver
 import { GmailError, gmailConfigured, gmailRead, gmailSend } from './gmail/gmail';
 import { buildMime, type GmailMessage, parseGmailMessage } from './gmail/mime';
 
-type OutboxItem = { id: string; send_key: string; kind: string; to: string; name: string; deal_id: string | null; approval_id: string | null; detail: string | null };
+type OutboxItem = { id: string; send_key: string; kind: string; to: string; name: string; deal_id: string | null; approval_id: string | null; detail: string | null;
+  commission_claim_id?: string | null; pdf_key?: string | null };
 type WatchItem = { thread_id: string; mailbox_user_id: string; mailbox: string; gmail_thread_id: string; known: string[] };
 
 /** Text interného e-mailu (bez osobných údajov zákazníkov – iba detail upozornenia a odkaz do CRM). */
 export function outboxMessage(o: OutboxItem, crmUrl: string): { subject: string; text: string } {
   const base = crmUrl.replace(/\/+$/, '');
   const link = o.kind === 'schvalenie_nove' || o.kind === 'schvalenie_rozhodnutie' ? `${base}/schvalovanie`
+    : o.kind === 'provizny_list' || o.kind === 'provizny_list_zruseny' ? `${base}/provizie`
     : o.deal_id ? `${base}/obchody/${o.deal_id}` : `${base}/upozornenia`;
   const subject = o.kind === 'schvalenie_nove' ? 'CRM: nová žiadosť o schválenie'
     : o.kind === 'schvalenie_rozhodnutie' ? 'CRM: rozhodnutie o vašej žiadosti'
     : o.kind === 'pomoc_s_ponukou' ? 'CRM: žiadosť o pomoc s ponukou'
+    // F7: provízny list s PDF v prílohe (detail = číslo listu)
+    : o.kind === 'provizny_list' ? `CRM: provízny list ${o.detail ?? ''}`.trim()
+    : o.kind === 'provizny_list_zruseny' ? `CRM: zrušený provízny list ${o.detail ?? ''}`.trim()
     : 'CRM: zákazník prijal ponuku';
+  if (o.kind === 'provizny_list' || o.kind === 'provizny_list_zruseny') {
+    const text = [
+      'Dobrý deň,', '',
+      o.kind === 'provizny_list'
+        ? `v prílohe je provízny list ${o.detail ?? ''}.`
+        : `provízny list ${o.detail ?? ''} bol zrušený – provízie sa vrátili na „Čaká na uplatnenie“. V prílohe je list s pečiatkou ZRUŠENÉ.`,
+      '', `Provízie v CRM: ${link}`, '', 'Greenlogy CRM (automatická správa, neodpovedajte na ňu)',
+    ].join('\n');
+    return { subject, text };
+  }
   const text = [
     'Dobrý deň,',
     '',
@@ -40,10 +55,18 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 async function sendOutbox(env: Env, sql: Sql, o: OutboxItem): Promise<'ok' | 'chyba'> {
   const { subject, text } = outboxMessage(o, env.CRM_URL);
   try {
+    // F7: PDF provízneho listu z R2 ako príloha
+    let attachments: { filename: string; mime: string; data: Uint8Array }[] | undefined;
+    if (o.pdf_key) {
+      const obj = await env.DOCS.get(o.pdf_key);
+      if (!obj) throw new Error('PDF listu sa nenašlo v úložisku.');
+      attachments = [{ filename: o.pdf_key.split('/').pop()!, mime: 'application/pdf', data: new Uint8Array(await obj.arrayBuffer()) }];
+    }
     const mime = buildMime({
       from: CRM_MAILBOX, fromName: 'Greenlogy CRM', to: [o.to], subject, text,
       html: `<div style="font-family:Arial,sans-serif;font-size:14px">${esc(text).replace(/\n/g, '<br>')}</div>`,
       messageId: `<crm-oznam-${o.id}@greenlogy.com>`,
+      attachments,
     });
     const r = await gmailSend(env, CRM_MAILBOX, mime, [o.to], null);
     await sql`SELECT email_outbox_result(${o.id}, ${o.send_key}, ${r.id}, NULL)`;

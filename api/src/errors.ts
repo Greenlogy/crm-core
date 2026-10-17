@@ -141,6 +141,9 @@ export function dbErrorResponse(err: unknown): { status: 400 | 403 | 404 | 409; 
     case '22001': // string_data_right_truncation
     case '22003': // numeric_value_out_of_range
       return { status: 400, body: { error: 'Neplatná hodnota.', code: e.code } };
+    case '40P01': // deadlock_detected (aj po opakovaní – withRetry)
+    case '40001': // serialization_failure
+      return { status: 409, body: { error: 'Záznam práve mení iná operácia. Skúste to o chvíľu znova.', code: e.code } };
     case 'P0002': // no_data_found („… neexistuje“)
       return { status: 404, body: { error: ours ? e.message! : 'Záznam neexistuje.', code: e.code } };
     case 'P0001': // raise_exception

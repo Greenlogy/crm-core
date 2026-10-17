@@ -259,7 +259,7 @@ export function ContractsPage() {
                       {k.added_value_eur === null || k.added_value_eur === undefined ? '–' : eur(k.added_value_eur)}
                     </td>
                     {showMargin && (
-                      <td className="num margin-col" title={k.portfolio_stale ? 'starý odhad portfólia (viac ako 30 dní)' : undefined}>
+                      <td className="num margin-col" title={k.portfolio_stale ? 'stará nákupná cena portfólia (viac ako 30 dní)' : undefined}>
                         {k.margin_eur === null || k.margin_eur === undefined ? '–' : eur(k.margin_eur)}
                         {k.portfolio_stale && <div className="sub">starý odhad</div>}
                       </td>

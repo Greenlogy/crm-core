@@ -41,3 +41,26 @@ export async function asUser<T>(sql: Sql, userId: string, fn: (tx: Sql) => Promi
     return fn(tx as unknown as Sql);
   })) as T;
 }
+
+/** Deadlock (40P01) a chyba serializácie (40001): PostgreSQL celú transakciu vrátil, dá sa bezpečne spustiť znova. */
+export function isRetryable(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  return code === '40P01' || code === '40001';
+}
+
+/**
+ * Transakcia na samostatnom pripojení (mimo transakcie požiadavky), po deadlocku alebo chybe serializácie spustená
+ * celá znova – najviac raz (Peter 17. 10., F7). fn smie robiť iba zápisy do databázy (nič mimo nej – R2, e-mail),
+ * lebo pri opakovaní sa spustí druhýkrát; prvý pokus databáza vrátila celý (aj počítadlá čísel).
+ * userId = null: beh na pozadí bez používateľa.
+ */
+export async function withRetry<T>(sql: Sql, userId: string | null, fn: (tx: Sql) => Promise<T>): Promise<T> {
+  const once = () => (userId === null ? (sql.begin((tx) => fn(tx as unknown as Sql)) as Promise<T>) : asUser(sql, userId, fn));
+  try {
+    return await once();
+  } catch (err) {
+    if (!isRetryable(err)) throw err;
+    console.log(`Transakcia zopakovaná po ${(err as { code?: string }).code}`);
+    return once();
+  }
+}

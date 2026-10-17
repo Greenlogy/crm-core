@@ -457,7 +457,7 @@ function DeactivatePanel(props: { user: SettingsUser; onClose: () => void; onDon
 }
 
 /** Percento provízie z pridanej hodnoty s históriou „platí od“ (modul 5, F2): mení admin a obchodný riaditeľ. */
-function CommissionSection(props: { userId: string }) {
+export function CommissionSection(props: { userId: string }) {
   type Rate = { id: string; valid_from: string; pct: string; changed_by_name: string | null; future: boolean };
   const { data, reload } = useApi<{ items: Rate[]; current: string; can_edit: boolean; today: string }>(`/api/commission-rates/${props.userId}`);
   const [from, setFrom] = useState('');

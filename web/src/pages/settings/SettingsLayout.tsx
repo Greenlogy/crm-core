@@ -11,7 +11,8 @@ export const SETTINGS_SECTIONS = [
   { path: 'timy', label: 'Tímy a práva' },
   { path: 'ciselniky', label: 'Číselníky' },
   { path: 'parovanie-sadzieb', label: 'Párovanie sadzieb' },
-  { path: 'cenove-parametre', label: 'Cenové parametre', approver: true },
+  { path: 'cenove-parametre', label: 'Cenové parametre', approver: true, purchase: true },
+  { path: 'provizie', label: 'Provízie obchodníkov', approver: true },
   { path: 'sablony-ponuk', label: 'Šablóny ponúk' },
   { path: 'sablony-emailov', label: 'Šablóny e-mailov', marketing: true },
   { path: 'preklady-importov', label: 'Preklady importov' },
@@ -33,6 +34,7 @@ export function SettingsLayout() {
   // Bez admina iba povolené sekcie: Cenové parametre („schvaľuje ceny“), Nočný beh (Nákup)
   const allowed = (s: (typeof SETTINGS_SECTIONS)[number]) =>
     me.is_admin || ('approver' in s && s.approver && me.approves_prices) || ('jobs' in s && s.jobs && me.can_see_job_runs) ||
+    ('purchase' in s && s.purchase && me.team_code === 'nakup') ||
     ('marketing' in s && s.marketing && marketing);
   const sections = SETTINGS_SECTIONS.filter(allowed);
   if (!me.is_admin && !sections.some((s) => s.path === section)) {
@@ -49,6 +51,8 @@ export function SettingsLayout() {
         ))}
         <div className="caption settings-nav-note">
           {section === 'cenove-parametre'
+            ? 'Mení admin a obchodný riaditeľ; nákupnú cenu portfólia admin a Nákup. Každá zmena ide do auditu.'
+            : section === 'provizie'
             ? 'Mení admin a obchodný riaditeľ. Každá zmena ide do auditu.'
             : section === 'nocny-beh'
               ? 'Iba čítanie – vidí admin a Nákup.'

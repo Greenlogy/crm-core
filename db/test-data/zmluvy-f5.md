@@ -44,3 +44,19 @@ Výsledok je vidieť ráno po nočnom behu. Hneď sa dá spustiť nočný beh k 
 
 Zmazanie všetkého vrátane importovaných zmlúv: `./db/test-data/zmluvy-f5.sh dev zmaz`. Ceny pod hranicou cien dňa na Teste
 môžu pridať aj príznak modulu 4 „Pod hranicou bez výnimky“ – s párovaním nesúvisí.
+
+## Provízie (F7, `0053`–`0055`)
+
+Predpoklad: Nastavenia → Provízie obchodníkov – dátum prechodu (napr. 2026-10-01) a „počítať provízie“ pri obchodníkovi obchodov
+(predvolene peter@greenlogy.com). Zmena nastavenia sama províziu nezaloží – vznikne pri spárovaní / zmene štádia hneď, inak v nočnom behu.
+
+1. Import oboch súborov (krok 3 vyššie) spáruje 1129995001, 002 → Epsilon, 003 → Zeta, 006 → Théta; obchody prejdú do Vyhraté
+   a **provízie vzniknú hneď** (Provízie, karta obchodu → Provízia).
+2. Provízie → vybrať províziu Epsilon → „Uplatniť províziu“ → list CMSN, PDF do minúty, e-mail s PDF obchodníkovi a kópii.
+3. **Vyrovnanie:** na karte zmluvy 1129995004 (Nespárovaná) „Vybrať obchod“ → Epsilon (je Vyhraté, EIC 0/1 – výber dovolí) →
+   pri Epsilon vznikne čakajúce vyrovnanie (+) a upozornenie. „Zrušiť spárovanie“ 004 (admin) → vyrovnanie zmizne.
+4. Zrušenie listu (admin, dôvod) → PDF so ZRUŠENÉ, e-mail, provízie späť na Čaká.
+
+`./db/test-data/zmluvy-f5.sh dev zmaz` zmaže aj provízie, provízne listy, frontu a e-maily listov testovacích obchodov (inak
+sa provízia nemaže); zastaví sa, ak by list obsahoval províziu iného obchodu. PDF listov v R2 (`provizie/…`) ostávajú, čísla CMSN
+sa znova nepoužijú.

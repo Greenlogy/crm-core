@@ -30,6 +30,13 @@ export const CONTRACT_STATUS: Record<string, { label: string; tone: Tone; live?:
 };
 
 /** Stav výnimky z ceny (0025; Expirovaná sa počíta). */
+/** Stav provízie (0053) */
+export const COMMISSION_STATE: Record<string, { label: string; tone: Tone }> = {
+  caka: { label: 'Čaká', tone: 'warning' },
+  uplatnena: { label: 'Uplatnená', tone: 'positive' },
+  zrusena: { label: 'Zrušená', tone: 'neutral' },
+};
+
 export const EXCEPTION_STATE: Record<string, { label: string; tone: Tone }> = {
   caka: { label: 'Čaká', tone: 'warning' },
   schvalena: { label: 'Schválená', tone: 'positive' },
@@ -94,6 +101,13 @@ export const NOTIFICATION_KIND: Record<string, { label: string; tone: Tone }> = 
   akceptacia_zrusena: { label: 'Akceptácia zrušená', tone: 'warning' },
   ponuka_odpoved: { label: 'Odpoveď na e-mail', tone: 'positive' },
   pomoc_s_ponukou: { label: 'Pomoc s ponukou', tone: 'info' },
+  provizny_list: { label: 'Provízny list', tone: 'positive' },
+  provizny_list_zruseny: { label: 'Provízny list zrušený', tone: 'warning' },
+  provizia_vyrovnanie: { label: 'Vyrovnanie provízie', tone: 'info' },
+  provizia_duplicita: { label: 'Provízia zo Sales portálu', tone: 'warning' },
+  provizia_preradena: { label: 'Provízia preradená', tone: 'info' },
+  provizia_chyba_cena: { label: 'Provízia – chýba cena', tone: 'negative' },
+  provizie_fronta: { label: 'Fronta provízií', tone: 'negative' },
   ponuka_pripomienka: { label: 'Pripomienka platnosti', tone: 'info' },
   gmail_chyba: { label: 'Chyba Gmailu', tone: 'negative' },
   email_chyba: { label: 'Chyba e-mailu', tone: 'negative' },

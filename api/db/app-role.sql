@@ -107,6 +107,11 @@ REVOKE INSERT, UPDATE ON deal_contract_input FROM crm_app;
 REVOKE INSERT, UPDATE ON spot_average_daily FROM crm_app;
 -- 0052: uloženú pridanú hodnotu obchodu prepočítava iba databáza (spúšťače, nočný beh)
 REVOKE INSERT, UPDATE ON deal_value_cache FROM crm_app;
+-- 0053: provízie, provízne listy a povolenia zhody so Sales portálom zapisujú iba funkcie (commission_claim_create,
+-- _void, commission_reassign, commission_legacy_allow, prepočet spúšťačmi); aplikácia iba číta podľa RLS
+REVOKE INSERT, UPDATE ON commission, commission_claim, commission_legacy_override FROM crm_app;
+-- 0054: frontu prepočtov provízií spracúva iba beh na pozadí (commission_queue_run) a uplatnenie
+REVOKE ALL ON commission_queue FROM crm_app;
 
 -- Nikdy neobchádza RLS. („Bez používateľa nič“ zaručuje migrácia 0009 podľa mena roly;
 -- ALTER ROLE … SET app.require_user na Neone nejde – vlastník nie je superuser.)

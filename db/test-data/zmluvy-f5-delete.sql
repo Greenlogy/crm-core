@@ -12,6 +12,7 @@ DECLARE
   v_c uuid[] := ARRAY['00000000-0000-4000-9000-000000005101'::uuid, '00000000-0000-4000-9000-000000005102'::uuid, '00000000-0000-4000-9000-000000005103'::uuid, '00000000-0000-4000-9000-000000005104'::uuid];
   v_p uuid[] := ARRAY(SELECT o.person_id FROM oom o WHERE o.eic = '24ZZS99TESTFA06A' AND o.person_id IS NOT NULL);
   v_f uuid[];
+  v_cl uuid[];
 BEGIN
   v_f := ARRAY(SELECT id FROM offer WHERE deal_id = ANY (v_d));
   DELETE FROM notification WHERE contract_id = ANY (v_k) OR deal_id = ANY (v_d);
@@ -41,6 +42,22 @@ BEGIN
   DELETE FROM deal_oom WHERE deal_id = ANY (v_d);
   ALTER TABLE deal_oom ENABLE TRIGGER trg_deal_oom_ready;
   DELETE FROM deal_contact WHERE deal_id = ANY (v_d);
+  -- provízie testovacích obchodov (F7, 0053–0055): provízia a list sa inak nemažú (strážca) – iba tu, iba testovacie obchody;
+  -- až po zmazaní zmlúv (zmazanie zmluvy obchod prepočíta). List s províziou iného obchodu sa nemaže – skript sa zastaví.
+  v_cl := ARRAY(SELECT DISTINCT claim_id FROM commission WHERE deal_id = ANY (v_d) AND claim_id IS NOT NULL);
+  IF EXISTS (SELECT 1 FROM commission WHERE claim_id = ANY (v_cl) AND (deal_id IS NULL OR NOT deal_id = ANY (v_d))) THEN
+    RAISE EXCEPTION 'Provízny list testovacích obchodov obsahuje aj províziu iného obchodu – mazanie zastavené.';
+  END IF;
+  ALTER TABLE commission DISABLE TRIGGER trg_guard;
+  ALTER TABLE commission_claim DISABLE TRIGGER trg_guard;
+  DELETE FROM email_outbox WHERE commission_claim_id = ANY (v_cl);
+  DELETE FROM notification WHERE commission_claim_id = ANY (v_cl) OR deal_id = ANY (v_d);
+  DELETE FROM commission_queue WHERE deal_id = ANY (v_d);
+  DELETE FROM commission_legacy_override WHERE deal_id = ANY (v_d);
+  DELETE FROM commission WHERE deal_id = ANY (v_d);
+  DELETE FROM commission_claim WHERE id = ANY (v_cl);
+  ALTER TABLE commission ENABLE TRIGGER trg_guard;
+  ALTER TABLE commission_claim ENABLE TRIGGER trg_guard;
   DELETE FROM deal WHERE id = ANY (v_d);
   DELETE FROM oom_customer WHERE oom_id = ANY (v_o);
   DELETE FROM oom_contact WHERE oom_id = ANY (v_o);
@@ -51,7 +68,7 @@ BEGIN
   DELETE FROM company_contact WHERE company_id = ANY (v_c) OR contact_id = ANY (v_p);
   DELETE FROM company WHERE id = ANY (v_c);
   DELETE FROM contact WHERE id = ANY (v_p);
-  RAISE NOTICE 'Zmazané testovacie dáta F5 (zmluvy %, obchody %, OOM %).', cardinality(v_k), cardinality(v_d), cardinality(v_o);
+  RAISE NOTICE 'Zmazané testovacie dáta F5 (zmluvy %, obchody %, OOM %, provízne listy %).', cardinality(v_k), cardinality(v_d), cardinality(v_o), cardinality(v_cl);
 END;
 $f5$;
 COMMIT;

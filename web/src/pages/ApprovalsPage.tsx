@@ -2,7 +2,7 @@
 // predĺženie platnosti ponuky (F2) a pridelenie firmy (F1). Kto žiadosť vidí a kto ju smie schváliť, stráži databáza:
 // ceny, riziko a platnosť schvaľuje „schvaľuje ceny“, pridelenie firmy „schvaľuje pridelenie firmy“, nikdy žiadateľ.
 // Pri výnimke smie schvaľovateľ schváliť inú hranicu, nie vyššiu ako žiadaná cena; platí 3 dni na odoslanie.
-// Hranicu z odhadu portfólia a maržu firmy vráti databáza iba s právom.
+// Hranicu z nákupnej ceny portfólia a maržu firmy vráti databáza iba s právom.
 
 import { type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -255,7 +255,7 @@ function Detail(props: { a: Approval; onChanged: () => void }) {
               <Rows
                 rows={[
                   ['Žiadaná cena', `${price(x.requested_value)} €/MWh`],
-                  ['Hranica', x.threshold_value === null ? 'skrytá (odhad portfólia)' : `${price(x.threshold_value)} €/MWh`],
+                  ['Hranica', x.threshold_value === null ? 'skrytá (nákupná cena portfólia)' : `${price(x.threshold_value)} €/MWh`],
                   ['Objem', `${dec(x.volume_mwh ?? 0, 1, 1)} MWh`],
                   ['Pridaná hodnota s výnimkou', `${eur(x.added_value_requested ?? 0)} €`],
                   ...(detail.data?.see_margin && x.margin_requested !== null
