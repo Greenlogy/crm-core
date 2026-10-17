@@ -2,6 +2,7 @@
 
 ## 2026-10-17
 
+- Modul 5, F7: `0053`–`0056` na `dev`, nasadené na Test (Peter), commit `5018372`.
 - Modul 4/5 (nenasadené): `0056_nakupna_cena_portfolia` overená nanečisto, 284 kontrol – nákupná cena portfólia pre rok dodávky „platí od“ dňa aj spätne od 1. 1. 2026 (iba admin a Nákup, BL / PL dňa ostanú, doplnia sa chýbajúce snímky zmlúv), marža s poslednou cenou, zmrazená marža ponuky spárovanej so zmluvou, premenovanie „odhad portfólia“ → „nákupná cena portfólia“; Cenové parametre pre Nákup s tlačidlom „Nákupná cena portfólia – zadať pre obdobie“.
 - Testovacie dáta F5: `zmluvy-f5-delete.sql` (aj generátor) maže aj provízie, provízne listy, frontu a e-maily listov testovacích obchodov (overené na dočasnej databáze); návod `zmluvy-f5.md` doplnený o skúšku provízií F7.
 - Modul 5, F7 krok 2 (lokálne overené, nenasadené): `0054` na `dev` (Peter). `0055_provizie_listy` (snímka položiek listu, dokument a PDF listu aj zrušenia, e-mail z crm@ s PDF obchodníkovi a kópii, nevykreslené PDF dokončí beh na pozadí, stará položka fronty → denník behov a upozornenie adminom raz) overená nanečisto, 280 kontrol. API `routes/commissions.ts` s opakovaním transakcie po deadlocku (`withRetry`), Cron každú minútu (fronta, PDF), nočný prepočet provízií; obrazovka 41 Provízie, Nastavenia → Provízie obchodníkov, provízia na karte obchodu, upozornenia a denník behov. Test súbehu doplnený o preskočený obchod a opakovanie uplatnenia so skutočnou databázou.
