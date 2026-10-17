@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
 import { RegulationNotice } from '../components/regulation';
+import { PageHero } from '../components/hero';
 import { Card, Empty, ErrorState, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { send, useApi, type ContractCard, type ContractYear } from '../lib/api';
 import { useMe } from '../lib/me';
@@ -82,13 +83,17 @@ export function ContractPage() {
 
   return (
     <>
-      <div className="caption" style={{ marginBottom: 4 }}>
-        <Link to="/zmluvy">Zmluvy</Link> / {k.number}
-      </div>
-      <header className="page-head">
-        <div style={{ minWidth: 0 }}>
-          <h1 className="t-page-title">{k.number}</h1>
-          <div className="page-sub">
+      <PageHero
+        size="detail"
+        card
+        above={
+          <>
+            <Link to="/zmluvy">Zmluvy</Link> / {k.number}
+          </>
+        }
+        title={<span className="gl-mono hero-mono">{k.number}</span>}
+        sub={
+          <span className="hero-meta">
             <StatusPill map={CONTRACT_STATUS} value={k.state} />
             <Pill>{CONTRACT_TYPE[k.type] ?? k.type}</Pill>
             {models.map((m) => (
@@ -97,23 +102,23 @@ export function ContractPage() {
               </Pill>
             ))}
             {openFlags.map((f) => (
-              <Pill key={f.id} tone={CONTRACT_FLAG[f.code]?.tone ?? 'neutral'}>
+              <Pill key={f.id} tone={CONTRACT_FLAG[f.code]?.tone ?? 'neutral'} live>
                 {CONTRACT_FLAG[f.code]?.label ?? f.code}
               </Pill>
             ))}
             <span>
               <Link to={customerPath}>{k.customer_name || '(bez mena)'}</Link> · {k.owner_name ?? 'bez obchodníka'}
             </span>
-          </div>
-        </div>
-        <div className="head-actions">
-          {k.can_edit && (
+          </span>
+        }
+        actions={
+          k.can_edit ? (
             <button type="button" className="btn" onClick={() => setEditing(true)}>
               Upraviť údaje CRM
             </button>
-          )}
-        </div>
-      </header>
+          ) : undefined
+        }
+      />
       {save.error && <Notice tone="error">{save.error}</Notice>}
       {closing && (
         <CloseThresholdPanel

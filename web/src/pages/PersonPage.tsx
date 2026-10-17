@@ -1,6 +1,7 @@
 // Karta osoby podľa docs/dizajn/obrazovky/10-karta-osoby.html (modul Zákazníci):
 // domácnosť aj kontakt vo firme. Vľavo údaje, firmy a vývoj stavu, v strede časová os, vpravo OOM, dealy, zmluvy.
 
+import { PageHero } from '../components/hero';
 import { EmailList } from '../components/email';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -43,44 +44,46 @@ export function PersonPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="page-head-main">
-          <Avatar name={p.name} />
-          <div style={{ minWidth: 0 }}>
-            <div className="crumbs">
-              <Link to={p.is_household ? '/zakaznici' : '/kontakty'}>{p.is_household ? 'Zákazníci' : 'Kontakty'}</Link> / {p.name}
-            </div>
-            <div className="title-line">
-              <h1 className="t-page-title" title={fullName}>
-                {fullName}
-              </h1>
-              {p.is_household ? (
-                <>
-                  <CustomerStatus status={p.status} former={p.is_former_customer} archived={p.archived} />
-                  <Pill>{p.segment_label}</Pill>
-                </>
-              ) : (
-                <>
-                  <Pill>Kontakt vo firme</Pill>
-                  {p.archived && <Pill tone="negative">Archív</Pill>}
-                </>
-              )}
-            </div>
-            <div className="page-sub">
-              {p.city && <span>{p.city}</span>}
-              {p.owner_name && <span>{p.owner_name}</span>}
-              <HubSpotLink object="contact" id={p.hubspot_id} />
-            </div>
-          </div>
-        </div>
-        {p.can_edit && (
-          <div className="head-actions">
+      <PageHero
+        size="detail"
+        card
+        above={
+          <>
+            <Link to={p.is_household ? '/zakaznici' : '/kontakty'}>{p.is_household ? 'Zákazníci' : 'Kontakty'}</Link> / {p.name}
+          </>
+        }
+        title={
+          <span className="hero-title-line">
+            <Avatar name={p.name} />
+            {fullName}
+          </span>
+        }
+        sub={
+          <span className="hero-meta">
+            {p.is_household ? (
+              <>
+                <CustomerStatus status={p.status} former={p.is_former_customer} archived={p.archived} />
+                <Pill>{p.segment_label}</Pill>
+              </>
+            ) : (
+              <>
+                <Pill>Kontakt vo firme</Pill>
+                {p.archived && <Pill tone="negative">Archív</Pill>}
+              </>
+            )}
+            {p.city && <span>· {p.city}</span>}
+            {p.owner_name && <span>· {p.owner_name}</span>}
+            <HubSpotLink object="contact" id={p.hubspot_id} />
+          </span>
+        }
+        actions={
+          p.can_edit ? (
             <button type="button" className="btn" onClick={() => setEditing(true)}>
               Upraviť
             </button>
-          </div>
-        )}
-      </header>
+          ) : undefined
+        }
+      />
       {editing && <PersonFormPanel person={p} onClose={() => setEditing(false)} onSaved={reload} />}
       {marketing && (
         <MarketingPanel

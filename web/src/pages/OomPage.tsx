@@ -8,6 +8,7 @@ import { CustomFieldsCard, formatCustom, useFieldDefs, type FieldDef } from '../
 import { canEditOomData, ContactsCard, DevicesCard } from '../components/oom-children';
 import { OomActions, PLAN_DATE_LABEL, PLAN_KIND, PlanBanner } from '../components/oom-actions';
 import { RegulationPanel, RegulationValue } from '../components/oom-regulation';
+import { PageHero } from '../components/hero';
 import { BackLink, Card, Empty, ErrorState, HubSpotLink, Item, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
 import { send, useApi, type AuditEvent, type OomCard, type OomLink } from '../lib/api';
 import { useMe } from '../lib/me';
@@ -65,31 +66,35 @@ export function OomPage() {
 
   return (
     <>
-      <BackLink />
-      <header className="page-head">
-        <div style={{ minWidth: 0 }}>
-          <h1 className="t-page-title">{o.name || address || o.eic}</h1>
-          <div className="page-sub">
-            <StatusPill map={OOM_STATUS} value={o.status} />
-            <Pill>{label(OOM_TYPE, o.type)}</Pill>
-            <span className="mono">{o.eic}</span>
-            {o.customer_name ? (
-              <Link to={customerPathOf(o)}>{o.customer_name}</Link>
-            ) : (
-              <span className="muted">zákazník skrytý</span>
+      <PageHero
+        size="detail"
+        card
+        above={<BackLink />}
+        title={o.name || address || o.eic}
+        sub={
+          <>
+            <span className="hero-meta">
+              <StatusPill map={OOM_STATUS} value={o.status} />
+              <Pill tone={o.type === 'vyroba' ? 'positive' : 'neutral'}>{label(OOM_TYPE, o.type)}</Pill>
+              <span className="mono">{o.eic}</span>
+              {o.customer_name ? (
+                <Link to={customerPathOf(o)}>{o.customer_name}</Link>
+              ) : (
+                <span className="muted">zákazník skrytý</span>
+              )}
+              {o.owner_name && <span>· {o.owner_name}</span>}
+              <HubSpotLink object="oom" id={o.hubspot_id} />
+            </span>
+            {o.transferred_from_name && (
+              <div className="caption">
+                Prepis od {o.transferred_from_name}
+                {o.transferred_on ? ` k ${date(o.transferred_on)}` : ''}
+              </div>
             )}
-            {o.owner_name && <span>{o.owner_name}</span>}
-            <HubSpotLink object="oom" id={o.hubspot_id} />
-          </div>
-          {o.transferred_from_name && (
-            <div className="caption">
-              Prepis od {o.transferred_from_name}
-              {o.transferred_on ? ` k ${date(o.transferred_on)}` : ''}
-            </div>
-          )}
-        </div>
-        <OomActions o={o} onChanged={reload} />
-      </header>
+          </>
+        }
+        actions={<OomActions o={o} onChanged={reload} />}
+      />
 
       <PlanBanner o={o} onChanged={reload} />
 

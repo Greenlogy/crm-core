@@ -14,10 +14,13 @@ export function PageHero(props: {
   above?: ReactNode;
   /** home 320 px, detail 290 px, inak 270 px */
   size?: 'home' | 'detail';
+  /** karty (firma, osoba, OOM, zmluva): menší nadpis 36 px, aby dlhé názvy nezakryli turbíny (Peter 17. 10. 2026) */
+  card?: boolean;
   label?: string;
 }) {
+  const cls = ['gl-hero', props.size && `gl-hero--${props.size}`, props.card && 'hero-card'].filter(Boolean).join(' ');
   return (
-    <section className={`gl-hero${props.size ? ` gl-hero--${props.size}` : ''}`} aria-label={props.label ?? 'Hlavička'}>
+    <section className={cls} aria-label={props.label ?? 'Hlavička'}>
       <div className="gl-hero__art" aria-hidden="true" dangerouslySetInnerHTML={{ __html: landscape }} />
       <div className="gl-hero__content">
         <div className="hero-text">

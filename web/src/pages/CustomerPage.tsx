@@ -9,6 +9,7 @@ import { RegulationNotice } from '../components/regulation';
 import { CompanyFormPanel } from '../components/customer-forms';
 import { CustomFieldsCard } from '../components/custom-fields';
 import { FinstatCompanyCard } from '../components/deal-forms';
+import { PageHero } from '../components/hero';
 import { ContractsCard, CustomerStatus, DealsCard, OomsCard, StatusHistoryCard } from '../components/customer';
 import {
   Avatar,
@@ -43,39 +44,41 @@ export function CustomerPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="page-head-main">
-          <Avatar name={c.name} />
-          <div style={{ minWidth: 0 }}>
-            <div className="crumbs">
-              <Link to="/zakaznici">Zákazníci</Link> / {c.name}
-            </div>
-            <div className="title-line">
-              <h1 className="t-page-title" title={c.name}>
-                {c.name}
-              </h1>
-              <CustomerStatus status={c.is_customer ? c.status : null} former={c.is_former_customer} archived={c.archived} />
-              {c.is_customer && <Pill>{c.segment_label}</Pill>}
-              {c.is_partner && <Pill tone="info">Partner</Pill>}
-              {c.is_supplier && <Pill tone="info">Dodávateľ</Pill>}
-            </div>
-            <div className="page-sub">
-              {c.ico && <span className="mono">{c.country === 'HR' ? 'OIB' : 'IČO'} {c.ico}</span>}
-              {me.orgs.length > 1 && <span>{c.org_name}</span>}
-              {c.city && <span>{c.city}</span>}
-              {c.owner_name && <span>{c.owner_name}</span>}
-              <HubSpotLink object="company" id={c.hubspot_id} />
-            </div>
-          </div>
-        </div>
-        {c.can_edit && me.team_code !== 'servis' && (
-          <div className="head-actions">
+      <PageHero
+        size="detail"
+        card
+        above={
+          <>
+            <Link to="/zakaznici">Zákazníci</Link> / {c.name}
+          </>
+        }
+        title={
+          <span className="hero-title-line">
+            <Avatar name={c.name} />
+            {c.name}
+          </span>
+        }
+        sub={
+          <span className="hero-meta">
+            <CustomerStatus status={c.is_customer ? c.status : null} former={c.is_former_customer} archived={c.archived} />
+            {c.is_customer && <Pill>{c.segment_label}</Pill>}
+            {c.is_partner && <Pill tone="info">Partner</Pill>}
+            {c.is_supplier && <Pill tone="info">Dodávateľ</Pill>}
+            {c.ico && <span className="mono">{c.country === 'HR' ? 'OIB' : 'IČO'} {c.ico}</span>}
+            {me.orgs.length > 1 && <span>· {c.org_name}</span>}
+            {c.city && <span>· {c.city}</span>}
+            {c.owner_name && <span>· {c.owner_name}</span>}
+            <HubSpotLink object="company" id={c.hubspot_id} />
+          </span>
+        }
+        actions={
+          c.can_edit && me.team_code !== 'servis' ? (
             <button type="button" className="btn" onClick={() => setEditing(true)}>
               Upraviť
             </button>
-          </div>
-        )}
-      </header>
+          ) : undefined
+        }
+      />
       {editing && <CompanyFormPanel company={c} onClose={() => setEditing(false)} onSaved={reload} />}
 
       <RegulationNotice check={c.regulation_check} />

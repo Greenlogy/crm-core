@@ -3077,3 +3077,30 @@ a.tab {
 .card > .empty {
   padding: 4px 24px 20px;
 }
+
+/* Karty (firma, osoba, OOM, zmluva): avatar pri nadpise, číslo zmluvy v mono písme */
+.hero-title-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.hero-title-line .avatar {
+  font-size: 15px;
+  letter-spacing: 0;
+}
+.hero-mono {
+  font-size: 0.8em;
+  letter-spacing: 0;
+}
+.gl-hero__sub .hero-meta + .caption {
+  margin-top: 6px;
+  color: var(--gl-ink-2);
+}
+.hero-card .gl-hero__title {
+  font-size: 36px;
+}
+@media (max-width: 760px) {
+  .hero-card .gl-hero__title {
+    font-size: 28px;
+  }
+}
