@@ -48,10 +48,19 @@ export function StatusPill(props: { map: Record<string, { label: string; tone: T
   );
 }
 
-export function Kpi(props: { label: string; value: string; sub?: string }) {
+export function Kpi(props: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  /** soft: jedna hlavná KPI na obrazovke (jemný prechod), danger: červená karta (napr. krok po termíne) */
+  variant?: 'soft' | 'danger';
+  /** zvýraznené číslo v --gl-brand-blue (odhad provízie) */
+  accent?: boolean;
+}) {
   // Bez dát sa zobrazí „—“, nikdy 0 (komponent KpiCard).
+  const cls = ['card', 'kpi', props.variant && `kpi-${props.variant}`, props.accent && 'kpi-accent'].filter(Boolean).join(' ');
   return (
-    <div className="card kpi">
+    <div className={cls}>
       <div className="kpi-label t-label">{props.label}</div>
       <div className="kpi-value t-kpi-lg">{props.value || EMPTY}</div>
       {props.sub && <div className="kpi-sub t-caption">{props.sub}</div>}

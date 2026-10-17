@@ -2824,3 +2824,184 @@ a.tab {
   background: var(--gl-blue-600);
   color: var(--gl-on-primary);
 }
+
+/* KPI varianty (dizajn 04): hlavná KPI s jemným prechodom, krok po termíne, zvýraznené číslo, jednotka */
+.card.kpi.kpi-soft {
+  background: var(--gl-gradient-soft);
+  border-color: var(--gl-soft-border);
+}
+.kpi-soft .kpi-label {
+  color: var(--gl-green-700);
+  font-weight: var(--gl-fw-medium);
+}
+.card.kpi.kpi-danger {
+  background: var(--gl-danger-card-bg);
+  border-color: var(--gl-danger-card-border);
+}
+.kpi-danger .kpi-label,
+.kpi-danger .kpi-sub {
+  color: var(--gl-danger-fg);
+}
+.kpi-accent .kpi-value {
+  color: var(--gl-brand-blue);
+}
+.kpi-value .unit {
+  font-size: var(--gl-fs-body);
+  font-weight: var(--gl-fw-regular);
+  letter-spacing: 0;
+}
+.kpi-value-text {
+  font-size: 22px;
+  white-space: normal;
+}
+
+/* Detail obchodu (dizajn 04): štádiá v sklenenej lište, ponuky ako karty, časová os s ikonami */
+.hero-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+.deal-stepper {
+  padding: 4px 0;
+}
+.deal-stepper li::after {
+  top: 15px;
+}
+.stepper-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 4px 6px;
+  border-radius: var(--gl-radius-field);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+}
+.stepper-btn:disabled {
+  cursor: default;
+}
+.stepper-btn:not(:disabled):hover {
+  background: var(--gl-chip-hover);
+}
+.stepper-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--gl-stepper-line);
+  background: var(--gl-surface-card);
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+}
+.stepper-dot svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: var(--gl-on-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.is-done .stepper-dot {
+  background: var(--gl-green-400);
+  border-color: var(--gl-green-400);
+}
+.is-current .stepper-dot {
+  width: 26px;
+  height: 26px;
+  margin: -2px 0;
+  background: var(--gl-blue-600);
+  border: 4px solid var(--gl-surface-card);
+  box-shadow: 0 0 0 2px var(--gl-blue-600);
+}
+.btn.stage-lost-current {
+  background: var(--gl-danger-bg);
+  border-color: var(--gl-danger-card-border);
+  color: var(--gl-danger-fg);
+}
+.card-note {
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--gl-border);
+}
+.offer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+.offer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--gl-border);
+  border-radius: var(--gl-radius-item);
+  color: var(--gl-ink);
+}
+.offer-item:hover {
+  background: var(--gl-surface-hover);
+  text-decoration: none;
+}
+.offer-item.is-current {
+  background: var(--gl-offer-current-bg);
+  border-color: var(--gl-offer-current-bg);
+}
+.offer-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.offer-no {
+  color: var(--gl-brand-blue);
+  font-weight: var(--gl-fw-semibold);
+}
+.offer-valid {
+  font-size: var(--gl-fs-small);
+}
+.timeline-event {
+  list-style: none;
+}
+.timeline-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.timeline-main .timeline-subject {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+.timeline-main .gl-sub {
+  margin-top: 2px;
+}
+.event-icon.info {
+  background: var(--gl-info-bg);
+  color: var(--gl-info-fg);
+}
+.event-icon.positive {
+  background: var(--gl-ok-bg);
+  color: var(--gl-ok-fg);
+}
+.event-icon.warning {
+  background: var(--gl-warn-bg);
+  color: var(--gl-warn-fg);
+}
+.event-icon.negative {
+  background: var(--gl-danger-bg);
+  color: var(--gl-danger-fg);
+}
+.event-icon.neutral {
+  background: var(--gl-neutral-bg);
+  color: var(--gl-neutral-fg);
+}
+@media (max-width: 760px) {
+  .deal-stepper li {
+    min-width: 84px;
+  }
+}

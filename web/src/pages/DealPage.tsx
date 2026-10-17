@@ -2,14 +2,18 @@
 // v stave Pripravované), kontaktné osoby s rolami, ďalší krok, časová os s poznámkami, výstrahy Finstatu, ponuky
 // s verziami a pridaná hodnota / odhad provízie z ponuky (F2). E-maily a podklady pre zmluvu pribudnú vo fázach F4–F5.
 // Pravidlá štádií a vlastníka stráži databáza.
+// Vzhľad podľa docs/design-handoff/reference/04-obchod-detail.html: hlavička s krajinou, štádiá v sklenenej lište
+// (hotové zelené, aktuálne modré, prehraté vpravo), KPI s hlavnou pridanou hodnotou, ponuky ako karty, časová os s ikonami.
 
-import { EmailList } from '../components/email';
+import { EmailComposer, EmailList } from '../components/email';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { LostPanel, ReopenPanel, RiskPills } from '../components/deal-forms';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
 import { changed, initialValues, OomFields, type OomFormValues, type OomOptions } from '../components/oom-forms';
-import { Card, Empty, ErrorState, Kpi, PageSkeleton, Pill, Rows, StatusPill } from '../components/ui';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
+import { Card, Empty, ErrorState, Kpi, PageSkeleton, Pill, Rows, StatusPill, WithUnit } from '../components/ui';
 import { send, useApi, type Owner } from '../lib/api';
 import { type DealCard, type DealContact, type DealOom, type DealOptions, isSupply, OUTCOME_TONE, type StageRef, STEP_STATE, type TimelineItem, VOLTAGE } from '../lib/deals';
 import { date, eur, mwh, num, text } from '../lib/format';
@@ -30,6 +34,9 @@ export function DealPage() {
   const [panel, setPanel] = useState<null | 'edit' | 'lost' | 'reopen' | 'step' | 'oom-add' | 'oom-new' | 'contact-add' | 'help'>(null);
   const [editOom, setEditOom] = useState<DealOom | null>(null);
   const [tlFilter, setTlFilter] = useState<'vsetko' | 'poznamka' | 'udalost'>('vsetko');
+  // „Poslať e-mail“ v hlavičke (Peter 16. 10. 2026) – rovnaký dialóg ako Nový e-mail v karte; po odoslaní sa zoznam načíta znova
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailKey, setMailKey] = useState(0);
   const save = useSave();
   const refresh = () => {
     reload();
@@ -78,92 +85,139 @@ export function DealPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <div className="caption">
+      <PageHero
+        size="detail"
+        above={
+          <>
             <Link to="/obchody">Obchody</Link> · {d.pipeline_name}
-          </div>
-          <h1 className="t-page-title">{d.name}</h1>
-          <div className="page-sub" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Pill tone={OUTCOME_TONE[d.stage_outcome]}>{d.stage_name}</Pill>
+          </>
+        }
+        title={d.name}
+        sub={
+          <span className="hero-meta">
+            <Pill tone={OUTCOME_TONE[d.stage_outcome]} live>
+              {d.stage_name}
+            </Pill>
             <Link to={d.company_id ? `/firmy/${d.company_id}` : `/osoby/${d.person_id}`}>{text(d.customer_name)}</Link>
             <span>· {text(d.owner_name)}</span>
             {d.source_code === 'obnova' && <Pill tone="info">Obnova</Pill>}
             <RiskPills risk={d.risk} />
-          </div>
-        </div>
-        <div className="head-actions">
-          {(d.stage_code === 'akceptacia' || d.stage_code === 'vyhrane') && (
-            <Link className="btn" to={`/obchody/${d.id}/podklady`}>
-              Podklady pre zmluvu
-            </Link>
-          )}
-          {d.can_request_help && (
-            <button type="button" className="btn" onClick={() => setPanel('help')}>
-              Požiadať o pomoc s ponukou
+          </span>
+        }
+        actions={
+          <>
+            <button type="button" className="btn" onClick={() => setMailOpen(true)}>
+              <Icon d={ICONS.mail} />
+              Poslať e-mail
             </button>
-          )}
-          {editable && (
-            <button type="button" className="btn" onClick={() => setPanel('step')}>
-              Ďalší krok
-            </button>
-          )}
-          {editable && (
-            <button type="button" className="btn" onClick={() => setPanel('edit')}>
-              Upraviť
-            </button>
-          )}
-          {closed && d.can_reopen && (
-            <button type="button" className="btn" onClick={() => setPanel('reopen')}>
-              Znova otvoriť
-            </button>
-          )}
-        </div>
-      </header>
+            {(d.stage_code === 'akceptacia' || d.stage_code === 'vyhrane') && (
+              <Link className="btn" to={`/obchody/${d.id}/podklady`}>
+                <Icon d={ICONS.contracts} />
+                Podklady pre zmluvu
+              </Link>
+            )}
+            {d.can_request_help && (
+              <button type="button" className="btn" onClick={() => setPanel('help')}>
+                Požiadať o pomoc s ponukou
+              </button>
+            )}
+            {editable && (
+              <button type="button" className="btn" onClick={() => setPanel('step')}>
+                Ďalší krok
+              </button>
+            )}
+            {editable && (
+              <button type="button" className="btn" onClick={() => setPanel('edit')}>
+                Upraviť
+              </button>
+            )}
+            {closed && d.can_reopen && (
+              <button type="button" className="btn" onClick={() => setPanel('reopen')}>
+                Znova otvoriť
+              </button>
+            )}
+            {latest && (
+              <Link className="btn primary" to={`/ponuky/${latest.id}`}>
+                <Icon d={ICONS.contracts} />
+                Otvoriť ponuku
+              </Link>
+            )}
+          </>
+        }
+      />
+
+      <GlassBar
+        label="Štádiá obchodu"
+        aside={d.stages
+          .filter((s) => s.outcome === 'prehrany')
+          .map((s) => {
+            const current = s.id === d.stage_id;
+            const locked = !editable || current || !lostStage;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={`btn btn-sm${current ? ' stage-lost-current' : ''}`}
+                disabled={locked || save.busy}
+                aria-current={current ? 'step' : undefined}
+                onClick={() => moveTo(s)}
+              >
+                {s.name}
+                {!current ? '…' : ''}
+              </button>
+            );
+          })}
+      >
+        <ol className="gl-stepper deal-stepper">
+          {d.stages
+            .filter((s) => s.outcome !== 'prehrany')
+            .map((s) => {
+              const current = s.id === d.stage_id;
+              const i = d.stages.findIndex((x) => x.id === s.id);
+              const currentIdx = d.stages.findIndex((x) => x.id === d.stage_id);
+              const done = s.outcome === 'otvoreny' && (i < currentIdx || d.stage_outcome === 'vyhrany');
+              const locked = !editable || current || s.code === 'akceptacia' || s.code === 'vyhrane';
+              return (
+                <li key={s.id} className={done ? 'is-done' : current ? 'is-current' : undefined} aria-current={current ? 'step' : undefined}>
+                  <button type="button" className="stepper-btn" disabled={locked || save.busy} title={stageTitle(s)} onClick={() => moveTo(s)}>
+                    <span className="stepper-dot" aria-hidden="true">
+                      {done && (
+                        <svg viewBox="0 0 24 24">
+                          <path d={ICONS.approve} />
+                        </svg>
+                      )}
+                    </span>
+                    <span>
+                      {s.name}
+                      {done && <span className="sr-only"> (hotové)</span>}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+        </ol>
+      </GlassBar>
       {save.error && <Notice tone="error">{save.error}</Notice>}
       {d.risk?.needs_approval && (
         <Notice tone="error">Zákazník je v konkurze, reštrukturalizácii alebo má rating E/X – ponuku bude možné odoslať až po schválení.</Notice>
       )}
-
-      <nav className="stepper" aria-label="Štádiá obchodu">
-        {d.stages.map((s, i) => {
-          const current = s.id === d.stage_id;
-          const currentIdx = d.stages.findIndex((x) => x.id === d.stage_id);
-          const done = s.outcome === 'otvoreny' && (i < currentIdx || d.stage_outcome === 'vyhrany');
-          const locked = !editable || current || s.code === 'akceptacia' || s.code === 'vyhrane' || (s.code === 'prehrane' && !lostStage);
-          return (
-            <button
-              key={s.id}
-              type="button"
-              className={`step${current ? ' step-current' : ''}${done ? ' step-done' : ''} step-${s.outcome}`}
-              disabled={locked || save.busy}
-              title={stageTitle(s)}
-              aria-current={current ? 'step' : undefined}
-              onClick={() => moveTo(s)}
-            >
-              {s.name}
-              {s.code === 'prehrane' && !current ? '…' : ''}
-            </button>
-          );
-        })}
-      </nav>
       {closed && (
-        <p className="caption" style={{ marginTop: -8 }}>
+        <p className="caption" style={{ margin: 0 }}>
           Uzavretý {date(d.closed_at)}
           {d.lost_reason_label ? ` · dôvod: ${d.lost_reason_label}` : ''}
           {d.lost_note ? ` · ${d.lost_note}` : ''}
         </p>
       )}
 
-      <div className="kpis" style={{ margin: '12px 0 16px' }}>
+      <div className="kpis">
         {supply ? (
           <Kpi
             label="Objem MWh / rok"
-            value={mwh(totals.all)}
+            value={<WithUnit value={mwh(totals.all)} />}
             sub={`${num(d.ooms.length, 0)} OOM${totals.vn > 0 ? ` · NN ${num(totals.nn, 1)} · VN ${num(totals.vn, 1)}` : ''}`}
           />
         ) : (
-          <Kpi label="Výroba MWh / rok" value={mwh(totals.feed)} sub={`${num(d.ooms.length, 0)} OOM · ${num(totals.kw, 1)} kW`} />
+          <Kpi label="Výroba MWh / rok" value={<WithUnit value={mwh(totals.feed)} />} sub={`${num(d.ooms.length, 0)} OOM · ${num(totals.kw, 1)} kW`} />
         )}
         {mainTotal ? (
           <>
@@ -171,18 +225,21 @@ export function DealPage() {
               label={`Pridaná hodnota – variant ${offers.data?.main ? String.fromCharCode(64 + offers.data.main.sort_order) : ''}${offers.data?.main?.accepted ? ' (akceptovaný)' : ' (hlavný)'}`}
               value={`${eur(mainTotal.added_value_eur)} €`}
               sub={`${offers.data?.main?.display_number ?? ''}${mainYears ? ` · ${mainYears}` : ''}`}
+              variant="soft"
             />
             <Kpi
+              accent
               label={`Odhad provízie (${num(mainTotal.commission_pct, 2)} %)`}
               value={`${eur(mainTotal.commission_eur)} €`}
               sub="z pridanej hodnoty variantu"
             />
           </>
         ) : (
-          <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad obchodníka – kým nie je ponuka" />
+          <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad obchodníka – kým nie je ponuka" variant="soft" />
         )}
         <Kpi
-          label="Ďalší krok"
+          label={d.step_state === 'po_termine' ? 'Ďalší krok · po termíne' : 'Ďalší krok'}
+          variant={d.step_state === 'po_termine' ? 'danger' : undefined}
           value={d.next_step ? date(d.next_step_on) : '–'}
           sub={d.next_step ?? (d.step_state ? STEP_STATE[d.step_state].label : undefined)}
         />
@@ -208,14 +265,14 @@ export function DealPage() {
             }
           >
             <OomTable deal={d} editable={editable} onEdit={setEditOom} onChanged={refresh} />
-            <div className="caption" style={{ padding: '8px 16px' }}>
+            <div className="caption card-note">
               NN a VN sú v jednom obchode a jednej ponuke; na dve zmluvy sa rozdelia až v podkladoch pre zmluvu. Objemy na obchode sú odhad pre
               ponuku – plánovanú spotrebu z XM Trade neprepisujú.
             </div>
           </Card>
 
           <Card title="E-maily a odpovede">
-            <EmailList query={`deal_id=${d.id}`} source={{ dealId: d.id }} />
+            <EmailList key={mailKey} query={`deal_id=${d.id}`} source={{ dealId: d.id }} />
           </Card>
 
           <Card
@@ -235,18 +292,23 @@ export function DealPage() {
               <Empty>Zatiaľ bez udalostí.</Empty>
             ) : (
               <ul className="timeline">
-                {timeline.data.items.filter((t) => tlFilter === 'vsetko' || t.type === tlFilter).map((t) => (
-                  <li key={t.id} className="timeline-item">
-                    <div className="timeline-head">
-                      <span className="caption">
-                        {date(t.occurred_at)} {time(t.occurred_at)}
+                {timeline.data.items.filter((t) => tlFilter === 'vsetko' || t.type === tlFilter).map((t) => {
+                  const ic = eventIcon(t);
+                  return (
+                    <li key={t.id} className="gl-event timeline-event">
+                      <span className={`gl-event__icon event-icon ${ic.tone}`} aria-hidden="true">
+                        <Icon d={ic.d} />
                       </span>
-                      <span className="caption">· {t.user_name ?? 'Systém'}</span>
-                    </div>
-                    <div className="timeline-subject">{eventText(t)}</div>
-                    {(t.body || t.reason) && <div className="timeline-body">{t.body ?? t.reason}</div>}
-                  </li>
-                ))}
+                      <div className="timeline-main">
+                        <div className="timeline-subject">{eventText(t)}</div>
+                        <div className="gl-sub">
+                          {date(t.occurred_at)} {time(t.occurred_at)} · {t.user_name ?? 'Systém'}
+                        </div>
+                        {(t.body || t.reason) && <div className="timeline-body">{t.body ?? t.reason}</div>}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>
@@ -267,33 +329,25 @@ export function DealPage() {
             {!offers.data ? null : offers.data.items.length === 0 ? (
               <Empty>{d.ooms.length === 0 ? 'Pred ponukou pridajte do obchodu aspoň jedno OOM.' : 'Zatiaľ bez ponuky.'}</Empty>
             ) : (
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Číslo</th>
-                    <th>Stav</th>
-                    <th>Platí do</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {offers.data.items.map((x) => (
-                    <tr key={x.id} className="clickable" onClick={() => navigate(`/ponuky/${x.id}`)}>
-                      <td>
-                        <Link className="mono" to={`/ponuky/${x.id}`} onClick={(e) => e.stopPropagation()}>
-                          {x.display_number}
-                        </Link>
-                        <div className="sub">
-                          {x.variants} {x.variants === 1 ? 'variant' : x.variants < 5 ? 'varianty' : 'variantov'} · {x.language.toUpperCase()}
-                        </div>
-                      </td>
-                      <td>
+              <div className="offer-list">
+                {offers.data.items.map((x, i) => {
+                  const past = x.state === 'nahradena' || x.state === 'vyprsana';
+                  return (
+                    <Link key={x.id} to={`/ponuky/${x.id}`} className={`offer-item${i === 0 && !past ? ' is-current' : ''}`}>
+                      <span className="offer-item-row">
+                        <span className="gl-mono offer-no">{x.display_number}</span>
                         <StatusPill map={OFFER_STATE} value={x.state} />
-                      </td>
-                      <td className={x.state === 'nahradena' || x.state === 'vyprsana' ? 'muted' : undefined}>{x.valid_until ? dateTime(x.valid_until) : '–'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </span>
+                      <span className="offer-item-row">
+                        <span className="gl-sub">
+                          {x.variants} {x.variants === 1 ? 'variant' : x.variants < 5 ? 'varianty' : 'variantov'} · {x.language.toUpperCase()}
+                        </span>
+                        <span className={past ? 'gl-sub' : 'offer-valid'}>{x.valid_until ? `platí do ${dateTime(x.valid_until)}` : '–'}</span>
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
             )}
           </Card>
           <Card title="Údaje obchodu">
@@ -330,6 +384,18 @@ export function DealPage() {
       {panel === 'contact-add' && (
         <ContactAddPanel deal={d} options={opts} onClose={() => setPanel(null)} onSaved={() => { setPanel(null); refresh(); }} />
       )}
+      {mailOpen && (
+        <EmailComposer
+          title="Nový e-mail"
+          source={{ dealId: d.id }}
+          onClose={() => setMailOpen(false)}
+          onDone={() => {
+            setMailOpen(false);
+            setMailKey((k) => k + 1);
+            timeline.reload();
+          }}
+        />
+      )}
       {editOom && <OomVolumePanel deal={d} oom={editOom} onClose={() => setEditOom(null)} onSaved={() => { setEditOom(null); refresh(); }} />}
     </>
   );
@@ -337,6 +403,22 @@ export function DealPage() {
 
 const offerNo = (t: TimelineItem) =>
   t.detail?.number ? `${String(t.detail.number)}${Number(t.detail.version) > 1 ? `/${String(t.detail.version)}` : ''}` : '';
+
+/** Ikonová dlaždica udalosti v časovej osi podľa typu (DESIGN_SPEC § 6). */
+function eventIcon(t: TimelineItem): { d: string; tone: 'info' | 'positive' | 'warning' | 'negative' | 'neutral' } {
+  if (t.type === 'poznamka') return { d: ICONS.note, tone: 'neutral' };
+  const k = t.kind ?? '';
+  if (k === 'ponuka_otvorena') return { d: ICONS.eye, tone: 'info' };
+  if (k === 'ponuka_odoslana') return { d: ICONS.mail, tone: 'positive' };
+  if (k === 'ponuka_akceptovana' || k === 'zmluva_sparovana') return { d: ICONS.approve, tone: 'positive' };
+  if (k === 'schvalenie_rozhodnutie') return t.detail?.approved ? { d: ICONS.approve, tone: 'positive' } : { d: ICONS.close, tone: 'negative' };
+  if (k === 'schvalenie_ziadost' || k === 'pomoc_ziadost') return { d: ICONS.alert, tone: 'warning' };
+  if (k === 'ponuka_zamietnuta' || k === 'akceptacia_zrusena' || k === 'oom_zrusene') return { d: ICONS.close, tone: 'negative' };
+  if (k.startsWith('ponuka')) return { d: ICONS.contracts, tone: 'info' };
+  if (k.startsWith('oom')) return { d: ICONS.oom, tone: 'neutral' };
+  if (k.startsWith('kontakt')) return { d: ICONS.contacts, tone: 'neutral' };
+  return { d: ICONS.deals, tone: 'neutral' };
+}
 
 function eventText(t: TimelineItem): string {
   if (t.type === 'poznamka') return 'Poznámka';
@@ -416,14 +498,14 @@ function OomTable(props: { deal: DealCard; editable: boolean; onEdit: (o: DealOo
           {deal.ooms.map((o) => (
             <tr key={o.id}>
               <td>
-                {o.eic ? <Link to={`/oom/${o.id}`}>{o.eic}</Link> : <span className="muted">OOM nevidíte</span>}
+                {o.eic ? <Link className="gl-mono" to={`/oom/${o.id}`}>{o.eic}</Link> : <span className="muted">OOM nevidíte</span>}
                 <div className="sub">
                   {o.type ? OOM_TYPE[o.type] ?? o.type : ''}
                   {o.created_here ? ' · nové z obchodu' : ''}
                 </div>
               </td>
               <td>{text(o.address)}</td>
-              <td>{o.voltage_level ? VOLTAGE[o.voltage_level] : '–'}</td>
+              <td>{o.voltage_level ? <Pill tone={o.voltage_level === 'nn' ? 'neutral' : 'info'}>{VOLTAGE[o.voltage_level]}</Pill> : '–'}</td>
               <td>{text(o.pds_tariff)}</td>
               {supply ? (
                 <>
@@ -439,10 +521,10 @@ function OomTable(props: { deal: DealCard; editable: boolean; onEdit: (o: DealOo
               <td>{o.status ? <StatusPill map={OOM_STATUS} value={o.status} /> : '–'}</td>
               {props.editable && (
                 <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => props.onEdit(o)}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => props.onEdit(o)}>
                     Objemy
                   </button>
-                  <button type="button" className="btn btn-ghost" disabled={save.busy} onClick={() => remove(o)}>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={save.busy} onClick={() => remove(o)}>
                     Odobrať
                   </button>
                 </td>
