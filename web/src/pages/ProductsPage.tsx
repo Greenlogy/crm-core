@@ -5,8 +5,10 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Check } from '../components/form';
 import { ProductPanel } from '../components/product-edit';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
 import { PriceTabs, tariffText, vatText } from '../components/pricelists';
-import { Card, ErrorState, PageSkeleton, Source, StatusPill } from '../components/ui';
+import { Card, ErrorState, PageSkeleton, StatusPill } from '../components/ui';
 import { useApi, type ProductRow } from '../lib/api';
 import { EMPTY, num } from '../lib/format';
 import { label, PRICE_MODEL, PRODUCT_CATEGORY, PRODUCT_GROUPS, PRODUCT_STATUS } from '../lib/labels';
@@ -40,22 +42,20 @@ export function ProductsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Produkty</h1>
-          <div className="page-sub">
-            <span>katalóg – čo predávame</span>
-            <Source />
-          </div>
-        </div>
-        {admin && (
-          <div className="head-actions">
-            <button type="button" className="btn primary" onClick={() => setPanel('new')}>
-              Nový produkt
-            </button>
-          </div>
-        )}
-      </header>
+      <PageHero
+        title="Produkty"
+        sub="katalóg – čo predávame"
+        actions={
+          admin ? (
+            <>
+              <button type="button" className="btn primary" onClick={() => setPanel('new')}>
+                <Icon d={ICONS.plus} />
+                Nový produkt
+              </button>
+            </>
+          ) : undefined
+        }
+      />
       {panel && (
         <ProductPanel
           product={panel === 'new' ? undefined : panel}
@@ -66,7 +66,9 @@ export function ProductsPage() {
           }}
         />
       )}
-      <PriceTabs />
+      <GlassBar label="Cenníky, produkty, programy">
+        <PriceTabs />
+      </GlassBar>
 
       <Card flush label="Katalóg produktov">
         <div className="toolbar chips-bar">

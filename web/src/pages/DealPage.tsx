@@ -226,6 +226,7 @@ export function DealPage() {
               value={`${eur(mainTotal.added_value_eur)} €`}
               sub={`${offers.data?.main?.display_number ?? ''}${mainYears ? ` · ${mainYears}` : ''}`}
               variant="soft"
+              negative={Number(mainTotal.added_value_eur) < 0}
             />
             <Kpi
               accent
@@ -235,7 +236,7 @@ export function DealPage() {
             />
           </>
         ) : (
-          <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad obchodníka – kým nie je ponuka" variant="soft" />
+          <Kpi label="Pridaná hodnota" value={d.value_eur === null ? '' : `≈ ${eur(d.value_eur)} €`} sub="odhad obchodníka – kým nie je ponuka" variant="soft" negative={Number(d.value_eur) < 0} />
         )}
         <Kpi
           label={d.step_state === 'po_termine' ? 'Ďalší krok · po termíne' : 'Ďalší krok'}

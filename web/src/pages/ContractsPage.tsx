@@ -167,11 +167,11 @@ export function ContractsPage() {
         </div>
 
         {error ? (
-          <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ padding: '0 24px 20px' }}>
             <ErrorState error={error} />
           </div>
         ) : !data ? (
-          <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ padding: '0 24px 20px' }}>
             <Skeleton lines={10} />
           </div>
         ) : (

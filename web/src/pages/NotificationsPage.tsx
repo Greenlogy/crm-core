@@ -4,6 +4,7 @@
 
 import { Link } from 'react-router-dom';
 import { Notice, useSave } from '../components/form';
+import { PageHero } from '../components/hero';
 import { Card, Empty, ErrorState, Item, Pill, Skeleton } from '../components/ui';
 import { send, useApi, type NotificationRow } from '../lib/api';
 import { date } from '../lib/format';
@@ -37,17 +38,15 @@ export function NotificationsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Upozornenia</h1>
-          <div className="page-sub">{data ? `${data.unread} neprečítaných` : ''}</div>
-        </div>
-        <div className="head-actions">
+      <PageHero
+        title="Upozornenia"
+        sub={data ? `${data.unread} neprečítaných` : undefined}
+        actions={
           <button type="button" className="btn" disabled={save.busy || !data?.unread} onClick={markAll}>
             Označiť všetko ako prečítané
           </button>
-        </div>
-      </header>
+        }
+      />
       {save.error && <Notice tone="error">{save.error}</Notice>}
       {error ? (
         <ErrorState error={error} />
@@ -86,7 +85,7 @@ export function NotificationsPage() {
                       n.read_at ? (
                         <span className="caption">prečítané</span>
                       ) : (
-                        <button type="button" className="btn" onClick={() => markRead(n)}>
+                        <button type="button" className="btn btn-sm" onClick={() => markRead(n)}>
                           Prečítané
                         </button>
                       )

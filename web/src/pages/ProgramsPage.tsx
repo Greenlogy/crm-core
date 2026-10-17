@@ -1,8 +1,9 @@
 // Programy (obrazovka 23, modul 3 F1 – iba čítanie): VBattery a Green VIWA s parametrami balíkov z platnej verzie cenníka.
 // Ceny s DPH z databázy. Stĺpec „Zmluvy“ príde v module 4.
 
+import { GlassBar, PageHero } from '../components/hero';
 import { PriceTabs } from '../components/pricelists';
-import { Card, ErrorState, PageSkeleton, Source, StatusPill } from '../components/ui';
+import { Card, ErrorState, PageSkeleton, StatusPill } from '../components/ui';
 import { useApi, type ProgramRow } from '../lib/api';
 import { date, dec, EMPTY } from '../lib/format';
 import { PRODUCT_STATUS } from '../lib/labels';
@@ -22,16 +23,13 @@ export function ProgramsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Programy</h1>
-          <div className="page-sub">
-            <span>VBattery a Green VIWA – parametre balíkov</span>
-            <Source />
-          </div>
-        </div>
-      </header>
-      <PriceTabs />
+      <PageHero
+        title="Programy"
+        sub="VBattery a Green VIWA – parametre balíkov"
+      />
+      <GlassBar label="Cenníky, produkty, programy">
+        <PriceTabs />
+      </GlassBar>
 
       <Card flush title="Virtuálna batéria (VBattery)" label="VBattery">
         <div className="price-note">

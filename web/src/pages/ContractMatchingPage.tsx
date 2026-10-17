@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Field, Notice, SidePanel, TextInput, useSave } from '../components/form';
+import { PageHero } from '../components/hero';
 import { Card, Empty, ErrorState, Pill, Skeleton } from '../components/ui';
 import { type DealCandidate, send, useApi } from '../lib/api';
 import { date } from '../lib/format';
@@ -40,12 +41,7 @@ export function ContractMatchingPage() {
   });
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Zmluvy k obchodom</h1>
-          <span className="page-sub">akceptované obchody a párovanie importu</span>
-        </div>
-      </header>
+      <PageHero title="Zmluvy k obchodom" sub="akceptované obchody a párovanie importu" />
       {save.error && <Notice tone="error">{save.error}</Notice>}
 
       <Card title="Čaká na zmluvu (Akceptácia)" aside={<span className="caption">zadáva obchodník (firmy), back office (domácnosti), Nákup (výkup)</span>} flush>
@@ -121,7 +117,7 @@ export function ContractMatchingPage() {
             </table>
           </div>
         )}
-        <div className="caption" style={{ padding: '8px 16px' }}>
+        <div className="caption" style={{ padding: '10px 24px 16px' }}>
           Import páruje zmluvu s otvoreným obchodom toho istého zákazníka podľa EIC (Akceptácia: akceptovaný variant; Vyjednávanie: OOM obchodu).
           Jednoznačná zhoda sa spáruje sama; ostatné vyberie vlastník zákazníka alebo admin, alebo označí „Bez obchodu“.
         </div>
@@ -145,7 +141,7 @@ export function ContractMatchingPage() {
             </table>
           </div>
         )}
-        <div className="caption" style={{ padding: '8px 16px' }}>
+        <div className="caption" style={{ padding: '10px 24px 16px' }}>
           Upozornenie dostane obchodník a schvaľovatelia cien. Príznak uzatvára schvaľovateľ cien s poznámkou na karte zmluvy.
         </div>
       </Card>

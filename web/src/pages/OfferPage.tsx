@@ -487,7 +487,7 @@ function VariantEditor(props: { offer: Offer; variant: Variant; values: VariantV
           ) : undefined
         }
       >
-        {save.error && <div style={{ padding: '0 16px' }}><Notice tone="error">{save.error}</Notice></div>}
+        {save.error && <div style={{ padding: '0 24px' }}><Notice tone="error">{save.error}</Notice></div>}
         {!listPriced && editable && (
           <div className="price-toolbar">
             <Field label="Produkt">
@@ -595,7 +595,7 @@ function VariantEditor(props: { offer: Offer; variant: Variant; values: VariantV
             </table>
           </div>
         )}
-        <div className="caption" style={{ padding: '8px 16px' }}>
+        <div className="caption" style={{ padding: '10px 24px 16px' }}>
           {listPriced
             ? 'Ceny z cenníka dopĺňa CRM podľa sadzby OOM a obchodník ich nemení.'
             : `Hranica = ${vykup ? 'minimálny aditív výkupu' : o.seller_type === 'manazer' ? 'odhad nákupnej ceny portfólia (manažér)' : 'cena pre obchodníka'} ku dňu verzie (${date(o.priced_on)}). Pri schválenej výnimke platí schválená hranica. PH = pridaná hodnota, iba komodita.`}

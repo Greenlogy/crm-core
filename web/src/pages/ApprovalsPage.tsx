@@ -8,6 +8,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RiskPills } from '../components/deal-forms';
 import { Field, Notice, useSave } from '../components/form';
+import { GlassBar, PageHero } from '../components/hero';
 import { Card, Empty, ErrorState, Rows, Skeleton, StatusPill } from '../components/ui';
 import { send, useApi } from '../lib/api';
 import type { Risk } from '../lib/deals';
@@ -109,26 +110,21 @@ export function ApprovalsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="page-head-main check-title">
-          <h1 className="t-page-title">Schvaľovanie</h1>
-          <span className="check-title-sub">výnimky, konkurz a rating, platnosť, pridelenie firmy</span>
+      <PageHero title="Schvaľovanie" sub="výnimky, konkurz a rating, platnosť, pridelenie firmy" />
+      <GlassBar label="Filter žiadostí">
+        <div className="chips" role="group" aria-label="Filter">
+          {TABS.map(([v, n]) => (
+            <button key={v} type="button" className="chip" aria-pressed={tab === v} onClick={() => setTab(v)}>
+              {n} {v === 'caka' && <span className="cc">{data ? num(data.counts.caka ?? 0, 0) : ''}</span>}
+            </button>
+          ))}
         </div>
-      </header>
+      </GlassBar>
       <div className="columns">
         <div className="col-wide">
           <Card flush label="Žiadosti">
-            <div className="toolbar chips-bar">
-              <div className="chips" role="group" aria-label="Filter">
-                {TABS.map(([v, n]) => (
-                  <button key={v} type="button" className="chip" aria-pressed={tab === v} onClick={() => setTab(v)}>
-                    {n} {v === 'caka' && <span className="cc">{data ? num(data.counts.caka ?? 0, 0) : ''}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
             {!data ? (
-              <div style={{ padding: 16 }}>
+              <div className="card-body" style={{ paddingTop: 20 }}>
                 <Skeleton lines={5} />
               </div>
             ) : (
@@ -178,7 +174,7 @@ export function ApprovalsPage() {
                 </table>
               </div>
             )}
-            <div className="caption" style={{ padding: '8px 16px' }}>
+            <div className="caption" style={{ padding: '10px 24px 16px' }}>
               Výnimky, konkurz / rating E/X a predĺženie platnosti schvaľuje CEO alebo obchodný riaditeľ (príznak „schvaľuje ceny“). Pridelenie
               firmy schvaľuje manažér alebo obchodný riaditeľ. Schválená výnimka platí 3 dni na odoslanie ponuky, schválenie rizika 30 dní.
             </div>

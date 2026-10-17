@@ -7,7 +7,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PersonFormPanel, useCanCreateCustomers } from '../components/customer-forms';
 import { CustomFilters, formatCustom, useFieldDefs } from '../components/custom-fields';
 import { permission, useMe } from '../lib/me';
-import { Avatar, Card, ErrorState, Pill, Skeleton, Source } from '../components/ui';
+import { PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
+import { Avatar, Card, ErrorState, Pill, Skeleton } from '../components/ui';
 import { useApi, type ContactList } from '../lib/api';
 import { date, num } from '../lib/format';
 import { COMPANY_ROLE, CUSTOMER_STATUS, rolesText } from '../lib/labels';
@@ -52,38 +54,40 @@ export function ContactsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Kontakty</h1>
-          <div className="page-sub">
-            <span>všetky osoby · zákazníci za domácnosť aj kontakty vo firmách</span>
-            <Source />
-          </div>
-        </div>
-        <div className="head-actions">
-          {canExport && (
-            <a className="btn" href={`/api/contacts/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
-              Export
-            </a>
-          )}
-          {canCreate && (
-            <button className="btn primary" type="button" onClick={() => setCreating(true)}>
-              Nová osoba
-            </button>
-          )}
-        </div>
-      </header>
+      <PageHero
+        title="Kontakty"
+        sub="všetky osoby · zákazníci za domácnosť aj kontakty vo firmách"
+        actions={
+          <>
+            {canExport && (
+              <a className="btn" href={`/api/contacts/export?${query}`} title="Stiahnuť zoznam podľa filtra (.xlsx)">
+                <Icon d={ICONS.download} />
+                Export
+              </a>
+            )}
+            {canCreate && (
+              <button className="btn primary" type="button" onClick={() => setCreating(true)}>
+                <Icon d={ICONS.plus} />
+                Nová osoba
+              </button>
+            )}
+          </>
+        }
+      />
 
       <Card flush label="Zoznam osôb">
         <div className="toolbar">
-          <input
-            className="input grow"
-            type="search"
-            placeholder="Meno, e-mail alebo telefón…"
-            aria-label="Hľadať osobu"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
+          <div className="gl-search list-search">
+            <Icon d={ICONS.search} />
+            <input
+              className="input"
+              type="search"
+              placeholder="Meno, e-mail alebo telefón…"
+              aria-label="Hľadať osobu"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
           <select className="input select" aria-label="Rola" value={role} onChange={(e) => update({ rola: e.target.value, page: '1' })}>
             <option value="">Rola: všetky</option>
             {roleOptions.map((r) => (
@@ -96,11 +100,11 @@ export function ContactsPage() {
         </div>
 
         {error ? (
-          <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ padding: '0 24px 20px' }}>
             <ErrorState error={error} />
           </div>
         ) : !data ? (
-          <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ padding: '0 24px 20px' }}>
             <Skeleton lines={10} />
           </div>
         ) : (
@@ -198,14 +202,14 @@ export function ContactsPage() {
               · jedna osoba = jeden záznam, aj keď pôsobí vo viacerých firmách
             </span>
             {pages > 1 && (
-              <>
+              <div className="pager-actions">
                 <button type="button" className="btn" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                   ← Predchádzajúca
                 </button>
                 <button type="button" className="btn" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
                   Ďalšia →
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}

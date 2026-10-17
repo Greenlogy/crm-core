@@ -56,9 +56,11 @@ export function Kpi(props: {
   variant?: 'soft' | 'danger';
   /** zvýraznené číslo v --gl-brand-blue (odhad provízie) */
   accent?: boolean;
+  /** záporná hodnota (napr. pridaná hodnota) v červenej */
+  negative?: boolean;
 }) {
   // Bez dát sa zobrazí „—“, nikdy 0 (komponent KpiCard).
-  const cls = ['card', 'kpi', props.variant && `kpi-${props.variant}`, props.accent && 'kpi-accent'].filter(Boolean).join(' ');
+  const cls = ['card', 'kpi', props.variant && `kpi-${props.variant}`, props.accent && 'kpi-accent', props.negative && 'kpi-negative'].filter(Boolean).join(' ');
   return (
     <div className={cls}>
       <div className="kpi-label t-label">{props.label}</div>
@@ -155,7 +157,7 @@ export function Skeleton(props: { lines?: number }) {
 export function PageSkeleton() {
   return (
     <>
-      <div className="card" style={{ padding: '16px 20px' }}>
+      <div className="card" style={{ padding: '20px 24px' }}>
         <Skeleton lines={2} />
       </div>
       <div className="kpis">
@@ -165,7 +167,7 @@ export function PageSkeleton() {
           </div>
         ))}
       </div>
-      <div className="card" style={{ padding: '16px 20px' }}>
+      <div className="card" style={{ padding: '20px 24px' }}>
         <Skeleton lines={8} />
       </div>
     </>

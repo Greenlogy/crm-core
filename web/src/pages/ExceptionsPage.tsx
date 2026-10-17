@@ -6,6 +6,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, Field, Notice, Select, SidePanel, TextInput, useSave } from '../components/form';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
 import { Card, Empty, ErrorState, Pill, Rows, Skeleton, StatusPill } from '../components/ui';
 import { get, send, useApi } from '../lib/api';
 import { date, dec, eur, eurMwh, mwh, num, text } from '../lib/format';
@@ -70,21 +72,27 @@ export function ExceptionsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Výnimky z ceny</h1>
-          <div className="page-sub">
-            <span>žiadosti obchodníkov o cenu pod hranicou</span>
-          </div>
-        </div>
-        <div className="head-actions">
-          {me.seller_type !== null || me.is_admin ? (
+      <PageHero
+        title="Výnimky z ceny"
+        sub="žiadosti obchodníkov o cenu pod hranicou"
+        actions={
+          me.seller_type !== null || me.is_admin ? (
             <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+              <Icon d={ICONS.plus} />
               Nová žiadosť
             </button>
-          ) : null}
+          ) : undefined
+        }
+      />
+      <GlassBar label="Filter podľa stavu">
+        <div className="chips" role="group" aria-label="Stav">
+          {CHIPS.map(([v, n]) => (
+            <button key={v || 'all'} type="button" className="chip" aria-pressed={state === v} onClick={() => setState(v)}>
+              {n} <span className="cc">{data ? num(data.counts[v || 'all'] ?? 0, 0) : ''}</span>
+            </button>
+          ))}
         </div>
-      </header>
+      </GlassBar>
       {creating && (
         <NewException
           onClose={() => setCreating(false)}
@@ -99,17 +107,8 @@ export function ExceptionsPage() {
       <div className="columns">
         <div className="col-wide">
           <Card flush label="Žiadosti o výnimku">
-            <div className="toolbar chips-bar">
-              <div className="chips" role="group" aria-label="Filter podľa stavu">
-                {CHIPS.map(([v, n]) => (
-                  <button key={v || 'all'} type="button" className="chip" aria-pressed={state === v} onClick={() => setState(v)}>
-                    {n} <span className="cc">{data ? num(data.counts[v || 'all'] ?? 0, 0) : ''}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
             {!data ? (
-              <div style={{ padding: 16 }}>
+              <div className="card-body" style={{ paddingTop: 20 }}>
                 <Skeleton lines={6} />
               </div>
             ) : (
@@ -159,7 +158,7 @@ export function ExceptionsPage() {
                 </table>
               </div>
             )}
-            <div className="caption" style={{ padding: '8px 16px' }}>
+            <div className="caption" style={{ padding: '10px 24px 16px' }}>
               Schválená výnimka sa pri importe spáruje so zmluvou (zákazník + rok + model) a stane sa hranicou pre pridanú hodnotu. Platí 30 dní
               na podpis.
             </div>
@@ -436,7 +435,7 @@ function OfferExceptions() {
           </tbody>
         </table>
       </div>
-      <div className="caption" style={{ padding: '8px 16px' }}>
+      <div className="caption" style={{ padding: '10px 24px 16px' }}>
         Výnimky z ponúk žiada obchodník z ponuky a schvaľuje sa v Schvaľovaní. Platia 3 dni na odoslanie ponuky; odoslaná ponuka si ich ponechá.
         Na zmluvu sa prenesú pri spárovaní s obchodom (fáza F5).
       </div>

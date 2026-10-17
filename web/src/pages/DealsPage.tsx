@@ -7,6 +7,8 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { NewDealPanel, RiskPills } from '../components/deal-forms';
 import { Select, TextInput } from '../components/form';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
 import { Card, ErrorState, Kpi, Pill, Skeleton } from '../components/ui';
 import { useApi, type Owner } from '../lib/api';
 import { useMe } from '../lib/me';
@@ -74,22 +76,22 @@ export function DealsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Obchody</h1>
-          <div className="page-sub">
-            <span>pipeline od príležitosti po vyhratý obchod</span>
-          </div>
-        </div>
-        <div className="head-actions">
-          <Link className="btn" to="/overenie-firmy">
-            Overiť firmu
-          </Link>
-          <button type="button" className="btn primary" onClick={() => setCreating(true)}>
-            Nový obchod
-          </button>
-        </div>
-      </header>
+      <PageHero
+        title="Obchody"
+        sub="pipeline od príležitosti po vyhratý obchod"
+        actions={
+          <>
+            <Link className="btn" to="/overenie-firmy">
+              <Icon d={ICONS.check} />
+              Overiť firmu
+            </Link>
+            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+              <Icon d={ICONS.plus} />
+              Nový obchod
+            </button>
+          </>
+        }
+      />
       {creating && (
         <NewDealPanel
           onClose={() => setCreating(false)}
@@ -97,22 +99,24 @@ export function DealsPage() {
         />
       )}
 
-      <div className="tabs" role="tablist" aria-label="Pipelines">
-        {(opts?.pipelines ?? []).map((p) => (
-          <button key={p.id} type="button" role="tab" className="tab" aria-selected={p.id === activePipeline?.id} onClick={() => set('pipeline', p.id)}>
-            {p.name}
-          </button>
-        ))}
-      </div>
+      <GlassBar label="Pipelines">
+        <div className="tabs" role="tablist" aria-label="Pipelines">
+          {(opts?.pipelines ?? []).map((p) => (
+            <button key={p.id} type="button" role="tab" className="tab" aria-selected={p.id === activePipeline?.id} onClick={() => set('pipeline', p.id)}>
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </GlassBar>
 
-      <div className="kpis" style={{ marginBottom: 16 }}>
+      <div className="kpis">
         <Kpi
           label="Otvorené obchody"
           value={data ? num(kpi.count, 0) : ''}
           sub={`${activePipeline?.name ?? ''}${owner === 'ja' ? ` · vlastník ${me.name}` : ''}`}
         />
-        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="akceptovaný / hlavný variant, inak odhad" />
-        <Kpi label="Vážená pridaná hodnota" value={data ? `${eur(kpi.weighted)} €` : ''} sub="podľa pravdepodobnosti štádia" />
+        <Kpi label="Pridaná hodnota otvorených" value={data ? `${eur(kpi.sum)} €` : ''} sub="akceptovaný / hlavný variant, inak odhad" negative={kpi.sum < 0} />
+        <Kpi label="Vážená pridaná hodnota" value={data ? `${eur(kpi.weighted)} €` : ''} sub="podľa pravdepodobnosti štádia" negative={kpi.weighted < 0} />
         <Kpi label="Bez kroku / po termíne" value={data ? num(kpi.attention, 0) : ''} sub="zvýraznené" />
       </div>
 
@@ -141,12 +145,12 @@ export function DealsPage() {
           </div>
         </div>
         {data?.truncated && (
-          <div className="caption" style={{ padding: '8px 16px', color: 'var(--warning)' }}>
+          <div className="caption" style={{ padding: '8px 24px', color: 'var(--gl-warn-fg)' }}>
             Zobrazených je prvých 1 000 obchodov – zúžte filter (vlastník, ďalší krok, hľadanie). Súčty a počty sú za všetky.
           </div>
         )}
         {!data || !activePipeline ? (
-          <div style={{ padding: 16 }}>
+          <div className="card-body">
             <Skeleton lines={6} />
           </div>
         ) : view === 'kanban' ? (
@@ -182,7 +186,7 @@ function Kanban(props: { items: DealRow[]; totals: StageTotal[]; stages: DealOpt
                 <div className="kanban-title">{d.name}</div>
                 <div className="caption">{text(d.customer_name)}</div>
                 <div className="kanban-meta">
-                  <span title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined}>
+                  <span title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined} className={Number(d.value_eur) < 0 ? 'negative-text' : undefined}>
                     PH {d.value_eur === null ? '–' : `${d.value_source === 'odhad' ? '≈ ' : ''}${eur(d.value_eur)} €`}
                   </span>
                   {d.step_state && d.step_state !== 'planovany' ? (
@@ -258,11 +262,11 @@ function DealTable(props: { items: DealRow[] }) {
                 )}
               </td>
               <td>{date(d.expected_close)}</td>
-              <td className="num" title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined}>
+              <td className={`num${Number(d.value_eur) < 0 ? ' negative-text' : ''}`} title={d.value_source ? VALUE_SOURCE[d.value_source] : undefined}>
                 {money(d.value_eur)}
                 {d.value_source && d.value_source !== 'odhad' && <div className="sub">{VALUE_SOURCE[d.value_source]}</div>}
               </td>
-              <td className="num">{money(d.weighted_eur)}</td>
+              <td className={`num${Number(d.weighted_eur) < 0 ? ' negative-text' : ''}`}>{money(d.weighted_eur)}</td>
             </tr>
           ))}
         </tbody>

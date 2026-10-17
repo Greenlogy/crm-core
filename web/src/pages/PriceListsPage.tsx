@@ -4,8 +4,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { NewPriceListPanel } from '../components/pricelist-edit';
+import { GlassBar, PageHero } from '../components/hero';
+import { Icon, ICONS } from '../components/Layout';
 import { PriceTabs, productsText } from '../components/pricelists';
-import { Card, ErrorState, PageSkeleton, Pill, Source } from '../components/ui';
+import { Card, ErrorState, PageSkeleton, Pill } from '../components/ui';
 import { useApi, type PriceListRow } from '../lib/api';
 import { date, EMPTY } from '../lib/format';
 import { label, SEGMENT } from '../lib/labels';
@@ -21,24 +23,24 @@ export function PriceListsPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1 className="t-page-title">Cenníky</h1>
-          <div className="page-sub">
-            <span>verzie cien s platnosťou od – do</span>
-            <Source />
-          </div>
-        </div>
-        {admin && (
-          <div className="head-actions">
-            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
-              Nový cenník
-            </button>
-          </div>
-        )}
-      </header>
+      <PageHero
+        title="Cenníky"
+        sub="verzie cien s platnosťou od – do"
+        actions={
+          admin ? (
+            <>
+              <button type="button" className="btn primary" onClick={() => setCreating(true)}>
+                <Icon d={ICONS.plus} />
+                Nový cenník
+              </button>
+            </>
+          ) : undefined
+        }
+      />
       {creating && <NewPriceListPanel onClose={() => setCreating(false)} onCreated={(id) => navigate(`/cenniky/${id}`)} />}
-      <PriceTabs />
+      <GlassBar label="Cenníky, produkty, programy">
+        <PriceTabs />
+      </GlassBar>
 
       <Card flush label="Zoznam cenníkov">
         <div className="table-wrap">

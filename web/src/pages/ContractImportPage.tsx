@@ -322,7 +322,7 @@ export function ContractImportPage() {
 
       {preview && c && (
         <>
-          <div className="card" style={{ padding: '0 16px', marginBottom: 16 }}>
+          <div className="card" style={{ padding: '0 24px', marginBottom: 16 }}>
             <div className="toolbar" style={{ padding: 0 }}>
               <div className="tabs" role="tablist" aria-label="Súbory importu" style={{ borderBottom: 0 }}>
                 {opFile && (
@@ -442,7 +442,7 @@ export function ContractImportPage() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="caption" style={{ padding: '8px 16px' }}>
+                  <div className="caption" style={{ padding: '10px 24px 16px' }}>
                     Párovanie: zmluva podľa ID a čísla, OOM podľa EIC, zákazník podľa IČO alebo Osoba_ID. Cenový model podľa prekladu názvu produktu
                     (INDIVIDUAL = FIX, ISOTSK_PLUS = SPOT + aditív, GREENVYR = výkup).
                   </div>
