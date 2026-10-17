@@ -383,7 +383,7 @@ function SummaryCard(props: { offer: Offer; variant: Variant; summary: VariantSu
           ['Pridaná hodnota spolu', <strong key="t">{eur(total?.added_value_eur)} €</strong>],
           [
             `Odhad provízie (${dec(total?.commission_pct ?? o.commission_pct, 0, 2)} %)`,
-            <strong key="p" className="tone-positive">{eur(total?.commission_eur)} €</strong>,
+            <strong key="p" className="accent-text">{eur(total?.commission_eur)} €</strong>,
           ],
           ...(o.see_margin ? ([['Marža firmy (komodita + poplatky)', `${eur(total?.margin_eur)} €`]] as [string, string][]) : []),
         ]}
@@ -480,7 +480,7 @@ function VariantEditor(props: { offer: Offer; variant: Variant; values: VariantV
         aside={
           editable && !listPriced ? (
             <span style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="btn primary" disabled={!dirty || save.busy} onClick={savePrices}>
+              <button type="button" className="btn" disabled={!dirty || save.busy} onClick={savePrices}>
                 {save.busy ? 'Ukladám…' : 'Uložiť ceny'}
               </button>
             </span>

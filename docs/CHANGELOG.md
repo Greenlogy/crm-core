@@ -2,6 +2,7 @@
 
 ## 2026-10-16
 
+- Dizajn (krok 4, skupina 3 – ponuka a Overenie firmy): jednoduchá hlavička bez krajiny s nadpisom 32 px (platí aj pre Nastavenia a importy), odhad provízie v súhrne ponuky modrou, „Uložiť ceny“ v ponuke sekundárne (jediné primárne tlačidlo je krok ponuky, napr. „Pripraviť na odoslanie“).
 - Dizajn (krok 4, skupina 2 – karty): karta firmy, osoby, OOM a zmluvy s hlavičkou s krajinou (nadpis 36 px, aby dlhé názvy nezakryli turbíny; drobčeky, avatar pri nadpise firmy a osoby, štítky a údaje v riadku pod nadpisom, akcie vpravo; číslo zmluvy v mono písme, „Výroba“ zelená, príznaky zmluvy s bodkou); poradie sekcií a záložky karty OOM bez zmeny.
 - Dizajn (krok 4, skupina 1 – ostatné zoznamy): Kontakty, Obchody (záložky pipelines v sklenenej lište, kanban v kartách so zaoblením), Cenníky / Produkty / Programy (záložky v sklenenej lište), Schvaľovanie a Výnimky z ceny (filtre v sklenenej lište), Upozornenia a Zmluvy k obchodom s hlavičkou s krajinou; záporná pridaná hodnota v červenej aj v KPI, kanbane a tabuľke obchodov a na detaile obchodu; okraje poznámok a prázdnych stavov v kartách 24 px.
 - Dizajn (obrazovka 05 Zmluvy): hlavička s krajinou, stavy a príznaky (podfarbené podľa závažnosti, druhý riadok) v sklenenej lište, hľadanie s lupou, číslo zmluvy v mono písme, príznaky v tabuľke s bodkou, zvýraznený stĺpec Marža firmy a v pätičke zámok „iba CEO, Nákup, Marketing, obch. riaditeľ“; zo zoznamov 02, 03, 05 vypustená poznámka „Údaje z Greenlogy CRM“.

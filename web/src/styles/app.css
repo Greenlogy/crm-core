@@ -35,10 +35,10 @@ a:hover {
 /* --- Typografia (pôvodné štýly t-*; veľkosti sa dorovnajú pri komponentoch) --- */
 
 .t-page-title {
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-size: 32px;
+  font-weight: var(--gl-fw-semibold);
+  line-height: 1.15;
+  letter-spacing: var(--gl-ls-tight);
 }
 .t-section-title {
   font-size: var(--gl-fs-h2);
@@ -3102,5 +3102,15 @@ a.tab {
 @media (max-width: 760px) {
   .hero-card .gl-hero__title {
     font-size: 28px;
+  }
+}
+
+/* Jednoduchá hlavička (Nastavenia, importy, ponuka, Overenie firmy) a zvýraznené číslo */
+.accent-text {
+  color: var(--gl-brand-blue);
+}
+@media (max-width: 760px) {
+  .t-page-title {
+    font-size: 26px;
   }
 }
