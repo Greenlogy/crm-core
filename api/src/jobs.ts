@@ -123,6 +123,14 @@ export async function nightlyRun(env: Env): Promise<void> {
 // behov a upozorní adminov. Do logu iba počty.
 export async function pricesRun(env: Env, scheduledTime: number): Promise<void> {
   if (!isPriceSlot(scheduledTime)) return;
+  await pricesFetchStore(env);
+}
+
+/**
+ * Beh cien z Montelu (rovnaký o 7:00, o 13:00 aj z tlačidla „Načítať dnešné ceny z Montelu“ adminom): dnešné BL / PL rokov
+ * dodávky a priemer SPOT od 1. 1.; zapisuje databáza ako beh na pozadí (vlastné pripojenie bez používateľa) s denníkom behov.
+ */
+export async function pricesFetchStore(env: Env): Promise<{ ceny: number; spot: number; chyby: number }> {
   const errors: { krok: string; kod: string; text: string }[] = [];
   const get = async (path: MontelPath): Promise<unknown> => {
     try {
@@ -142,6 +150,7 @@ export async function pricesRun(env: Env, scheduledTime: number): Promise<void> 
     const [row] = await sql<{ r: { ceny: number; spot: number } }[]>`
       SELECT market_price_daily_run(${sql.json(rows)}, ${spotAvg}, ${sql.json(errors)}) AS r`;
     console.log(`Ceny z Montelu: zapísané ${row?.r?.ceny ?? 0}, SPOT ${row?.r?.spot ?? 0}, chyby ${errors.length}`);
+    return { ceny: row?.r?.ceny ?? 0, spot: row?.r?.spot ?? 0, chyby: errors.length };
   } catch (err) {
     const code = (err as { code?: string }).code ?? 'unknown';
     console.error(`Ceny z Montelu zlyhali: ${(err as Error).name} ${code}`);

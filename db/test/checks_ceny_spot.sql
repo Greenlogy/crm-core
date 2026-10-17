@@ -96,7 +96,7 @@ BEGIN
   m := pg_temp.c_row(crm_today(), 2091);
   ASSERT m.bl_eur_mwh = 95.1235 AND m.pl_eur_mwh = 110 AND m.source = 'cockpit' AND m.changed_by IS NULL, 'BL / PL 2091 zo zdroja cockpit';
   ASSERT pg_temp.c_row(crm_today(), 2093) IS NULL AND pg_temp.c_row(crm_today(), 2094) IS NULL, 'neúplný a záporný riadok sa vynechá';
-  ASSERT (SELECT avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 101.5, 'SPOT priemer';
+  ASSERT (SELECT avg_ytd_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 101.5, 'SPOT priemer';
   ASSERT (SELECT count(*) FROM job_run WHERE job = 'ceny') = v_runs + 1, 'beh v denníku';
 
   -- 13:00 bez zmeny: nič nové
@@ -109,7 +109,7 @@ BEGIN
   ASSERT r->>'ceny' = '1' AND (pg_temp.c_row(crm_today(), 2092)).bl_eur_mwh = 91, 'nová hodnota dňa';
   ASSERT (SELECT count(*) FROM market_price_daily WHERE org_id = crm_default_org() AND on_date = crm_today() AND delivery_year = 2092
             AND corrected_at IS NOT NULL AND bl_eur_mwh = 90) = 1, 'ranná hodnota v histórii';
-  ASSERT (SELECT avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 102, 'SPOT priemer aktualizovaný';
+  ASSERT (SELECT avg_ytd_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 102, 'SPOT priemer aktualizovaný';
   RAISE NOTICE 'OK: S1 denný beh: iba na pozadí; BL / PL zo zdroja cockpit; neplatné riadky vynechané; bez duplicít; nová hodnota dňa nahradí rannú; SPOT priemer; denník';
 END;
 $$;
@@ -174,7 +174,7 @@ BEGIN
   m := pg_temp.c_row(crm_today(), 2093);
   ASSERT m.bl_eur_mwh = 70 AND m.pl_eur_mwh = 75 AND m.portfolio_eur_mwh = 77 AND m.spot_fve_eur_mwh = 60 AND m.source = 'cockpit',
          'cena z Montelu s preneseným odhadom portfólia a SPOT pre FVE: ' || m::text;
-  ASSERT (SELECT avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 102, 'bez SPOT sa priemer nemení';
+  ASSERT (SELECT avg_ytd_eur_mwh FROM spot_average_daily WHERE org_id = crm_default_org() AND on_date = crm_today()) = 102, 'bez SPOT sa priemer nemení';
   RAISE NOTICE 'OK: S2 ručne zadaná cena dňa ostane; ručný odhad portfólia a SPOT pre FVE sa prenesú; príznak importu používateľovi nepomôže';
 END;
 $$;
@@ -242,8 +242,8 @@ BEGIN
     ASSERT trader_price(crm_default_org(), 2091::smallint, crm_today()) = (SELECT p2091 FROM c_expected), 'cena pre obchodníka z ručnej ceny ' || u;
     ASSERT trader_price(crm_default_org(), 2093::smallint, crm_today()) IS NOT NULL, 'cena pre obchodníka z Montelu ' || u;
     SELECT * INTO s FROM spot_average_on(crm_default_org(), crm_today());
-    ASSERT s.avg_12m_eur_mwh = 102 AND s.on_date = crm_today(), 'SPOT priemer cez funkciu ' || u;
-    ASSERT (SELECT avg_12m_eur_mwh FROM spot_average_on(crm_default_org(), crm_today() + 7)) = 102, 'SPOT priemer 7 dní dozadu';
+    ASSERT s.avg_ytd_eur_mwh = 102 AND s.on_date = crm_today(), 'SPOT priemer cez funkciu ' || u;
+    ASSERT (SELECT avg_ytd_eur_mwh FROM spot_average_on(crm_default_org(), crm_today() + 7)) = 102, 'SPOT priemer 7 dní dozadu';
     ASSERT NOT EXISTS (SELECT 1 FROM spot_average_on(crm_default_org(), crm_today() + 8)), 'starší ako 7 dní nie';
   END LOOP;
   -- bez prihlásenia nič

@@ -1,5 +1,5 @@
 // Testy F6 – ceny z Workera Montel a čas behu cien (čisté funkcie, bez siete a databázy). Spustenie: cd api && npm test
-// Peter 16. 10.: iba tri povolené GET adresy; do CRM iba BL / PL rokov dodávky a 12-mesačný priemer SPOT;
+// Peter 16. 10.: iba tri povolené GET adresy; do CRM iba BL / PL rokov dodávky a priemer SPOT od 1. 1. (17. 10.: spotAvgYTD);
 // beh po – pi o 7:00 a 13:00 v Bratislave v zimnom aj letnom čase.
 
 import assert from 'node:assert/strict';
@@ -67,11 +67,12 @@ test('z /forwards/quotes iba BL a PL rokov dodávky s oboma hodnotami', () => {
   assert.deepEqual(extractQuotes([1, 2]), []);
 });
 
-test('z /spot/aggregates iba 12-mesačný priemer', () => {
-  assert.equal(extractSpotAvg({ spotAvg365: 103.42, spotAvg30days: 88, spotMin365: -12 }), 103.42);
+test('z /spot/aggregates iba priemer od 1. 1. (spotAvgYTD), nie 365 dní', () => {
+  assert.equal(extractSpotAvg({ spotAvgYTD: 97.85, spotAvg365: 103.42, spotAvg30days: 88, spotMin365: -12 }), 97.85);
+  assert.equal(extractSpotAvg({ spotAvg365: 103.42 }), null);
   assert.equal(extractSpotAvg({ spotAvg30days: 88 }), null);
-  assert.equal(extractSpotAvg({ spotAvg365: Number.NaN }), null);
-  assert.equal(extractSpotAvg({ spotAvg365: '103' }), null);
+  assert.equal(extractSpotAvg({ spotAvgYTD: Number.NaN }), null);
+  assert.equal(extractSpotAvg({ spotAvgYTD: '103' }), null);
 });
 
 test('história: settlement ročných produktov dňa T je cenou dňa T + 1, od 1. 1. 2026 po dnes', () => {

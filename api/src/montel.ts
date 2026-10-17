@@ -1,7 +1,7 @@
 // Modul 5, F6 – ceny z Workera greenlogy-montel-auth (návrh DB časť 36.1; Peter 16. 10.).
 // Spojenie iba cez service binding MONTEL (bez verejnej adresy), kľúč MONTEL_API_KEY iba vo wrangler secret.
 // Povolené sú iba tri GET adresy (MONTEL_PATHS); kontroluje ich test a `npm run typecheck` (scripts/check-montel.mjs).
-// Z odpovedí sa vyberú iba BL / PL rokov dodávky a 12-mesačný priemer SPOT – celé odpovede sa neukladajú ani nelogujú.
+// Z odpovedí sa vyberú iba BL / PL rokov dodávky a priemer SPOT od 1. 1. aktuálneho roka (0057) – celé odpovede sa neukladajú ani nelogujú.
 
 export type MontelEnv = {
   MONTEL?: Fetcher;          // service binding na Worker greenlogy-montel-auth
@@ -79,9 +79,9 @@ export function extractQuotes(json: unknown): YearPrice[] {
   return out.sort((a, b) => a.year - b.year);
 }
 
-/** /spot/aggregates: iba 12-mesačný priemer SPOT (spotAvg365). */
+/** /spot/aggregates: iba priemer SPOT od 1. 1. aktuálneho roka po dnes (spotAvgYTD; Peter 17. 10., predtým spotAvg365). */
 export function extractSpotAvg(json: unknown): number | null {
-  return num(obj(json).spotAvg365);
+  return num(obj(json).spotAvgYTD);
 }
 
 /** Deň ceny v CRM k obchodnému dňu settlementu: settlement dňa T je ráno dňa T + 1 cenou dňa (ako pri dennom behu). */

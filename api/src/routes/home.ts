@@ -1,5 +1,5 @@
 // Modul 5, F6 – Domov (obrazovka 30; návrh DB časť 36.2; migrácie 0049, 0050). Úvodná stránka obchodníka a tímu
-// Sales_internal: cena pre obchodníka na 3 roky a jej vývoj (nikdy BL / PL), 12-mesačný SPOT priemer, hranica FIX pre
+// Sales_internal: cena pre obchodníka na 3 roky a jej vývoj (nikdy BL / PL), priemer SPOT od 1. 1., hranica FIX pre
 // kalkulačku (manažér s maržou odhad portfólia, ostatní cena pre obchodníka), môj minimálny aditív a percento provízie,
 // moje ďalšie kroky, moje ponuky a pridaná hodnota (uložená, 0052); pre manažéra rozpad podľa obchodníkov. Čo kto vidí,
 // stráži databáza.
@@ -21,7 +21,7 @@ home.get('/home', async (c) => {
   const [prices, basis, spot, terms, steps, offers, value] = await Promise.all([
     sql`SELECT delivery_year, trader_price, price_date FROM trader_prices_home(${org}, crm_today(), 3) ORDER BY delivery_year`,
     sql`SELECT delivery_year, basis, basis_eur_mwh, price_date FROM calculator_fix_basis(${org}, crm_today(), 3) ORDER BY delivery_year`,
-    sql`SELECT on_date, avg_12m_eur_mwh FROM spot_average_on(${org}, crm_today())`,
+    sql`SELECT on_date, avg_ytd_eur_mwh FROM spot_average_on(${org}, crm_today())`,
     sql`SELECT seller_type, min_additive_eur_mwh, commission_pct FROM my_sales_terms(${org})`,
     // moje ďalšie kroky: po termíne, dnes, zajtra (otvorené obchody, ktorých som vlastník); počet bez kroku
     sql`

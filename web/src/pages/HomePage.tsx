@@ -1,5 +1,5 @@
 // Domov (dizajn 30; modul 5, F6 krok 2; migrácie 0049, 0050). Úvodná stránka obchodníka (interného aj externého)
-// a tímu Sales_internal: cena pre obchodníka FIX na 3 roky a jej vývoj (nikdy BL / PL), 12-mesačný SPOT priemer, môj
+// a tímu Sales_internal: cena pre obchodníka FIX na 3 roky a jej vývoj (nikdy BL / PL), priemer SPOT od 1. 1., môj
 // minimálny aditív; kalkulačka pridanej hodnoty a provízie (FIX voči cene pre obchodníka, manažér s maržou voči odhadu
 // portfólia ako v ponuke; SPOT voči minimálnemu aditívu; záporná PH sa ukáže, provízia je vtedy 0 €); moje ďalšie
 // kroky, moje ponuky a PH; pre manažéra rozpad podľa obchodníkov.
@@ -20,7 +20,7 @@ type Home = {
   prices: { delivery_year: number; trader_price: string | null; price_date: string | null }[];
   basis: { delivery_year: number; basis: 'cena_pre_obchodnika' | 'odhad_portfolia'; basis_eur_mwh: string | null; price_date: string | null }[];
   series: { delivery_year: number; points: { on_date: string; trader_price: string }[] }[];
-  spot: { on_date: string; avg_12m_eur_mwh: string } | null;
+  spot: { on_date: string; avg_ytd_eur_mwh: string } | null;
   terms: { seller_type: 'obchodnik' | 'manazer'; min_additive_eur_mwh: string | null; commission_pct: string | null } | null;
   steps: { id: string; name: string; next_step: string | null; next_step_on: string; customer_name: string | null; state: 'po_termine' | 'dnes' | 'zajtra' }[];
   offers: { waiting_approval: number; sent: number; opened: number; expires_today: number; accepted_waiting_contract: number };
@@ -132,8 +132,8 @@ function HomeBody({ d }: { d: Home }) {
           />
         ))}
         <PriceTile
-          label="Priemerná SPOT za 12 mesiacov"
-          value={d.spot ? dec(d.spot.avg_12m_eur_mwh, 2, 2) : ''}
+          label={`Priemerná SPOT od 1. 1. ${(d.spot?.on_date ?? '').slice(0, 4) || new Date().getFullYear()}`}
+          value={d.spot ? dec(d.spot.avg_ytd_eur_mwh, 2, 2) : ''}
           meta={d.spot ? `€/MWh · OKTE · k ${date(d.spot.on_date)}` : 'zatiaľ nenačítané'}
         />
         <PriceTile

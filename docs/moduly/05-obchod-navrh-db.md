@@ -1801,3 +1801,11 @@ Firestore obsahuje pri provízii iba ID dealu z HubSpotu, názov, dátum uzavret
 **API a obrazovky:** `POST /api/pricing/portfolio`; Cenové parametre otvorí aj Nákup; karta **Nákupná cena portfólia** (platná cena po rokoch dodávky, dni zmien, kto zadal) s tlačidlom **„Nákupná cena portfólia – zadať pre obdobie“** (deň, rok dodávky, cena; výsledok: platí do, doplnené snímky). Ručné ceny dňa bez poľa nákupnej ceny; tlačidlá parametrov a ručných cien iba admin a schvaľovateľ cien. Texty v aplikácii premenované.
 
 **Overenie (dočasný lokálny Postgres):** 284 kontrol (séria N: práva a rozsah, spätné zadanie s BL / PL, platnosť, história, doplnenie snímky, marža s poslednou cenou a nezmenená pridaná hodnota, zmrazená marža spárovanej ponuky; test S2 upravený – schvaľovateľ cien už nákupnú cenu nezadá); 4 mutácie zachytené; `down` vráti schému `0055` bez rozdielu. Naživo (`wrangler dev`, používateľ Nákupu): spätná cena k 16. 10. uložená, BL / PL dňa ostali, ručné BL / PL Nákupu odmietnuté, obrazovka na 1440 px.
+
+## 42. Priemer SPOT od 1. 1. a načítanie dnešných cien (`0057_spot_priemer_od_zaciatku_roka`; overená nanečisto 17. 10. 2026)
+
+- **Zistenie na Teste (iba čítanie):** priemer SPOT na Domove chýbal, lebo denný beh cien (po – pi 7:00 a 13:00) na Teste ešte neprebehol ani raz (žiadny záznam „ceny“ v denníku); ceny BL / PL boli iba z načítania histórie, ktoré priemer SPOT neobsahuje. Prečo neprebehol beh 16. 10. o 13:00, ukážu iba logy Workera v Cloudflare.
+- **Priemer od 1. 1. aktuálneho roka** (Peter, variant a): Montel `spotAvgYTD` namiesto `spotAvg365`; v roku 2027 sa počíta od 1. 1. 2027. `0057` premenuje `spot_average_daily.avg_12m_eur_mwh` → `avg_ytd_eur_mwh` a prepíše `market_price_daily_run` a `spot_average_on` (na `dev` nebol uložený žiadny priemer).
+- **Tlačidlo „Načítať dnešné ceny z Montelu“** (Nastavenia → Cenové parametre, iba admin, `POST /api/pricing/montel-today`): rovnaký beh ako o 7:00 a 13:00 (`pricesFetchStore` v `jobs.ts`) – BL / PL rokov dodávky a priemer SPOT, ručné ceny dňa sa neprepíšu, zápis do denníka behov.
+- Popisy: Domov „Priemerná SPOT od 1. 1. RRRR“, Cenové parametre a denník behov.
+- Overenie: 284 kontrol, `down` vráti schému `0056` bez rozdielu; `npm test` 26; naživo s `MONTEL_FAKE`: po tlačidle Domov ukáže priemer od 1. 1. (nie 365-dňový), beh v denníku.

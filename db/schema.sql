@@ -11138,9 +11138,9 @@ BEGIN
   v_n := market_price_import(v_org, v_today, coalesce(p_quotes, '[]'), 'cockpit', false);
   IF p_spot_avg IS NOT NULL AND p_spot_avg BETWEEN 0 AND 10000
      AND NOT EXISTS (SELECT 1 FROM spot_average_daily WHERE org_id = v_org AND on_date = v_today AND source = 'rucne') THEN
-    INSERT INTO spot_average_daily (org_id, on_date, avg_12m_eur_mwh, source) VALUES (v_org, v_today, round(p_spot_avg, 4), 'cockpit')
-    ON CONFLICT (org_id, on_date) DO UPDATE SET avg_12m_eur_mwh = excluded.avg_12m_eur_mwh
-     WHERE spot_average_daily.avg_12m_eur_mwh IS DISTINCT FROM excluded.avg_12m_eur_mwh;
+    INSERT INTO spot_average_daily (org_id, on_date, avg_ytd_eur_mwh, source) VALUES (v_org, v_today, round(p_spot_avg, 4), 'cockpit')
+    ON CONFLICT (org_id, on_date) DO UPDATE SET avg_ytd_eur_mwh = excluded.avg_ytd_eur_mwh
+     WHERE spot_average_daily.avg_ytd_eur_mwh IS DISTINCT FROM excluded.avg_ytd_eur_mwh;
     v_spot := 1;
   END IF;
   UPDATE job_run SET finished_at = now(), result = jsonb_build_object('ceny', v_n, 'spot', v_spot),
@@ -16768,11 +16768,11 @@ COMMENT ON FUNCTION public.small_business_volume(p_on date, p_company_id uuid) I
 -- Name: spot_average_on(uuid, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.spot_average_on(p_org uuid, p_on date) RETURNS TABLE(on_date date, avg_12m_eur_mwh numeric)
+CREATE FUNCTION public.spot_average_on(p_org uuid, p_on date) RETURNS TABLE(on_date date, avg_ytd_eur_mwh numeric)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
-  SELECT s.on_date, s.avg_12m_eur_mwh FROM spot_average_daily s
+  SELECT s.on_date, s.avg_ytd_eur_mwh FROM spot_average_daily s
    WHERE crm_session_ok() AND p_org = ANY (crm_user_orgs()) AND s.org_id = p_org AND s.on_date BETWEEN p_on - 7 AND p_on
    ORDER BY s.on_date DESC LIMIT 1
 $$;
@@ -20448,7 +20448,7 @@ CREATE TABLE public.spot_average_daily (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     on_date date NOT NULL,
-    avg_12m_eur_mwh numeric(12,4) NOT NULL,
+    avg_ytd_eur_mwh numeric(12,4) NOT NULL,
     source text DEFAULT 'cockpit'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -20460,7 +20460,7 @@ CREATE TABLE public.spot_average_daily (
 -- Name: TABLE spot_average_daily; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.spot_average_daily IS 'priemerná SPOT cena OKTE za posledných 12 mesiacov (Montel spotAvg365) ku dňu – 0047';
+COMMENT ON TABLE public.spot_average_daily IS 'priemerná SPOT cena OKTE od 1. 1. aktuálneho roka po deň (Montel spotAvgYTD) – 0047, 0057';
 
 
 --
@@ -29272,4 +29272,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0053'),
     ('0054'),
     ('0055'),
-    ('0056');
+    ('0056'),
+    ('0057');

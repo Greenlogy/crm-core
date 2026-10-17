@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import type { Sql } from '../db';
 import { type AppEnv, UUID } from '../types';
 import { extractHistory, HISTORY_FROM, historyDays, MontelError, montelGet } from '../montel';
+import { pricesFetchStore } from '../jobs';
 import { BadRequest, Forbidden, readBody, str, type Body } from '../validate';
 import { price } from './pricelists-write';
 
@@ -97,12 +98,12 @@ pricing.get('/pricing', async (c) => {
       JOIN market_price_daily m ON m.id = h.id
      WHERE h.org_id = ${org} AND h.on_date >= crm_today() - 60
      ORDER BY h.on_date DESC, h.delivery_year, h.created_at DESC`;
-  // posledný beh cien z Montelu a 12-mesačný priemer SPOT (denník behov vidí admin a Nákup)
+  // posledný beh cien z Montelu a priemer SPOT od 1. 1. (denník behov vidí admin a Nákup)
   const [montel] = await sql`
     SELECT j.started_at, j.result, jsonb_array_length(j.errors) AS errors
       FROM job_run j WHERE j.job = 'ceny' ORDER BY j.started_at DESC LIMIT 1`;
   const [spot] = await sql`
-    SELECT on_date, avg_12m_eur_mwh FROM spot_average_daily WHERE org_id = ${org} ORDER BY on_date DESC LIMIT 1`;
+    SELECT on_date, avg_ytd_eur_mwh FROM spot_average_daily WHERE org_id = ${org} ORDER BY on_date DESC LIMIT 1`;
   // nákupná cena portfólia po rokoch dodávky: dni zmeny, platná dnes (0056)
   const portfolio = await sql`SELECT * FROM market_price_portfolio_history(${org})`;
   return c.json({ org_id: org, ...meta, parameters, today, history, portfolio, montel: montel ?? null, spot: spot ?? null });
@@ -203,6 +204,14 @@ pricing.post('/pricing/market-prices/:id/remove', async (c) => {
   const reason = str(b, 'reason', 'Dôvod', { max: 500 })!;
   await c.var.sql`SELECT market_price_manual_remove(${pid}, ${reason})`;
   return c.json({ ok: true });
+});
+
+// Dnešné ceny z Montelu hneď (iba admin, Peter 17. 10.): rovnaký beh ako o 7:00 a 13:00 – BL / PL rokov dodávky a priemer
+// SPOT od 1. 1.; ručne zadané ceny dňa sa neprepíšu; zápis s denníkom behov (beh na pozadí bez používateľa)
+pricing.post('/pricing/montel-today', async (c) => {
+  const [r] = await c.var.sql<{ ok: boolean }[]>`SELECT crm_is_admin() AS ok`;
+  if (!r?.ok) throw new Forbidden('Dnešné ceny z Montelu načítava admin.');
+  return c.json(await pricesFetchStore(c.env));
 });
 
 // História cien z Montelu od 1. 1. 2026 (iba admin, 0047): settlement ročných produktov po dňoch; dni s cenou sa nemenia

@@ -17,7 +17,7 @@ export function fakeMontel(path: MontelPath, days?: number): unknown {
     return r;
   }
   if (path === '/spot/aggregates') {
-    return { spotAvg365: 103.42, spotAvg30days: 88.1, spotAvg7days: 79.5, spotMin365: -12.4, spotMax365: 412.9, samplesTotal: 8760 };
+    return { spotAvgYTD: 97.85, spotAvg365: 103.42, spotAvg30days: 88.1, spotAvg7days: 79.5, spotMin365: -12.4, spotMax365: 412.9, samplesTotal: 8760 };
   }
   // /forwards/ohlc/history: obchodné dni (po – pi) za posledných `days` dní
   const dates: string[] = [];

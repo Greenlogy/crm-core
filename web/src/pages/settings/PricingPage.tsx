@@ -82,7 +82,7 @@ type Pricing = {
   purchase: boolean;
   portfolio: PortfolioRow[];
   montel: { started_at: string; result: { ceny?: number; spot?: number }; errors: number } | null;
-  spot: { on_date: string; avg_12m_eur_mwh: string } | null;
+  spot: { on_date: string; avg_ytd_eur_mwh: string } | null;
 };
 
 /** Parametre v poradí obrazovky 29; adminOnly = mení iba admin (zadanie modulu 4, časť 6). */
@@ -135,6 +135,13 @@ export function PricingPage() {
   const me = useMe();
   const [panel, setPanel] = useState<Panel>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const montelSave = useSave();
+  const [montelResult, setMontelResult] = useState<{ ceny: number; spot: number; chyby: number } | null>(null);
+  const montelToday = () =>
+    montelSave.run(async () => {
+      setMontelResult(await send<{ ceny: number; spot: number; chyby: number }>('POST', '/api/pricing/montel-today', {}));
+      data.reload();
+    });
 
   // Riadky tabuľky: parameter (energopomoc po rokoch dodávky) – platná hodnota, naplánovaná zmena, história
   const rows = useMemo(() => {
@@ -261,6 +268,11 @@ export function PricingPage() {
               </span>
               <span className="grow" />
               {isAdmin && (
+                <button type="button" className="btn" disabled={montelSave.busy} onClick={montelToday}>
+                  {montelSave.busy ? 'Načítavam…' : 'Načítať dnešné ceny z Montelu'}
+                </button>
+              )}
+              {isAdmin && (
                 <button type="button" className="btn" onClick={() => setPanel({ kind: 'history' })}>
                   Načítať históriu z Montelu
                 </button>
@@ -271,6 +283,13 @@ export function PricingPage() {
                 </button>
               )}
             </div>
+            {montelSave.error && <Notice tone="error">{montelSave.error}</Notice>}
+            {montelResult && (
+              <Notice tone={montelResult.chyby > 0 ? 'error' : 'ok'}>
+                Načítané z Montelu: ceny rokov dodávky {montelResult.ceny}, priemer SPOT {montelResult.spot ? 'áno' : 'nie (bez zmeny alebo chýba)'}
+                {montelResult.chyby > 0 ? `, chyby ${montelResult.chyby} – podrobnosti v Nastaveniach → Nočný beh` : ''}.
+              </Notice>
+            )}
             <div className="table-wrap">
               <table className="tbl">
                 <thead>
@@ -337,7 +356,7 @@ export function PricingPage() {
               Ručne zadaná cena dňa sa načítaním z Montelu neprepíše; ak ju admin zmaže, ďalší beh deň načíta z Montelu.
               {d.spot && (
                 <>
-                  {' '}Priemerná SPOT cena za 12 mesiacov: <strong>{dec(d.spot.avg_12m_eur_mwh, 2, 2)} €/MWh</strong> (k {date(d.spot.on_date)}).
+                  {' '}Priemerná SPOT cena od 1. 1. {d.spot.on_date.slice(0, 4)} do {date(d.spot.on_date)}: <strong>{dec(d.spot.avg_ytd_eur_mwh, 2, 2)} €/MWh</strong>.
                 </>
               )}
             </div>

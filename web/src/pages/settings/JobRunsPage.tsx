@@ -1,7 +1,7 @@
 // Nastavenia – Nočný beh (modul Zmluvy F4, 0028): denník nočných behov zmlúv. Počty po krokoch, zmluvy so spätne
 // zapísaným cenníkom (pre Nákup) a chyby jednotlivých zmlúv (krok, kód, text so skráteným EIC). Zmluva s chybou
 // sa skúsi znova ďalšiu noc. Iba čítanie – vidí admin a Nákup. Beh s iným ako dnešným dátumom = ručný beh na Teste.
-// F6 (0047): beh cien z Montelu (po – pi 7:00 a 13:00) – zapísané ceny dňa, 12-mesačný priemer SPOT, chyby Montelu.
+// F6 (0047): beh cien z Montelu (po – pi 7:00 a 13:00) – zapísané ceny dňa, priemer SPOT od 1. 1., chyby Montelu.
 
 import { Link } from 'react-router-dom';
 import { Card, Empty, ErrorState, Pill, Rows, Skeleton } from '../../components/ui';
@@ -38,7 +38,7 @@ const COMMISSION_COUNTS: [string, string][] = [['fronta_stara', 'Obchody s prepo
 
 const PRICE_COUNTS: [string, string][] = [
   ['ceny', 'Zapísané ceny dňa (BL / PL po rokoch dodávky)'],
-  ['spot', '12-mesačný priemer SPOT'],
+  ['spot', 'Priemer SPOT od 1. 1. aktuálneho roka'],
 ];
 
 export function JobRunsPage() {
